@@ -1,0 +1,14 @@
+{
+	"cmake.configureOnOpen": true,
+	"cmake.configureArgs": [
+		"-DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-arm-none-eabi.cmake"
+	],
+	"files.associations": {
+		"string": "cpp",
+		"tuple": "cpp",
+		"array": "cpp",
+		"utility": "cpp",
+		"map": "cpp"
+	},
+	"C_Cpp.errorSquiggles": "Enabled",
+}

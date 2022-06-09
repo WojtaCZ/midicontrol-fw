@@ -1,0 +1,12 @@
+**.d
+**.o
+**.hex
+**.elf
+**.map
+**.out
+**.bin
+
+Debug/
+debug/
+Build/
+build/
