@@ -1,16 +1,16 @@
 #include "scheduler.hpp"
 #include "oled.hpp"
-#include "menu.hpp"
+//#include "menu.hpp"
 #include "base.hpp"
 
 
-#include <libopencm3/stm32/usart.h>
-
+#include <stm32/usart.h>
+/*
 extern void menu_scroll_callback(void);
 Scheduler menuScroll(500, &menu_scroll_callback, Scheduler::PERIODICAL);
 
 extern void render(void);
-Scheduler menuRender(30, &render, Scheduler::PERIODICAL | Scheduler::ACTIVE);
+Scheduler menuRender(30, &render, Scheduler::PERIODICAL | Scheduler::ACTIVE);*/
 /*
 extern void led_dev_process_pending_status(void);
 Scheduler ledProcess(50, &led_dev_process_pending_status, Scheduler::PERIODICAL | Scheduler::ACTIVE);
@@ -19,7 +19,7 @@ Scheduler ledProcess(50, &led_dev_process_pending_status, Scheduler::PERIODICAL 
 
 Scheduler ioKeypress(10, &led_dev_process_pending_status, Scheduler::PERIODICAL | Scheduler::ACTIVE);
 */
-Scheduler oledSleep(OLED_SLEEP_INTERVAL, &oled_sleep_callback, Scheduler::ACTIVE);
+//Scheduler oledSleep(OLED_SLEEP_INTERVAL, &oled_sleep_callback, Scheduler::ACTIVE);
 /*
 extern void comm_decode_callback(void);
 Scheduler sched_comm_decode = {0, 0, &comm_decode_callback, 0};
@@ -35,14 +35,15 @@ Scheduler::Scheduler(int interval, void (*callback)(void), uint16_t flags, int c
     this->counter = counter;
 }
 
-void Scheduler::check(){
+void Scheduler::increment(){
     if((this->counter >= this->interval) && !(this->flags & Scheduler::READY) && (this->flags & Scheduler::ACTIVE)){
         this->flags |= READY;
+        if(this->flags & Scheduler::DISPATCH_ON_INCREMENT) this->dispatch();
     }else if(this->flags & Scheduler::ACTIVE){
         this->counter++;
     }
 }
-void Scheduler::process(){
+void Scheduler::dispatch(){
     if(this->flags & Scheduler::READY){
         (*this->callback)();
 

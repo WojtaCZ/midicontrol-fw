@@ -1,10 +1,10 @@
 #include "led.hpp"
 
-#include <libopencm3/stm32/timer.h>
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/dma.h>
-#include <libopencm3/stm32/dmamux.h>
-#include <libopencm3/cm3/nvic.h>
+#include <stm32/timer.h>
+#include <stm32/gpio.h>
+#include <stm32/dma.h>
+#include <stm32/dmamux.h>
+#include <cm3/nvic.h>
 
 
 uint8_t ledFrontBuffer[LED_FRONT_BUFFER_SIZE];

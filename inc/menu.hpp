@@ -55,7 +55,7 @@ using namespace std;
 
 #define MENU_FONT		Font_11x18
 
-namespace Menu{
+namespace GUI{
 
 	//Enum for language selection
 	enum class Language{
@@ -118,18 +118,9 @@ namespace Menu{
 			bool selectedLastItem();
 	};
 
-	class Renderer{
-		private:
-			Menu activeMenu;
-			bool forceRender = 0;
-			int scrollIndex = 0;
-			bool hadScrollPause = false;
-		public:
-			Renderer(bool forceRender = false);
-			Language LANG = Language::CS;
-			void display(Menu & menu);
-			void render(void);
-	};
+	void display(Menu & menu);
+	void render(void);
+
 }
 
 void menu_keypress(uint8_t key);

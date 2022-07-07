@@ -1,14 +1,13 @@
 #include "midi.hpp"
 #include "usb.h"
 
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/timer.h>
-#include <libopencm3/stm32/dma.h>
-#include <libopencm3/stm32/dmamux.h>
-#include <libopencm3/stm32/usart.h>
-#include <libopencm3/stm32/rcc.h>
-#include <libopencm3/cm3/nvic.h>
-
+#include <stm32/gpio.h>
+#include <stm32/timer.h>
+#include <stm32/dma.h>
+#include <stm32/dmamux.h>
+#include <stm32/usart.h>
+#include <stm32/rcc.h>
+#include <cm3/nvic.h>
 #include <string.h>
 
 uint8_t midiFifo[100], midiFifoIndex, midiGotMessage;

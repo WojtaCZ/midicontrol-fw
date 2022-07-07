@@ -1,7 +1,7 @@
 #ifndef OLED_H
 #define OLED_H
 
-#include "global.hpp"
+#include "scheduler.hpp"
 #include "oled_fonts.hpp"
 #include <string>
 #include <array>
@@ -19,7 +19,7 @@ using namespace std;
 #define OLED_XOFFSET            2
 #define OLED_YOFFSET            0
 
-#define OLED_SLEEP_INTERVAL     30000
+#define OLED_SLEEP_INTERVAL     5000
 
 //Velikost bufferu
 #define OLED_SCREENBUF_SIZE		(OLED_WIDTH*OLED_HEIGHT / 8) + 8
@@ -48,43 +48,30 @@ namespace Oled{
         DOT_UNSEL = 33
     };
 
-    class Oled{
-        private:
-            pair<uint16_t, uint16_t> coordinates;
-            bool inverted;
-            bool initialized;
-            bool sleeping;
-        public: 
-            array<uint8_t, OLED_SCREENBUF_SIZE> screenBuffer;
-            array<uint8_t, 4> pageBuffer;
-            array<uint8_t, 29> initBuffer;
+    void setCoordinates(pair<uint16_t, uint16_t> coord);
+    void sleep();
+    void wakeup();
+    bool isSleeping();
+    bool isInitialized();
+    bool isInverted();
+    void setInitialized(bool state);
 
-            uint8_t dmaStatus;
-            uint16_t dmaIndex;
-
-            Oled();
-
-            void setCoordinates(pair<uint16_t, uint16_t> coord);
-            void sleep();
-            void wakeup();
-            bool isSleeping();
-            bool isInitialized();
-            bool isInverted();
-            void setInitialized(bool state);
-
-            void update();
-            void fill(Color color);
-            void setCursor(pair<uint16_t, uint16_t> coord);
-            void drawPixel(pair<uint16_t, uint16_t> coord, Color color);
-            void writeSymbol(char c, FontDef font, Color color);
-            void writeSymbol(Icon icon, FontDef font, Color color);
-            void writeString(string str, FontDef font, Color color);
-    };
-
+    void update();
+    void fill(Color color);
+    void setCursor(pair<uint16_t, uint16_t> coord);
+    void drawPixel(pair<uint16_t, uint16_t> coord, Color color);
+    void writeSymbol(char c, FontDef font, Color color);
+    void writeSymbol(Icon icon, FontDef font, Color color);
+    void writeString(string str, FontDef font, Color color);
     void init();
+
+    
+    void sleepCallback(void);
+    void wakeupCallback(void);
+    
 }
 
-void oled_sleep_callback(void);
-void oled_wakeup_callback(void);
+
+
 
 #endif

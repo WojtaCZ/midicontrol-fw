@@ -35,18 +35,18 @@ set(SOURCES
 	${SOURCE_BASE}/main.cpp
 	startup/startup_stm32g431xx.s
 	${SOURCE_BASE}/base.cpp
-	${SOURCE_BASE}/display.cpp
+	#${SOURCE_BASE}/display.cpp
     ${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/scheduler.cpp
 
-	${SOURCE_BASE}/ble.cpp
-	${SOURCE_BASE}/comm.cpp
-	${SOURCE_BASE}/led.cpp
-	${SOURCE_BASE}/midi.cpp
+	#${SOURCE_BASE}/ble.cpp
+	#${SOURCE_BASE}/comm.cpp
+	#${SOURCE_BASE}/led.cpp
+	#${SOURCE_BASE}/midi.cpp
 	${SOURCE_BASE}/oled.cpp
 	${SOURCE_BASE}/oled_fonts.cpp
 
-	${SOURCE_BASE}/usb.c
+	#${SOURCE_BASE}/usb.c
 	# ${SOURCE_BASE}/subfilder/some_epic_source.cpp
 )
 
@@ -63,6 +63,8 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
 	${CMAKE_SOURCE_DIR}/lib
 	${CMAKE_SOURCE_DIR}/lib/libopencm3/lib/stm32/common
 	${CMAKE_SOURCE_DIR}/lib/libopencm3/lib/stm32/g4
+	${CMAKE_SOURCE_DIR}/lib/libopencm3/include/libopencm3
+
 	# ...
 )
 

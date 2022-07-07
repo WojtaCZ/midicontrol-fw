@@ -1,36 +1,43 @@
 #include "main.hpp"
 #include "oled.hpp"
-#include "menu.hpp"
 #include "base.hpp"
-#include "scheduler.hpp"/*
-#include "led.hpp"
-#include "usb.h"
-#include "midi.hpp"
-#include "ble.hpp"*/
+#include "scheduler.hpp"
+#include <menu.hpp>
 
+/*#include <scheduler.hpp<*//*
+#include <led.hpp<
+#include <usb.h>
+#include <midi.hpp<
+#include <ble.hpp<*/
 #include <utility>
 
-#include <libopencm3/stm32/exti.h>
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/usart.h>
-#include <libopencm3/stm32/flash.h>
-#include <libopencm3/stm32/iwdg.h>
+#include <stm32/exti.h>
+#include <stm32/gpio.h>
+#include <stm32/rcc.h>
+#include <stm32/usart.h>
+#include <stm32/flash.h>
+#include <stm32/iwdg.h>
 
-#include <libopencm3/cm3/nvic.h>
-#include <libopencm3/cm3/systick.h>
-#include <libopencm3/cm3/assert.h>
+#include <cm3/nvic.h>
+#include <cm3/systick.h>
+#include <cm3/assert.h>
 
-extern Menu::Menu menu_main;
-extern Oled::Oled oled;
-Menu::Renderer rndr(true);
+/*extern Menu::Menu menu_main;
 
+Menu::Renderer rndr(true);*/
+
+extern Scheduler oledSleepScheduler;
+extern Scheduler keypressScheduler;
+
+Scheduler keepalive = Scheduler(1000, &Base::CurrentSource::toggle, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
 extern "C" void SystemInit(void) {
 	//Initialize io and other stuff related to the base unit
 	Base::init();
-	//Initialize objects related to the OLED
+	//Initialize the OLED
 	Oled::init();
+
+	
 }
 
 extern "C" void SysTick_Handler(void){
@@ -40,6 +47,10 @@ extern "C" void SysTick_Handler(void){
 	//oledSleep.check();
 	//commTimeout.check();
 	//ledProcess.check();
+	keepalive.increment();
+	oledSleepScheduler.increment();
+	keypressScheduler.increment();
+	//Process inputs 
 }
 
 
@@ -53,7 +64,7 @@ extern "C" int main(void)
 	//Pauza pro startup (zmizi zakmity na PSU)
 	/*int i = 0;
 	while(i < 1000000){
-		__asm__("nop");
+		__asm__(<nop<);
 		i++;
 	}*/
 
@@ -72,14 +83,18 @@ extern "C" int main(void)
 	led_dev_process_pending_status();*/
 
 	//rndr.display(menu_main);
-	rndr.render();
+	//rndr.render();
 	
 
 	//led_dev_set_status_all(LED_STRIP_BACK, LED_STATUS_LOAD);
 	//led_dev_set_status_all(LED_STRIP_FRONT, LED_STATUS_LOAD);
 
+
+	Oled::fill(Oled::Color::BLACK);
+	Oled::writeString("Hellod", Font_11x18, Oled::Color::WHITE);
+
 	while (1) {
-		oled.update();
+		Oled::update();
 		int i = 0;
 	while(i < 1000000){
 		__asm__("nop");

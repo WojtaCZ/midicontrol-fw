@@ -1,7 +1,9 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
-#include "global.hpp"
+#include "base.hpp"
+
+#include <stdint.h>
 
 class Scheduler{
     private:
@@ -15,8 +17,8 @@ class Scheduler{
         uint16_t flags;
     public:
         Scheduler(int interval, void (*callback)(void), uint16_t flags = 0, int counter = 0);
-        void check();
-        void process();
+        void increment();
+        void dispatch();
         uint16_t setFlags(uint16_t flags);
         uint16_t enableFlags(uint16_t flags);
         uint16_t disableFlags(uint16_t flags);
@@ -35,7 +37,9 @@ class Scheduler{
             //Enables the scheduler to run repeatedly
             PERIODICAL  = 0x0004,
             //In case of periodical, indicates that the scheduler has been ready at least once
-            COMPLETED    = 0x0008
+            COMPLETED    = 0x0008,
+            //Dispathches the scheduler on increment
+            DISPATCH_ON_INCREMENT = 0x0010
         };
  };
 

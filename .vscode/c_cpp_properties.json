@@ -4,7 +4,9 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/lib/libopencm3/include"
+                "${workspaceFolder}/inc",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/lib/libopencm3/include/libopencm3"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang",

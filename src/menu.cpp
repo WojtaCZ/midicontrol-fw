@@ -13,140 +13,139 @@ using namespace std;
 extern Scheduler menuScroll;
 extern Scheduler menuRender;
 
-extern Oled::Oled oled;
+namespace GUI{
+
+	Menu activeMenu;
+	bool forceRender = 0;
+	int scrollIndex = 0;
+	bool hadScrollPause = false;
+	Language LANG = Language::CS;
 
 
 
-Menu::Item itm_play({{Menu::Language::EN, "Play"},{Menu::Language::CS, "Prehraj"}});
-Menu::Item itm_record({{Menu::Language::EN, "Record"},{Menu::Language::CS, "Nahraj"}});
-Menu::Menu menu_main({{Menu::Language::EN, "Main menu"},{Menu::Language::CS, "Hlavni menu"}}, {itm_play, itm_record});
+	Item itm_play({{Language::EN, "Play"},{Language::CS, "Prehraj"}});
+	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}});
+	Menu menu_main({{Language::EN, "Main menu"},{Language::CS, "Hlavni menu"}}, {itm_play, itm_record});
 
-//Menu constructor
-Menu::Menu::Menu(const map<Language, string> title, vector<Item> itms) : title(title), items(itms){ }
+	//Menu constructor
+	Menu::Menu(const map<Language, string> title, vector<Item> itms) : title(title), items(itms){ }
 
-//Menu item constructor
-Menu::Item::Item(const map<Language, string> title, CallbackType clbType) : title({}), callbackType(CallbackType::NONE){
-	this->icon.SELECTED = Oled::Icon::DOT_SEL;
-	this->icon.NOT_SELECTED = Oled::Icon::DOT_UNSEL;
+	//Menu item constructor
+	Item::Item(const map<Language, string> title, CallbackType clbType) : title({}), callbackType(CallbackType::NONE){
+		this->icon.SELECTED = Oled::Icon::DOT_SEL;
+		this->icon.NOT_SELECTED = Oled::Icon::DOT_UNSEL;
 
-}
-/*
-Menu::Checkbox::Checkbox(const map<Language, string>  & title, CallbackType clbType = CallbackType::NONE, bool checked = false){
-	this->title = title;
-	this->callbackType = clbType;
-	this->icon.SELECTED = Oled::Icon::CHECKBOX_SEL_UNCH;
-	this->icon.NOT_SELECTED = Oled::Icon::CHECKBOX_UNSEL_UNCH;
-}*/
+	}
+	/*
+	Menu::Checkbox::Checkbox(const map<Language, string>  & title, CallbackType clbType = CallbackType::NONE, bool checked = false){
+		this->title = title;
+		this->callbackType = clbType;
+		this->icon.SELECTED = Oled::Icon::CHECKBOX_SEL_UNCH;
+		this->icon.NOT_SELECTED = Oled::Icon::CHECKBOX_UNSEL_UNCH;
+	}*/
 
-void Menu::Renderer::display(Menu & menu){
-	this->activeMenu = menu;
-}
-
-int Menu::Menu::getSelectedIndex(){
-	return this->selectedIndex;
-}
-
-int Menu::Menu::setSelectedIndex(int index){
-	if(index > static_cast<int>(this->items.size()) || index < 0) return 0;
-	this->selectedIndex = index;
-	return 1;
-}
-
-bool Menu::Menu::selectedIndexChanged(){
-	if(this->selectedIndex != this->lastSelectedIndex) return true;
-	return false;
-}
-
-bool Menu::Menu::hasTitle(Language lang){
-	//Check if the menu has title in the specified language
-	if(this->title.find(lang) != this->title.end()) return true;
-	return false;
-}
-
-bool Menu::Menu::selectedFirstItem(){
-	//If the first menu item is selected
-	if(this->selectedIndex == 0) return true;
-	return false;
-}
-
-bool Menu::Menu::selectedLastItem(){
-	//If the last menu item is selected
-	if(this->selectedIndex == static_cast<int>(this->items.size())) return true;
-	return false;
-}
-
-Menu::Renderer::Renderer(bool forceRender) : activeMenu(menu_main), forceRender(forceRender){ }
-
-
-void Menu::Renderer::render(void){
-	//If there is nothing to update, return
-	if(!this->activeMenu.selectedIndexChanged() && !this->forceRender) return;
-	//Zero out the force render flag
-	this->forceRender = 0;
-	//Blank the oled
-	oled.fill(Oled::Color::BLACK);
-
-	//If the menu has a title in selected language, display it
-	if(this->activeMenu.hasTitle(this->LANG)){
-		oled.setCursor({0,0});
-		oled.writeString(this->activeMenu.title.at(this->LANG), Font_7x10, Oled::Color::WHITE);
+	void display(Menu & menu){
+		activeMenu = menu;
 	}
 
-	//Display arrows indicating more items on top or bottom of the menu
-	if(this->activeMenu.selectedFirstItem()){
-		//Down arrow
-		oled.setCursor({117,19});
-		oled.writeSymbol(Oled::Icon::DOWN_ARROW, Icon_11x18, Oled::Color::WHITE);
-	}else if(this->activeMenu.selectedLastItem()){
-		//Up arrow
-		oled.setCursor({117,41});
-		oled.writeSymbol(Oled::Icon::UP_ARROW, Icon_11x18, Oled::Color::WHITE);
-	}else{
-		//Down arrow
-		oled.setCursor({117,19});
-		oled.writeSymbol(Oled::Icon::DOWN_ARROW, Icon_11x18, Oled::Color::WHITE);
-		//Up arrow
-		oled.setCursor({117,41});
-		oled.writeSymbol(Oled::Icon::UP_ARROW, Icon_11x18, Oled::Color::WHITE);
+	int Menu::getSelectedIndex(){
+		return this->selectedIndex;
 	}
 
-	//If the text is too long to display, enable scrolling
-	if(this->activeMenu.items.at(this->activeMenu.getSelectedIndex()).title.at(this->LANG).size() > 9 && menuScroll.isActive()){
-		this->scrollIndex = 0;
-		this->hadScrollPause = false;
-		menuScroll.pause();
-		menuScroll.reset();
-		menuScroll.resume();
-	}else menuScroll.pause();
-
-	int indexShift = 1;
-
-    if(this->activeMenu.selectedFirstItem()){
-        indexShift = 0;
-	}else if(this->activeMenu.selectedLastItem()){
-        indexShift = 2;
+	int Menu::setSelectedIndex(int index){
+		if(index > static_cast<int>(this->items.size()) || index < 0) return 0;
+		this->selectedIndex = index;
+		return 1;
 	}
 
-	//int i = this->activeMenu.getSelectedIndex()-indexShift; i < this->activeMenu.getSelectedIndex()-indexShift+2; i++
+	bool Menu::selectedIndexChanged(){
+		if(this->selectedIndex != this->lastSelectedIndex) return true;
+		return false;
+	}
 
-	for(int i = 0; i < 2; i++){
-		//Draw the icon next to menu item
-		oled.setCursor({0 + MENU_LEFT_OFFSET, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
-		oled.writeSymbol(i == indexShift ? (this->activeMenu.items.at(i).icon.SELECTED) : (this->activeMenu.items.at(i).icon.NOT_SELECTED) , MENU_ICON_FONT, Oled::Color::WHITE);
-		oled.setCursor({COL(1) + MENU_LEFT_OFFSET + MENU_SELECTOR_SPACING, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
-		oled.writeString(this->activeMenu.items.at(i).title.at(this->LANG), MENU_FONT, Oled::Color::WHITE);
+	bool Menu::hasTitle(Language lang){
+		//Check if the menu has title in the specified language
+		if(this->title.find(lang) != this->title.end()) return true;
+		return false;
+	}
+
+	bool Menu::selectedFirstItem(){
+		//If the first menu item is selected
+		if(this->selectedIndex == 0) return true;
+		return false;
+	}
+
+	bool Menu::selectedLastItem(){
+		//If the last menu item is selected
+		if(this->selectedIndex == static_cast<int>(this->items.size())) return true;
+		return false;
+	}
+
+
+	void render(void){
+		//If there is nothing to update, return
+		if(!activeMenu.selectedIndexChanged() && !forceRender) return;
+		//Zero out the force render flag
+		forceRender = 0;
+		//Blank the oled
+		Oled::fill(Oled::Color::BLACK);
+
+		//If the menu has a title in selected language, display it
+		if(activeMenu.hasTitle(LANG)){
+			Oled::setCursor({0,0});
+			Oled::writeString(activeMenu.title.at(LANG), Font_7x10, Oled::Color::WHITE);
+		}
+
+		//Display arrows indicating more items on top or bottom of the menu
+		if(activeMenu.selectedFirstItem()){
+			//Down arrow
+			Oled::setCursor({117,19});
+			Oled::writeSymbol(Oled::Icon::DOWN_ARROW, Icon_11x18, Oled::Color::WHITE);
+		}else if(activeMenu.selectedLastItem()){
+			//Up arrow
+			Oled::setCursor({117,41});
+			Oled::writeSymbol(Oled::Icon::UP_ARROW, Icon_11x18, Oled::Color::WHITE);
+		}else{
+			//Down arrow
+			Oled::setCursor({117,19});
+			Oled::writeSymbol(Oled::Icon::DOWN_ARROW, Icon_11x18, Oled::Color::WHITE);
+			//Up arrow
+			Oled::setCursor({117,41});
+			Oled::writeSymbol(Oled::Icon::UP_ARROW, Icon_11x18, Oled::Color::WHITE);
+		}
+
+		//If the text is too long to display, enable scrolling
+		if(activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).size() > 9 && menuScroll.isActive()){
+			scrollIndex = 0;
+			hadScrollPause = false;
+			menuScroll.pause();
+			menuScroll.reset();
+			menuScroll.resume();
+		}else menuScroll.pause();
+
+		int indexShift = 1;
+
+		if(activeMenu.selectedFirstItem()){
+			indexShift = 0;
+		}else if(activeMenu.selectedLastItem()){
+			indexShift = 2;
+		}
+
+		//int i = this->activeMenu.getSelectedIndex()-indexShift; i < this->activeMenu.getSelectedIndex()-indexShift+2; i++
+
+		for(int i = 0; i < 2; i++){
+			//Draw the icon next to menu item
+			Oled::setCursor({0 + MENU_LEFT_OFFSET, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
+			Oled::writeSymbol(i == indexShift ? (activeMenu.items.at(i).icon.SELECTED) : (activeMenu.items.at(i).icon.NOT_SELECTED) , MENU_ICON_FONT, Oled::Color::WHITE);
+			Oled::setCursor({COL(1) + MENU_LEFT_OFFSET + MENU_SELECTOR_SPACING, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
+			Oled::writeString(activeMenu.items.at(i).title.at(LANG), MENU_FONT, Oled::Color::WHITE);
+			
+		}
+
 		
 	}
 
-	
 }
-
-extern Menu::Renderer rndr;
-
-void render(void){
-	rndr.render();
-}
-
 
 /*
 
