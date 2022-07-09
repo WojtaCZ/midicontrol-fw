@@ -40,6 +40,8 @@ namespace Oled{
     enum class Icon{
         UP_ARROW = 34,
         DOWN_ARROW = 35,
+        LEFT_ARROW_UNSEL = 36,
+        LEFT_ARROW_SEL = 37,
         CHECKBOX_SEL_UNCH = 40,
         CHECKBOX_SEL_CHCK = 41,
         CHECKBOX_UNSEL_UNCH = 38,

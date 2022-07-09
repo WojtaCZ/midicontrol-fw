@@ -1,8 +1,7 @@
 #include "base.hpp"
 #include "oled.hpp"
-/*#include "menu.hpp"
-#include "comm.hpp"
-#include "usb.h"*/
+#include "menu.hpp"
+
 
 #include <string>
 #include <stm32/exti.h>
@@ -173,19 +172,19 @@ namespace Base::Encoder{
 		//Handle a shift in position
 		if(pos > 0){
 			Oled::wakeupCallback();
+			GUI::keypress(UserInput::Key::DOWN);
 			pos = 0;
-			//OLED wakeup
 		}else if(pos < 0){
 			Oled::wakeupCallback();
+			GUI::keypress(UserInput::Key::UP);
 			pos = 0;
-			//OLED wakeup
 		}
 
 		if(pressed){
 			Oled::wakeupCallback();
+			GUI::keypress(UserInput::Key::ENTER);
 			pressed = false;
 
-			//OLED wakeup
 		}
 
 	}

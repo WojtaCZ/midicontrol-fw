@@ -3,6 +3,7 @@
 #include "base.hpp"
 #include "scheduler.hpp"
 #include "menu.hpp"
+#include "midi.hpp"
 
 /*#include <scheduler.hpp<*//*
 #include <led.hpp<
@@ -33,13 +34,17 @@ extern Scheduler guiRenderScheduler;
 extern Scheduler menuScrollScheduler;
 
 
+extern "C" void usb_init();
+
 extern "C" void SystemInit(void) {
 	//Initialize io and other stuff related to the base unit
 	Base::init();
 	//Initialize the OLED
 	Oled::init();
-
-	
+	//Initialize MIDI
+	//MIDI::init();
+	//Initialize USB
+	usb_init();
 }
 
 extern "C" void SysTick_Handler(void){

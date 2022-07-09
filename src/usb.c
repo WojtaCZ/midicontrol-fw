@@ -1,22 +1,24 @@
 #include "usb.h"
 #include "comm.hpp"
+//#include "base.hpp"
 
-#include <libopencm3/stm32/timer.h>
-#include <libopencm3/stm32/dma.h>
-#include <libopencm3/stm32/dmamux.h>
-#include <libopencm3/stm32/syscfg.h>
-#include <libopencm3/stm32/crs.h>
-#include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/desig.h>
+#include <stm32/timer.h>
+#include <stm32/dma.h>
+#include <stm32/dmamux.h>
+#include <stm32/syscfg.h>
+#include <stm32/crs.h>
+#include <stm32/rcc.h>
+#include <stm32/desig.h>
+#include <stm32/gpio.h>
 
-#include <libopencm3/usb/usbd.h>
-#include <libopencm3/usb/cdc.h>
-#include <libopencm3/usb/midi.h>
-#include <libopencm3/usb/audio.h>
-#include <libopencm3/usb/hid.h>
+#include <usb/usbd.h>
+#include <usb/cdc.h>
+#include <usb/midi.h>
+#include <usb/audio.h>
+#include <usb/hid.h>
 
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/cm3/nvic.h>
+#include <cm3/scb.h>
+#include <cm3/nvic.h>
 
 #include <string.h>
 
@@ -477,7 +479,7 @@ static void usb_midi_rx(usbd_device *dev, uint8_t ep){
 	uint8_t buf[64];
 	int len = usbd_ep_read_packet(dev, ENDPOINT_MIDI_DATA_OUT, buf, 64);
 
-    midi_send(&buf[1], len);
+    //midi_send(&buf[1], len);
 
    // usb_cdc_tx(&buf[1], len);
 
@@ -491,7 +493,7 @@ static void usb_cdc_rx(usbd_device *usbd_dev, uint8_t ep){
 	uint8_t buf[64];
 	int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
 
-    comm_usb_packet_received(buf, len);
+    //comm_usb_packet_received(buf, len);
 
 	if(len){
 		usbd_ep_write_packet(usbd_dev, 0x82, buf, len);
@@ -593,6 +595,6 @@ void usb_init(){
    
 }
 
-void usb_lp_isr(void){
+void USB_LP_IRQHandler(void){
     usbd_poll(usbd_fs_device);
 }

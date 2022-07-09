@@ -42,12 +42,10 @@ set(SOURCES
 	#${SOURCE_BASE}/ble.cpp
 	#${SOURCE_BASE}/comm.cpp
 	#${SOURCE_BASE}/led.cpp
-	#${SOURCE_BASE}/midi.cpp
+	${SOURCE_BASE}/midi.cpp
 	${SOURCE_BASE}/oled.cpp
 	${SOURCE_BASE}/oled_fonts.cpp
-
-	#${SOURCE_BASE}/usb.c
-	# ${SOURCE_BASE}/subfilder/some_epic_source.cpp
+	${SOURCE_BASE}/usb.c
 )
 
 add_executable(${PROJECT_NAME}.elf ${SOURCES})

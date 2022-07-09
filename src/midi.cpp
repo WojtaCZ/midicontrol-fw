@@ -1,5 +1,5 @@
 #include "midi.hpp"
-#include "usb.h"
+#include "base.hpp"
 
 #include <stm32/gpio.h>
 #include <stm32/timer.h>
@@ -12,63 +12,69 @@
 
 uint8_t midiFifo[100], midiFifoIndex, midiGotMessage;
 
-void midi_init(void){
-
-    gpio_mode_setup(PORT_USART_MIDI_RX, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO_USART_MIDI_RX);
-	gpio_mode_setup(PORT_USART_MIDI_TX, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO_USART_MIDI_TX);
-	gpio_set_af(PORT_USART_MIDI_RX, GPIO_AF7, GPIO_USART_MIDI_RX);
-	gpio_set_af(PORT_USART_MIDI_TX, GPIO_AF7, GPIO_USART_MIDI_TX);
+extern "C" uint32_t usb_cdc_tx(void *buf, int len);
+extern "C" uint32_t usb_midi_tx(void *buf, int len);
 
 
-	//Prijimani DMA
-	dma_set_priority(DMA1, DMA_CHANNEL4, DMA_CCR_PL_VERY_HIGH);
-	dma_set_memory_size(DMA1, DMA_CHANNEL4, DMA_CCR_MSIZE_8BIT);
-	dma_set_peripheral_size(DMA1, DMA_CHANNEL4, DMA_CCR_PSIZE_8BIT);
-	dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL4);
-	dma_set_read_from_peripheral(DMA1, DMA_CHANNEL4);
+namespace MIDI{
+	void init(void){
 
-    dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL4);
-    nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ);
+		gpio_mode_setup(Gpio::PORT_USART_MIDI_RX, GPIO_MODE_AF, GPIO_PUPD_NONE, Gpio::GPIO_USART_MIDI_RX);
+		gpio_mode_setup(Gpio::PORT_USART_MIDI_TX, GPIO_MODE_AF, GPIO_PUPD_NONE, Gpio::GPIO_USART_MIDI_TX);
+		gpio_set_af(Gpio::PORT_USART_MIDI_RX, GPIO_AF7, Gpio::GPIO_USART_MIDI_RX);
+		gpio_set_af(Gpio::PORT_USART_MIDI_TX, GPIO_AF7, Gpio::GPIO_USART_MIDI_TX);
 
-	dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL4, DMAMUX_CxCR_DMAREQ_ID_UART3_RX);
 
-	dma_set_peripheral_address(DMA1, DMA_CHANNEL4, (uint32_t)&USART3_RDR);
-	dma_set_memory_address(DMA1, DMA_CHANNEL4, (uint32_t)&midiFifo[0]);
-    dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+		//Prijimani DMA
+		dma_set_priority(DMA1, DMA_CHANNEL4, DMA_CCR_PL_VERY_HIGH);
+		dma_set_memory_size(DMA1, DMA_CHANNEL4, DMA_CCR_MSIZE_8BIT);
+		dma_set_peripheral_size(DMA1, DMA_CHANNEL4, DMA_CCR_PSIZE_8BIT);
+		dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL4);
+		dma_set_read_from_peripheral(DMA1, DMA_CHANNEL4);
 
-	//Vysilani DMA
-	dma_set_priority(DMA1, DMA_CHANNEL5, DMA_CCR_PL_VERY_HIGH);
-	dma_set_memory_size(DMA1, DMA_CHANNEL5, DMA_CCR_MSIZE_8BIT);
-	dma_set_peripheral_size(DMA1, DMA_CHANNEL5, DMA_CCR_PSIZE_8BIT);
-	dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL5);
-	dma_set_read_from_memory(DMA1, DMA_CHANNEL5);
+		dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL4);
+		nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ);
 
-	dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL5);
+		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL4, DMAMUX_CxCR_DMAREQ_ID_UART3_RX);
 
-	dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL5, DMAMUX_CxCR_DMAREQ_ID_UART3_TX);
+		dma_set_peripheral_address(DMA1, DMA_CHANNEL4, (uint32_t)&USART3_RDR);
+		dma_set_memory_address(DMA1, DMA_CHANNEL4, (uint32_t)&midiFifo[0]);
+		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
 
-	usart_set_baudrate(USART3, 31250);
-	usart_set_databits(USART3, 8);
-	usart_set_parity(USART3, USART_PARITY_NONE);
-	usart_set_stopbits(USART3, USART_STOPBITS_1);
-	usart_set_flow_control(USART3, USART_FLOWCONTROL_NONE);
-	usart_set_mode(USART3, USART_MODE_TX_RX);
-	usart_enable_rx_dma(USART3);
-	dma_enable_channel(DMA1, DMA_CHANNEL4);
-	
-	usart_enable(USART3);
+		//Vysilani DMA
+		dma_set_priority(DMA1, DMA_CHANNEL5, DMA_CCR_PL_VERY_HIGH);
+		dma_set_memory_size(DMA1, DMA_CHANNEL5, DMA_CCR_MSIZE_8BIT);
+		dma_set_peripheral_size(DMA1, DMA_CHANNEL5, DMA_CCR_PSIZE_8BIT);
+		dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL5);
+		dma_set_read_from_memory(DMA1, DMA_CHANNEL5);
+
+		dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL5);
+
+		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL5, DMAMUX_CxCR_DMAREQ_ID_UART3_TX);
+
+		usart_set_baudrate(USART3, 31250);
+		usart_set_databits(USART3, 8);
+		usart_set_parity(USART3, USART_PARITY_NONE);
+		usart_set_stopbits(USART3, USART_STOPBITS_1);
+		usart_set_flow_control(USART3, USART_FLOWCONTROL_NONE);
+		usart_set_mode(USART3, USART_MODE_TX_RX);
+		usart_enable_rx_dma(USART3);
+		dma_enable_channel(DMA1, DMA_CHANNEL4);
+		
+		usart_enable(USART3);
+	}
+
+	void send(vector<byte> data){
+		dma_set_peripheral_address(DMA1, DMA_CHANNEL5, (uint32_t)&USART3_TDR);
+		dma_set_memory_address(DMA1, DMA_CHANNEL5, (uint32_t)&data[0]);
+		dma_set_number_of_data(DMA1, DMA_CHANNEL5, data.size());
+		usart_enable_tx_dma(USART3);
+		nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ);
+		dma_enable_channel(DMA1, DMA_CHANNEL5);
+	}
 }
 
-void midi_send(uint8_t * buff, int len){
-	dma_set_peripheral_address(DMA1, DMA_CHANNEL5, (uint32_t)&USART3_TDR);
-	dma_set_memory_address(DMA1, DMA_CHANNEL5, (uint32_t)buff);
-    dma_set_number_of_data(DMA1, DMA_CHANNEL5, len);
-	usart_enable_tx_dma(USART3);
-	nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ);
-	dma_enable_channel(DMA1, DMA_CHANNEL5);
-}
-
-void dma1_channel5_isr(){
+extern "C" void DMA1_Channel5_IRQHandler(void){
 	dma_disable_channel(DMA1, DMA_CHANNEL5);
 	usart_disable_tx_dma(USART3);
 	dma_clear_interrupt_flags(DMA1, DMA_CHANNEL5, DMA_TCIF);
@@ -76,7 +82,7 @@ void dma1_channel5_isr(){
 }
 
 
-void dma1_channel4_isr(){
+extern "C" void DMA1_Channel4_IRQHandler(void){
 	dma_disable_channel(DMA1, DMA_CHANNEL4);
 	usart_disable_rx_dma(USART3);
 

@@ -48,19 +48,23 @@ using namespace std;
 // 7bit - callback bit
 #define MENU_CALLBACK_IS_FUNCTION 0x80
 
-
-#define MENU_KEY_UP		10	
-#define MENU_KEY_DOWN	20
-#define MENU_KEY_ENTER	30
-
 #define MENU_FONT		Font_11x18
+
+namespace UserInput{
+	enum class Key{
+		UP,
+		DOWN,
+		ENTER
+	};
+}
+
 
 namespace GUI{
 
 	//Language selection
 	enum class Language{
-		EN = 1,
-		CS = 2
+		EN ,
+		CS
 	};
 
 	//Menu Item class
@@ -80,21 +84,29 @@ namespace GUI{
 			void (*callback)(void *) = NULL;
 			CallbackType callbackType;
 
-			Oled::Icon iconSelected = Oled::Icon::DOT_SEL;
-			Oled::Icon iconNotSelected = Oled::Icon::DOT_UNSEL;
+			Oled::Icon iconSelected;
+			Oled::Icon iconNotSelected;
 
 			class Menu * parent = NULL;
 			class Menu * child = NULL;
-			Item(const map<Language, string>  title, CallbackType clbType = CallbackType::NONE);
+			Item(const map<Language, string>  title, CallbackType callbackType = CallbackType::NONE, Oled::Icon iconSelected = Oled::Icon::DOT_SEL, Oled::Icon iconNotSelected = Oled::Icon::DOT_UNSEL);
 
 	};
 
-	class Checkbox : Item{
+	class Checkbox : public Item{
 		private:
 			bool checked;
 		public:
-			Checkbox(const map<Language, string>  title, CallbackType clbType = CallbackType::NONE, bool checked = false);
+			Checkbox(const map<Language, string> title, CallbackType callbackType = CallbackType::NONE, bool checked = false);
 	};
+
+	class Back : public Item{
+		public:
+			Oled::Icon iconSelected = Oled::Icon::LEFT_ARROW_SEL;
+			Oled::Icon iconNotSelected = Oled::Icon::LEFT_ARROW_UNSEL;
+			Back(const map<Language, string>  title, CallbackType callbackType = CallbackType::SUBMENU);
+	};
+
 
 	class Menu{
 		private:
@@ -115,7 +127,7 @@ namespace GUI{
 
 	void display(Menu & menu);
 	void render(void);
-	void menu_keypress(uint8_t key);
+	void keypress(UserInput::Key key);
 	void back(void);
 	void scroll_callback(void);
 
