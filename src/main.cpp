@@ -2,7 +2,7 @@
 #include "oled.hpp"
 #include "base.hpp"
 #include "scheduler.hpp"
-#include <menu.hpp>
+#include "menu.hpp"
 
 /*#include <scheduler.hpp<*//*
 #include <led.hpp<
@@ -28,8 +28,10 @@ Menu::Renderer rndr(true);*/
 
 extern Scheduler oledSleepScheduler;
 extern Scheduler keypressScheduler;
+extern Scheduler keepaliveScheduler;
+extern Scheduler guiRenderScheduler;
+extern Scheduler menuScrollScheduler;
 
-Scheduler keepalive = Scheduler(1000, &Base::CurrentSource::toggle, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
 extern "C" void SystemInit(void) {
 	//Initialize io and other stuff related to the base unit
@@ -47,9 +49,11 @@ extern "C" void SysTick_Handler(void){
 	//oledSleep.check();
 	//commTimeout.check();
 	//ledProcess.check();
-	keepalive.increment();
-	oledSleepScheduler.increment();
+	keepaliveScheduler.increment();
+	//oledSleepScheduler.increment();
 	keypressScheduler.increment();
+	guiRenderScheduler.increment();
+	menuScrollScheduler.increment();
 	//Process inputs 
 }
 
@@ -89,12 +93,7 @@ extern "C" int main(void)
 	//led_dev_set_status_all(LED_STRIP_BACK, LED_STATUS_LOAD);
 	//led_dev_set_status_all(LED_STRIP_FRONT, LED_STATUS_LOAD);
 
-
-	Oled::fill(Oled::Color::BLACK);
-	Oled::writeString("Hellod", Font_11x18, Oled::Color::WHITE);
-
 	while (1) {
-		Oled::update();
 		int i = 0;
 	while(i < 1000000){
 		__asm__("nop");
@@ -111,3 +110,10 @@ extern "C" int main(void)
 	return 0;
 }
 
+
+
+extern "C" void HardFault_Handler(void) {
+	while(1){
+		__asm__("nop");
+	}
+}

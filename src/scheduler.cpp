@@ -28,6 +28,12 @@ Scheduler sched_comm_decode = {0, 0, &comm_decode_callback, 0};
 extern void comm_timeout_callback(void);
 Scheduler sched_comm_timeout(3000, &comm_timeout_callback);
 */
+
+//Initialize keepalive scheduler
+Scheduler keepaliveScheduler = Scheduler(1000, &Base::CurrentSource::toggle, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
+
+
+
 Scheduler::Scheduler(int interval, void (*callback)(void), uint16_t flags, int counter){
     this->interval = interval;
     this->callback = callback;
@@ -75,7 +81,7 @@ uint16_t Scheduler::disableFlags(uint16_t flags){
     return this->flags;
 }
 
-//Resets the scheduler and starts it immediately after reset
+//Resets the scheduler timer and READY and COMPLETED flags
 void Scheduler::reset(){
     this->disableFlags(Scheduler::READY | Scheduler::COMPLETED);
     this->counter = 0;
@@ -106,3 +112,6 @@ bool Scheduler::isCompleted(){
     return false;
 }
 
+void Scheduler::setInterval(int interval){
+    this->interval = interval;
+}

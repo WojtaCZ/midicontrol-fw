@@ -26,7 +26,7 @@ using namespace std;
 
 #define MENU_ICON_FONT Icon_11x18
 
-#define MENU_SCROLL_PAUSE	2
+#define MENU_SCROLL_PAUSE	1000
 
 // How many spaces is between arrow symbol and menu item
 // useful to set zero on smaller displays
@@ -57,10 +57,10 @@ using namespace std;
 
 namespace GUI{
 
-	//Enum for language selection
+	//Language selection
 	enum class Language{
-		EN,
-		CS
+		EN = 1,
+		CS = 2
 	};
 
 	//Menu Item class
@@ -76,16 +76,12 @@ namespace GUI{
 				FUNCTION
 			};
 
-			class Icon{
-				public:
-					Oled::Icon SELECTED = Oled::Icon::DOT_SEL;
-					Oled::Icon NOT_SELECTED = Oled::Icon::DOT_UNSEL;
-			};
-
 			map<Language, string> title;
 			void (*callback)(void *) = NULL;
 			CallbackType callbackType;
-			Icon icon;
+
+			Oled::Icon iconSelected = Oled::Icon::DOT_SEL;
+			Oled::Icon iconNotSelected = Oled::Icon::DOT_UNSEL;
 
 			class Menu * parent = NULL;
 			class Menu * child = NULL;
@@ -97,7 +93,6 @@ namespace GUI{
 		private:
 			bool checked;
 		public:
-			using Item::Item; 
 			Checkbox(const map<Language, string>  title, CallbackType clbType = CallbackType::NONE, bool checked = false);
 	};
 
@@ -120,10 +115,7 @@ namespace GUI{
 
 	void display(Menu & menu);
 	void render(void);
-
-}
-
-void menu_keypress(uint8_t key);
+	void menu_keypress(uint8_t key);
 	void back(void);
 	void scroll_callback(void);
 
@@ -133,5 +125,6 @@ void menu_keypress(uint8_t key);
 	void start_splash(void);
 	void error_splash(char * msg);
 
+}
 
 #endif

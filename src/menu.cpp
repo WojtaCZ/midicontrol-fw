@@ -10,30 +10,27 @@
 
 using namespace std;
 
-extern Scheduler menuScroll;
-extern Scheduler menuRender;
+Scheduler guiRenderScheduler(30, &GUI::render, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
+Scheduler menuScrollScheduler(2000, &GUI::scroll_callback, Scheduler::PERIODICAL | Scheduler::DISPATCH_ON_INCREMENT);
 
 namespace GUI{
 
-	Menu activeMenu;
 	bool forceRender = 0;
 	int scrollIndex = 0;
 	bool hadScrollPause = false;
 	Language LANG = Language::CS;
 
-
-
-	Item itm_play({{Language::EN, "Play"},{Language::CS, "Prehraj"}});
-	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}});
+	Item itm_play({{Language::EN, "Play"},{Language::CS, "Prehraj mi tu songu brasko"}});
+	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj mi to audio"}});
 	Menu menu_main({{Language::EN, "Main menu"},{Language::CS, "Hlavni menu"}}, {itm_play, itm_record});
+
+	Menu & activeMenu = menu_main;
 
 	//Menu constructor
 	Menu::Menu(const map<Language, string> title, vector<Item> itms) : title(title), items(itms){ }
 
 	//Menu item constructor
-	Item::Item(const map<Language, string> title, CallbackType clbType) : title({}), callbackType(CallbackType::NONE){
-		this->icon.SELECTED = Oled::Icon::DOT_SEL;
-		this->icon.NOT_SELECTED = Oled::Icon::DOT_UNSEL;
+	Item::Item(const map<Language, string> title, CallbackType clbType) : title(title), callbackType(CallbackType::NONE){
 
 	}
 	/*
@@ -99,29 +96,30 @@ namespace GUI{
 		//Display arrows indicating more items on top or bottom of the menu
 		if(activeMenu.selectedFirstItem()){
 			//Down arrow
-			Oled::setCursor({117,19});
+			Oled::setCursor({117,41});
 			Oled::writeSymbol(Oled::Icon::DOWN_ARROW, Icon_11x18, Oled::Color::WHITE);
 		}else if(activeMenu.selectedLastItem()){
 			//Up arrow
-			Oled::setCursor({117,41});
+			Oled::setCursor({117,19});
 			Oled::writeSymbol(Oled::Icon::UP_ARROW, Icon_11x18, Oled::Color::WHITE);
 		}else{
 			//Down arrow
-			Oled::setCursor({117,19});
+			Oled::setCursor({117,41});
 			Oled::writeSymbol(Oled::Icon::DOWN_ARROW, Icon_11x18, Oled::Color::WHITE);
 			//Up arrow
-			Oled::setCursor({117,41});
+			Oled::setCursor({117,19});
 			Oled::writeSymbol(Oled::Icon::UP_ARROW, Icon_11x18, Oled::Color::WHITE);
 		}
 
 		//If the text is too long to display, enable scrolling
-		if(activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).size() > 9 && menuScroll.isActive()){
+		if(activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() > 9 && !menuScrollScheduler.isActive()){
 			scrollIndex = 0;
 			hadScrollPause = false;
-			menuScroll.pause();
-			menuScroll.reset();
-			menuScroll.resume();
-		}else menuScroll.pause();
+			menuScrollScheduler.pause();
+			menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
+			menuScrollScheduler.reset();
+			menuScrollScheduler.resume();
+		}else if (activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() < 9) menuScrollScheduler.pause();
 
 		int indexShift = 1;
 
@@ -130,19 +128,49 @@ namespace GUI{
 		}else if(activeMenu.selectedLastItem()){
 			indexShift = 2;
 		}
+		
 
 		//int i = this->activeMenu.getSelectedIndex()-indexShift; i < this->activeMenu.getSelectedIndex()-indexShift+2; i++
 
 		for(int i = 0; i < 2; i++){
 			//Draw the icon next to menu item
 			Oled::setCursor({0 + MENU_LEFT_OFFSET, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
-			Oled::writeSymbol(i == indexShift ? (activeMenu.items.at(i).icon.SELECTED) : (activeMenu.items.at(i).icon.NOT_SELECTED) , MENU_ICON_FONT, Oled::Color::WHITE);
+			Oled::writeSymbol(i == indexShift ? (activeMenu.items.at(i).iconSelected) : (activeMenu.items.at(i).iconNotSelected) , MENU_ICON_FONT, Oled::Color::WHITE);
+			//Draw the menu item
 			Oled::setCursor({COL(1) + MENU_LEFT_OFFSET + MENU_SELECTOR_SPACING, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
-			Oled::writeString(activeMenu.items.at(i).title.at(LANG), MENU_FONT, Oled::Color::WHITE);
+			//Title reduced to 9 characters to fit on screen
+			string reducedTitle = activeMenu.items.at(i).title.at(LANG).substr(i == indexShift ? scrollIndex : 0, 8);
+			Oled::writeString(reducedTitle, MENU_FONT, Oled::Color::WHITE);
 			
 		}
 
-		
+		Oled::update();
+	}
+
+	void scroll_callback(){
+		if(hadScrollPause){
+			if(scrollIndex < activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() - 9){
+				scrollIndex++;
+			}else if(scrollIndex == activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() - 9){
+				menuScrollScheduler.pause();
+				menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
+				menuScrollScheduler.reset();
+				menuScrollScheduler.resume();
+				scrollIndex++;
+			}else{
+				hadScrollPause = false;
+				menuScrollScheduler.pause();
+				menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
+				menuScrollScheduler.reset();
+				scrollIndex = 0;
+				menuScrollScheduler.resume();
+			}
+
+		    forceRender = true;
+		}else{
+			menuScrollScheduler.setInterval(500);
+			hadScrollPause = true;
+		}
 	}
 
 }
@@ -250,7 +278,7 @@ void menu_update(void){
 
 
 
-
+/*
 
 unsigned char menuLanguage;
 
@@ -265,7 +293,7 @@ int len = 0, i = 0;
 uint8_t menuScrollIndex = 0, menuScrollPause = 0, menuScrollPauseDone = 0, menuScrollMax, menuForceUpdate = 0, menuMode = MENU_MENUMODE_NORMAL;
 
 extern Scheduler sched_menu_scroll;
-extern Scheduler sched_menu_update;
+extern Scheduler sched_menu_update;*/
 /*
 Menu * menu_actual_menu;
 void (*menu_actual_splash)(void *);
@@ -273,14 +301,14 @@ void * menu_actual_splash_param;
 uint8_t menuActualSplashKeypress = 0;*/
 /*
 extern Menu menu_display, menu_settings, menu_set_display;*/
-
+/*
 extern void base_menu_set_current_source(void * m);
 extern void base_play(uint8_t initiator, char * songname);
 extern void base_stop(uint8_t initiator);
 extern void base_req_songlist();
 
 
-
+*/
 /*
 MenuItem menuitem_play = {{"Prehraj", "Play"}, (void*)&base_req_songlist, MENU_CALLBACK_IS_FUNCTION, 0, 0, 0};
 MenuItem menuitem_stop = {{"Zastav", "Stop"}, (void*)&base_stop, MENU_CALLBACK_IS_FUNCTION, 0, 0, 0};
@@ -334,32 +362,7 @@ Menu menu_set_display = {
     .items = { &menuitem_display_set_song, &menuitem_display_set_verse, &menuitem_display_set_led, &menuitem_display_set_letter, &menuitem_back, 0},
 };*/
 
-void menu_scroll_callback(void){
 
-	/*char tmp[110];
-	sprintf(tmp, "Got %s\n", bleFifo);
-	usb_cdc_tx(tmp, strlen(tmp));*/
-	//Menu text scrolling
-	if(menuScrollPauseDone){
-		if(menuScrollIndex <= menuScrollMax){
-			menuScrollIndex++;
-		}else{
-			menuScrollPauseDone = 0;
-		}
-	}else menuScrollPause++;
-
-	if(menuScrollPause == MENU_SCROLL_PAUSE){
-		if(menuScrollIndex > 0){
-			menuScrollPauseDone = 0;
-		}else menuScrollPauseDone = 1;
-
-		menuScrollPause = 0;
-		menuScrollIndex = 0;
-	}
-
-	menuForceUpdate = 1;
-
-}
 /*
 void menu_show(Menu *menu){
 
@@ -489,8 +492,8 @@ void menu_show_splash(void (*callback)(void), void * param){
 }
 
 void menu_hide_splash(){
-	menuMode = MENU_MENUMODE_NORMAL;
-	menuForceUpdate = 1;
+	/*menuMode = MENU_MENUMODE_NORMAL;
+	menuForceUpdate = 1;*/
 }
 
 //Funkce vykreslujici zapinaci obrazovku

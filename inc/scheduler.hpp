@@ -28,6 +28,7 @@ class Scheduler{
         bool isReady();
         bool isActive();
         bool isCompleted();
+        void setInterval(int interval);
 
         enum{
             //Indicates that the scheduler is running
