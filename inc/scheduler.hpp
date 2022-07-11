@@ -3,7 +3,7 @@
 
 #include "base.hpp"
 
-#include <stdint.h>
+#include <cstdint>
 
 class Scheduler{
     private:

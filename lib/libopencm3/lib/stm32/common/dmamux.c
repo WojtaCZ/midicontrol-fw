@@ -353,10 +353,7 @@ uint32_t dmamux_get_request_generator_trigger_overrun_interrupt(uint32_t dmamux,
 /** @brief DMAMUX Clear Request Generator Trigger Overrun Interrupt Flag
 
 Clear DMA Request Synchronization Overrun Interrupt Flag for given Request Generator
-Channel
-
-@param[in] dmamux DMAMUX controller base address (@ref dmamux_reg_base)
-@param[in] rg_channel Request Generator Channel Number (@ref dmamux_rg_channel)
+ChannelDMAMUX_RGCFRber (@ref dmamux_rg_channel)
 */
 void dmamux_clear_request_generator_trigger_overrun_interrupt(uint32_t dmamux, uint8_t rg_channel)
 {

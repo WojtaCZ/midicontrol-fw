@@ -35,13 +35,13 @@ set(SOURCES
 	${SOURCE_BASE}/main.cpp
 	startup/startup_stm32g431xx.s
 	${SOURCE_BASE}/base.cpp
-	#${SOURCE_BASE}/display.cpp
+	${SOURCE_BASE}/display.cpp
     ${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/scheduler.cpp
 
-	#${SOURCE_BASE}/ble.cpp
-	#${SOURCE_BASE}/comm.cpp
-	#${SOURCE_BASE}/led.cpp
+	${SOURCE_BASE}/ble.cpp
+	${SOURCE_BASE}/comm.cpp
+	${SOURCE_BASE}/led.cpp
 	${SOURCE_BASE}/midi.cpp
 	${SOURCE_BASE}/oled.cpp
 	${SOURCE_BASE}/oled_fonts.cpp

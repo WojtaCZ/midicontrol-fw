@@ -1,7 +1,7 @@
 #ifndef MIDI_H
 #define MIDI_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <vector>
 
 using namespace std;

@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include <cstdint>
 
 #ifndef OLED_FONTS_H
 #define OLED_FONTS_H

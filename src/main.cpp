@@ -4,6 +4,7 @@
 #include "scheduler.hpp"
 #include "menu.hpp"
 #include "midi.hpp"
+#include "led.hpp"
 
 /*#include <scheduler.hpp<*//*
 #include <led.hpp<
@@ -45,6 +46,9 @@ extern "C" void SystemInit(void) {
 	//MIDI::init();
 	//Initialize USB
 	usb_init();
+
+	//Initialize LED indicators
+	LED::init();
 }
 
 extern "C" void SysTick_Handler(void){
@@ -54,8 +58,8 @@ extern "C" void SysTick_Handler(void){
 	//oledSleep.check();
 	//commTimeout.check();
 	//ledProcess.check();
-	keepaliveScheduler.increment();
-	//oledSleepScheduler.increment();
+	//keepaliveScheduler.increment();
+	oledSleepScheduler.increment();
 	keypressScheduler.increment();
 	guiRenderScheduler.increment();
 	menuScrollScheduler.increment();
@@ -95,8 +99,8 @@ extern "C" int main(void)
 	//rndr.render();
 	
 
-	//led_dev_set_status_all(LED_STRIP_BACK, LED_STATUS_LOAD);
-	//led_dev_set_status_all(LED_STRIP_FRONT, LED_STATUS_LOAD);
+	LED::USB.setColor(LED::Color(0xff, 0x00, 0xff));
+	
 
 	while (1) {
 		int i = 0;

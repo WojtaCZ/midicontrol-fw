@@ -1,5 +1,5 @@
 #include "usb.h"
-#include "comm.hpp"
+
 //#include "base.hpp"
 
 #include <stm32/timer.h>
@@ -21,6 +21,8 @@
 #include <cm3/nvic.h>
 
 #include <string.h>
+
+extern void comm_decode(char * data, int len);
 
 usbd_device *usbd_fs_device;
 
@@ -493,7 +495,7 @@ static void usb_cdc_rx(usbd_device *usbd_dev, uint8_t ep){
 	uint8_t buf[64];
 	int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
 
-    //comm_usb_packet_received(buf, len);
+    comm_decode(buf, len);
 
 	if(len){
 		usbd_ep_write_packet(usbd_dev, 0x82, buf, len);
