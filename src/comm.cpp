@@ -105,7 +105,5 @@ namespace Communication{
 
 //Wrapper to call from C files
 extern "C" void comm_decode(char * data, int len){
-	string s = string(data, len);
-
-	Communication::decode(s);
+	Communication::decode(string(data, len));
 }

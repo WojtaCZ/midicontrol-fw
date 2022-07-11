@@ -10,6 +10,7 @@
 #include <cm3/nvic.h>
 #include <string.h>
 
+
 uint8_t midiFifo[100], midiFifoIndex, midiGotMessage;
 
 extern "C" uint32_t usb_cdc_tx(void *buf, int len);
@@ -17,12 +18,14 @@ extern "C" uint32_t usb_midi_tx(void *buf, int len);
 
 
 namespace MIDI{
+
+
 	void init(void){
 
-		gpio_mode_setup(Gpio::PORT_USART_MIDI_RX, GPIO_MODE_AF, GPIO_PUPD_NONE, Gpio::GPIO_USART_MIDI_RX);
-		gpio_mode_setup(Gpio::PORT_USART_MIDI_TX, GPIO_MODE_AF, GPIO_PUPD_NONE, Gpio::GPIO_USART_MIDI_TX);
-		gpio_set_af(Gpio::PORT_USART_MIDI_RX, GPIO_AF7, Gpio::GPIO_USART_MIDI_RX);
-		gpio_set_af(Gpio::PORT_USART_MIDI_TX, GPIO_AF7, Gpio::GPIO_USART_MIDI_TX);
+		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN2);
+		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN3);
+		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN2);
+		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN3);
 
 
 		//Prijimani DMA

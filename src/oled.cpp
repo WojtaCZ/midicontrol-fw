@@ -63,12 +63,12 @@ namespace Oled{
     void init(){
 
         //Setup the GPIO for I2C
-        gpio_mode_setup(Gpio::PORT_I2C1_SCL, GPIO_MODE_AF, GPIO_PUPD_PULLUP, Gpio::GPIO_I2C1_SCL);
-        gpio_mode_setup(Gpio::PORT_I2C1_SDA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, Gpio::GPIO_I2C1_SDA);
-        gpio_set_output_options(Gpio::PORT_I2C1_SCL, GPIO_OTYPE_OD, GPIO_OSPEED_100MHZ, Gpio::GPIO_I2C1_SCL);
-        gpio_set_output_options(Gpio::PORT_I2C1_SDA, GPIO_OTYPE_OD, GPIO_OSPEED_100MHZ, Gpio::GPIO_I2C1_SDA);
-        gpio_set_af(Gpio::PORT_I2C1_SCL, GPIO_AF4, Gpio::GPIO_I2C1_SCL);
-        gpio_set_af(Gpio::PORT_I2C1_SDA, GPIO_AF4, Gpio::GPIO_I2C1_SDA);
+        gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO::PIN15);
+        gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO::PIN7);
+        gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_OD, GPIO_OSPEED_100MHZ, GPIO::PIN15);
+        gpio_set_output_options(GPIO::PORTB, GPIO_OTYPE_OD, GPIO_OSPEED_100MHZ, GPIO::PIN7);
+        gpio_set_af(GPIO::PORTA, GPIO_AF4, GPIO::PIN15);
+        gpio_set_af(GPIO::PORTB, GPIO_AF4, GPIO::PIN7);
 
         //Setup DMA channel
         dma_set_priority(DMA1, DMA_CHANNEL3, DMA_CCR_PL_HIGH);

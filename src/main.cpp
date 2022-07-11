@@ -5,12 +5,9 @@
 #include "menu.hpp"
 #include "midi.hpp"
 #include "led.hpp"
+#include "ble.hpp"
 
-/*#include <scheduler.hpp<*//*
-#include <led.hpp<
-#include <usb.h>
-#include <midi.hpp<
-#include <ble.hpp<*/
+
 #include <utility>
 
 #include <stm32/exti.h>
@@ -43,12 +40,15 @@ extern "C" void SystemInit(void) {
 	//Initialize the OLED
 	Oled::init();
 	//Initialize MIDI
-	//MIDI::init();
+	MIDI::init();
 	//Initialize USB
 	usb_init();
 
 	//Initialize LED indicators
 	LED::init();
+
+	//Initialize bluetooth
+	BLE::init();
 }
 
 extern "C" void SysTick_Handler(void){
@@ -99,7 +99,7 @@ extern "C" int main(void)
 	//rndr.render();
 	
 
-	LED::USB.setColor(LED::Color(0xff, 0x00, 0xff));
+	//LED::USB.setColor(LED::Color(0xff, 0x00, 0xff));
 	
 
 	while (1) {

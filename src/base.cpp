@@ -18,7 +18,11 @@
 
 Scheduler keypressScheduler(10, &Base::Encoder::process, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
+//Define all gpios
+
+
 namespace Base{
+	
 	//Initialization of necessary objects
 	void init(){
 		//Create structure to define clock setup
@@ -89,11 +93,11 @@ namespace Base{
 		systick_counter_enable();
 
 		//Initialize current source GPIO
-		gpio_mode_setup(Gpio::PORT_CURRENT_SOURCE, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, Gpio::GPIO_CURRENT_SOURCE);
-		gpio_set_output_options(Gpio::PORT_CURRENT_SOURCE, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, Gpio::GPIO_CURRENT_SOURCE);
+		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO::PIN4);
+		gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO::PIN4);
 
 		//Initialize rotary encoder GPIO
-		gpio_mode_setup(Gpio::PORT_ENCODER, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, Gpio::GPIO_ENCODER_A | Gpio::GPIO_ENCODER_B | Gpio::GPIO_ENCODER_SW);
+		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO::PIN0 | GPIO::PIN1 | GPIO::PIN2);
 	}
 }
 
@@ -102,15 +106,15 @@ namespace Base::CurrentSource{
 
 	//Get actual state of the current source
 	bool isEnabled(){
-		return !!(gpio_port_read(Gpio::PORT_CURRENT_SOURCE) & Gpio::GPIO_CURRENT_SOURCE);
+		return !!(gpio_port_read(GPIO::PORTA) & GPIO::PIN4);
 	}
 
 	//Enable the current source
 	void enable(){
 		enabled = true;
 
-		if(!!(gpio_port_read(Gpio::PORT_CURRENT_SOURCE) & Gpio::GPIO_CURRENT_SOURCE) != enabled){
-			gpio_set(Gpio::PORT_CURRENT_SOURCE, Gpio::GPIO_CURRENT_SOURCE);
+		if(!!(gpio_port_read(GPIO::PORTA) & GPIO::PIN4) != enabled){
+			gpio_set(GPIO::PORTA, GPIO::PIN4);
 		}
 	}
 
@@ -118,8 +122,8 @@ namespace Base::CurrentSource{
 	void disable(){
 		enabled = false;
 
-		if(!!(gpio_port_read(Gpio::PORT_CURRENT_SOURCE) & Gpio::GPIO_CURRENT_SOURCE) != enabled){
-			gpio_clear(Gpio::PORT_CURRENT_SOURCE, Gpio::GPIO_CURRENT_SOURCE);
+		if(!!(gpio_port_read(GPIO::PORTA) & GPIO::PIN4) != enabled){
+			gpio_clear(GPIO::PORTA, GPIO::PIN4);
 		}
 	}
 
@@ -140,7 +144,7 @@ namespace Base::Encoder{
 	void process(){
 
 		//Read the state of encoder switch gpio
-		gpioState = gpio_get(Gpio::PORT_ENCODER, Gpio::GPIO_ENCODER_SW);
+		gpioState = gpio_get(GPIO::PORTB, GPIO::PIN1);
 		//If the state differs from the previous one
 		if(gpioState != gpioStateOld){
 			//Update the old state
@@ -157,8 +161,8 @@ namespace Base::Encoder{
 
 		//Read A and B states into code variable
 		readCode <<= 2;
-		if (gpio_get(Gpio::PORT_ENCODER, Gpio::GPIO_ENCODER_B)) readCode |= 0x02;
-		if (gpio_get(Gpio::PORT_ENCODER, Gpio::GPIO_ENCODER_A)) readCode |= 0x01;
+		if (gpio_get(GPIO::PORTB, GPIO::PIN2)) readCode |= 0x02;
+		if (gpio_get(GPIO::PORTB, GPIO::PIN0)) readCode |= 0x01;
 		readCode &= 0x0f;
 
 		//If the code is valid
