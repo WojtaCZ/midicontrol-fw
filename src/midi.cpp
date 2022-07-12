@@ -22,10 +22,10 @@ namespace MIDI{
 
 	void init(void){
 
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN2);
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN3);
-		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN2);
-		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN3);
+		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN10);
+		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN11);
+		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN10);
+		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN11);
 
 
 		//Prijimani DMA
