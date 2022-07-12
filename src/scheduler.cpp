@@ -5,11 +5,6 @@
 //Initialize keepalive scheduler
 Scheduler keepaliveScheduler = Scheduler(1000, &Base::CurrentSource::toggle, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
-//Scheduler constructor
-Scheduler::Scheduler(int interval, void (*callback)(void), uint16_t flags, int counter) : interval(interval), callback(callback), flags(flags), counter(counter){
-
-}
-
 //Function to process and increment the scheduler counter
 void Scheduler::increment(){
     if((this->counter >= this->interval) && !(this->flags & Scheduler::READY) && (this->flags & Scheduler::ACTIVE)){

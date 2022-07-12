@@ -85,10 +85,6 @@ namespace GUI{
 
 
 	void render(void){
-
-		__asm__("nop");
-		__asm__("nop");
-		__asm__("nop");
 		//If there is nothing to update, return
 		if(!activeMenu.selectedIndexChanged() && !forceRender) return;
 		//Zero out the force render flag

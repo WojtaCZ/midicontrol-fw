@@ -9,14 +9,15 @@ class Scheduler{
     private:
         //Interval in ms
         int interval;
-        //Counter
-        int counter;
         //Callback to a function
-        void (*callback)(void);
+        void (*callback)();
         //Flags
         uint16_t flags;
+        //Counter
+        int counter;
     public:
-        Scheduler(int interval, void (*callback)(void), uint16_t flags = 0, int counter = 0);
+        //Scheduler constructor
+        Scheduler(int interval, void (*callback)(), uint16_t flags = 0, int counter = 0) : interval(interval), callback(callback), flags(flags), counter(counter){};
         void increment();
         void dispatch();
         uint16_t setFlags(uint16_t flags);

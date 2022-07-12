@@ -4,7 +4,6 @@
 #include "menu.hpp"
 
 #include <libopencm3/stm32/timer.h>
-
 #include <libopencm3/stm32/dma.h>
 #include <libopencm3/stm32/dmamux.h>
 #include <libopencm3/stm32/i2c.h>

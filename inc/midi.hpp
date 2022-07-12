@@ -11,4 +11,7 @@ namespace MIDI{
     void send(vector<byte> data);
 }
 
+//Wrapper for usb.h to call
+extern "C" void midi_send(char * data, int len);
+
 #endif

@@ -1,7 +1,5 @@
 #include "usb.h"
 
-//#include "base.hpp"
-
 #include <stm32/timer.h>
 #include <stm32/dma.h>
 #include <stm32/dmamux.h>
@@ -22,7 +20,9 @@
 
 #include <string.h>
 
+//Wrappers for CPP functions 
 extern void comm_decode(char * data, int len);
+extern void midi_send(char * data, int len);
 
 usbd_device *usbd_fs_device;
 
@@ -481,9 +481,8 @@ static void usb_midi_rx(usbd_device *dev, uint8_t ep){
 	uint8_t buf[64];
 	int len = usbd_ep_read_packet(dev, ENDPOINT_MIDI_DATA_OUT, buf, 64);
 
-    //midi_send(&buf[1], len);
-
-   // usb_cdc_tx(&buf[1], len);
+    //Send the received packet over MIDI
+    midi_send(&buf[1], len);
 
 	if(len){
 		usbd_ep_write_packet(dev, ENDPOINT_MIDI_DATA_IN, sysex_identity, sizeof(sysex_identity));
