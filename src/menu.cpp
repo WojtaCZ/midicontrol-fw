@@ -52,6 +52,7 @@ namespace GUI{
 
 	int Menu::setSelectedIndex(int index){
 		if(index >= static_cast<int>(this->items.size()) || index < 0) return 0;
+		this->lastSelectedIndex = this->selectedIndex;
 		this->selectedIndex = index;
 		return 1;
 	}
@@ -84,6 +85,10 @@ namespace GUI{
 
 
 	void render(void){
+
+		__asm__("nop");
+		__asm__("nop");
+		__asm__("nop");
 		//If there is nothing to update, return
 		if(!activeMenu.selectedIndexChanged() && !forceRender) return;
 		//Zero out the force render flag
@@ -117,7 +122,6 @@ namespace GUI{
 
 		//If the text is too long to display, enable scrolling
 		int idx = activeMenu.getSelectedIndex();
-		__asm__("nop");
 		if(activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() > 9 && !menuScrollScheduler.isActive()){
 			scrollIndex = 0;
 			hadScrollPause = false;

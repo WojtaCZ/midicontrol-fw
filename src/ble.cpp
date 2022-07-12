@@ -129,7 +129,7 @@ extern "C" void DMA1_Channel1_IRQHandler(){
 		BLE::bleFifoIndex = 0;
 		dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&BLE::bleFifo[BLE::bleFifoIndex]);
 	}else if(BLE::bleFifo[BLE::bleFifoIndex-1] == 0x0A){
-		comm_decode((char *)BLE::bleFifo, BLE::bleFifoIndex);
+		//comm_decode((char *)BLE::bleFifo, BLE::bleFifoIndex);
 		memset(BLE::bleFifo, 0, BLE::bleFifoIndex);
 		BLE::bleFifoIndex = 0;
 		dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&BLE::bleFifo[BLE::bleFifoIndex]);

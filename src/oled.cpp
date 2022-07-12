@@ -1,6 +1,7 @@
 #include "oled.hpp"
 #include "scheduler.hpp"
 #include "base.hpp"
+#include "menu.hpp"
 
 #include <libopencm3/stm32/timer.h>
 
@@ -29,6 +30,8 @@ namespace Oled{
     void wakeup(){
         if(isSleeping()){
             sleeping = false;
+            GUI::render();
+            update();
         }
     }
 
