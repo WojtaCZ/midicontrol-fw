@@ -11,30 +11,34 @@
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/cm3/nvic.h>
 
-
+//Scheduler used to time oled sleep
 Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
 namespace Oled{
+    //Coordinates on the oled
     pair<uint16_t, uint16_t> coordinates;
+    //Flags
     bool inverted;
     bool initialized;
     bool sleeping;
+    //Screen buffer storing image data
     array<uint8_t, OLED_SCREENBUF_SIZE> screenBuffer;
-    array<uint8_t, OLED_SCREENBUF_SIZE> savedScreenBuffer;
+    //Buffers used for initialization
     array<uint8_t, 4> pageBuffer;
     array<uint8_t, 29> initBuffer;
 
+    //DMA flags
     uint8_t dmaStatus;
     uint16_t dmaIndex;
 
+    //Wakeup function for the oled
     void wakeup(){
         if(isSleeping()){
             sleeping = false;
-            GUI::render();
-            update();
         }
     }
 
+    //Sleep function for the oled
     void sleep(){
         if(!isSleeping()){
             fill(Color::BLACK);
@@ -217,10 +221,12 @@ namespace Oled{
     }
 
     extern "C" void DMA1_Channel3_IRQHandler(void){
+        //Disable DMA so it doesnt fire while in interrupt
         dma_disable_channel(DMA1, DMA_CHANNEL3);
         dma_clear_interrupt_flags(DMA1, DMA_CHANNEL3, DMA_TCIF);
         nvic_clear_pending_irq(NVIC_DMA1_CHANNEL3_IRQ);
 
+        //Check if the init sequence has been done
         if(isInitialized()){
             if(dmaStatus < 15){
                 if(dmaStatus % 2){
@@ -252,12 +258,13 @@ namespace Oled{
         nvic_clear_pending_irq(NVIC_DMA1_CHANNEL3_IRQ);
     }
 
-
+    //Callback for the sleep scheduler
     void sleepCallback(void){
         oledSleepScheduler.pause();
         sleep();
     }
 
+    //Callback to wakeup the oled
     void wakeupCallback(void){
         oledSleepScheduler.reset();
         oledSleepScheduler.resume();
