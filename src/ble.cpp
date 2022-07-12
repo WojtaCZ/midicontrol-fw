@@ -35,7 +35,7 @@ namespace BLE{
 
 	void init(void){
 
-		/*gpio_mode_setup(GPIO::PORTA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO::PIN0 | GPIO::PIN1);
+		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO::PIN0 | GPIO::PIN1);
 		gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO::PIN0);
 		gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO::PIN1);
 
@@ -49,7 +49,7 @@ namespace BLE{
 
 		gpio_set(GPIO::PORTA, GPIO::PIN0);
 		gpio_clear(GPIO::PORTA, GPIO::PIN1);
-		*/
+		
 
 
 		//Prijimani DMA
@@ -91,7 +91,7 @@ namespace BLE{
 		
 		usart_enable(USART2);
 
-		//gpio_set(GPIO::PORTA, GPIO::PIN1);
+		gpio_set(GPIO::PORTA, GPIO::PIN1);
 
 	}
 

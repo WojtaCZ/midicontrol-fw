@@ -18,9 +18,6 @@
 
 Scheduler keypressScheduler(10, &Base::Encoder::process, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
-//Define all gpios
-
-
 namespace Base{
 	
 	//Initialization of necessary objects

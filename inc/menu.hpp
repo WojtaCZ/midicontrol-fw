@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 
 using namespace std;
 
@@ -69,42 +70,61 @@ namespace GUI{
 
 	//Menu Item class
 	class Item{
-		private:
-			int flags = 0;
-			int parameter = 0;
-			
 		public:
+			enum class ItemType{
+				ITEM,
+				CHECKBOX,
+				BACK
+			};
+
 			enum class CallbackType{
 				NONE,
 				SUBMENU,
 				FUNCTION
 			};
 
+		private:
+			//int flags = 0;
+			//int parameter = 0;
+			
 			map<Language, string> title;
-			void (*callback)(void *) = NULL;
-			CallbackType callbackType;
-
+			ItemType type;
+			CallbackType clbType;
 			Oled::Icon iconSelected;
 			Oled::Icon iconNotSelected;
+			
+		public:
+			
+			void (*callback)(void *) = NULL;
 
 			class Menu * parent = NULL;
 			class Menu * child = NULL;
-			Item(const map<Language, string>  title, CallbackType callbackType = CallbackType::NONE, Oled::Icon iconSelected = Oled::Icon::DOT_SEL, Oled::Icon iconNotSelected = Oled::Icon::DOT_UNSEL);
-
+			Item(map<Language, string> title, CallbackType callbackType = CallbackType::NONE, ItemType type = ItemType::ITEM, Oled::Icon iconSelected = Oled::Icon::DOT_SEL, Oled::Icon iconNotSelected = Oled::Icon::DOT_UNSEL) : title(title), type(type), clbType(callbackType), iconSelected(iconSelected), iconNotSelected(iconNotSelected){};
+			Item(const Item&) = delete;
+			Item(Item&&) = default;
+			string getTitle(Language lang);
+			Oled::Icon getIcon(bool selected);
+			CallbackType callbackType(){return clbType;};
 	};
 
 	class Checkbox : public Item{
 		private:
 			bool checked;
+			Oled::Icon iconSelectedChecked;
+			Oled::Icon iconNotSelectedChecked;
 		public:
-			Checkbox(const map<Language, string> title, CallbackType callbackType = CallbackType::NONE, bool checked = false);
+			Checkbox(map<Language, string> title, CallbackType callbackType = CallbackType::NONE, Oled::Icon iconSelected = Oled::Icon::CHECKBOX_SEL_UNCH, Oled::Icon iconNotSelected = Oled::Icon::CHECKBOX_UNSEL_UNCH, bool checked = false, Oled::Icon iconSelectedChecked = Oled::Icon::CHECKBOX_SEL_CHCK, Oled::Icon iconNotSelectedChecked = Oled::Icon::CHECKBOX_UNSEL_CHCK) : Item(title, callbackType, ItemType::CHECKBOX, iconSelected, iconNotSelected), checked(checked), iconSelectedChecked(iconSelectedChecked), iconNotSelectedChecked(iconNotSelectedChecked){};
+			Checkbox(const Checkbox&) = delete;
+			Checkbox(Checkbox&&) = default;
 	};
 
 	class Back : public Item{
 		public:
 			Oled::Icon iconSelected = Oled::Icon::LEFT_ARROW_SEL;
 			Oled::Icon iconNotSelected = Oled::Icon::LEFT_ARROW_UNSEL;
-			Back(const map<Language, string>  title, CallbackType callbackType = CallbackType::SUBMENU);
+			Back(map<Language, string>  title, CallbackType callbackType = CallbackType::SUBMENU) : Item(title, callbackType, ItemType::BACK, Oled::Icon::LEFT_ARROW_SEL, Oled::Icon::LEFT_ARROW_UNSEL){};
+			Back(const Back&) = delete;
+			Back(Back&&) = default;
 	};
 
 
@@ -114,8 +134,8 @@ namespace GUI{
 			int lastSelectedIndex = -1;
 		public:
 			map<Language, string> title;
-			vector<Item> items;
-			Menu(const map<Language, string> title = {}, vector<Item> itms = {});
+			vector<unique_ptr<Item>> items;
+			Menu(const map<Language, string> title, vector<unique_ptr<Item>> items) : title(title), items(items){};
 
 			int setSelectedIndex(int index);
 			int getSelectedIndex();
@@ -123,6 +143,9 @@ namespace GUI{
 			bool hasTitle(Language lan);
 			bool selectedFirstItem();
 			bool selectedLastItem();
+			Item getItem(int index);
+			Item getSelectedItem();
+			Item getSelectedItem(int offset);
 	};
 
 	void display(Menu & menu);

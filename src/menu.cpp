@@ -27,24 +27,16 @@ namespace GUI{
 	Item itm_play({{Language::EN, "Play"},{Language::CS, "Prehraj"}});
 	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}});
 
-
-	Menu menu_main({{Language::EN, "Main menu"},{Language::CS, "Hlavni menu"}}, {itm_play, itm_record, chck_power, back_btn});
+	Menu menu_main({{Language::EN, "Main menu"},{Language::CS, "Hlavni menu"}}, 
+		{
+			unique_ptr<Item>(&itm_play), 
+			unique_ptr<Item>(&itm_record), 
+			unique_ptr<Checkbox>(&chck_power),
+			unique_ptr<Back>(&back_btn)
+		}
+	);
 
 	Menu & activeMenu = menu_main;
-
-	//Menu constructor
-	Menu::Menu(const map<Language, string> title, vector<Item> itms) : title(title), items(itms){ }
-
-	//Menu item constructor
-	Item::Item(const map<Language, string> title, CallbackType callbackType, Oled::Icon iconSelected, Oled::Icon iconNotSelected) : title(title), callbackType(callbackType), iconSelected(iconSelected), iconNotSelected(iconNotSelected){ }
-	
-	Checkbox::Checkbox(const map<Language, string> title, CallbackType callbackType, bool checked) : Item(title, callbackType, Oled::Icon::CHECKBOX_SEL_UNCH, Oled::Icon::CHECKBOX_UNSEL_UNCH), checked(checked){ }
-
-	Back::Back(const map<Language, string> title, CallbackType callbackType) : Item(title, callbackType, Oled::Icon::LEFT_ARROW_SEL, Oled::Icon::LEFT_ARROW_UNSEL){ }
-
-	void display(Menu & menu){
-		activeMenu = menu;
-	}
 
 	int Menu::getSelectedIndex(){
 		return this->selectedIndex;
@@ -83,6 +75,29 @@ namespace GUI{
 		return false;
 	}
 
+	Item Menu::getItem(int index){
+		return *this->items.at(index);
+	}
+
+	Item Menu::getSelectedItem(){
+		return *this->items.at(this->getSelectedIndex());
+	}
+
+	Item Menu::getSelectedItem(int offset){
+		return *this->items.at(this->getSelectedIndex() + offset);
+	}
+
+	string Item::getTitle(Language lang){
+		return this->title.at(lang);
+	}
+
+	Oled::Icon Item::getIcon(bool selected){
+		return selected ? this->iconSelected : this->iconNotSelected;
+	}
+
+	void display(Menu & menu){
+		activeMenu = menu;
+	}
 
 	void render(void){
 		//If there is nothing to update, return
@@ -116,16 +131,17 @@ namespace GUI{
 			Oled::writeSymbol(Oled::Icon::UP_ARROW, Icon_11x18, Oled::Color::WHITE);
 		}
 
+		size_t titleLength = activeMenu.getSelectedItem().getTitle(LANG).length();
 		//If the text is too long to display, enable scrolling
 		int idx = activeMenu.getSelectedIndex();
-		if(activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() > 9 && !menuScrollScheduler.isActive()){
+		if(titleLength > 9 && !menuScrollScheduler.isActive()){
 			scrollIndex = 0;
 			hadScrollPause = false;
 			menuScrollScheduler.pause();
 			menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 			menuScrollScheduler.reset();
 			menuScrollScheduler.resume();
-		}else if (activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() < 9) menuScrollScheduler.pause();
+		}else if (titleLength < 9) menuScrollScheduler.pause();
 
 		int indexShift = 0;
 
@@ -135,17 +151,14 @@ namespace GUI{
 			indexShift = 1;
 		}
 		
-
-		//int i = this->activeMenu.getSelectedIndex()-indexShift; i < this->activeMenu.getSelectedIndex()-indexShift+2; i++
-
 		for(int i = 0; i < 2; i++){
 			//Draw the icon next to menu item
 			Oled::setCursor({0 + MENU_LEFT_OFFSET, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
-			Oled::writeSymbol(i == indexShift ? (activeMenu.items.at(i + activeMenu.getSelectedIndex() - indexShift).iconSelected) : (activeMenu.items.at(i + activeMenu.getSelectedIndex() - indexShift).iconNotSelected) , MENU_ICON_FONT, Oled::Color::WHITE);
+			Oled::writeSymbol(activeMenu.getSelectedItem(i - indexShift).getIcon(i == indexShift), MENU_ICON_FONT, Oled::Color::WHITE);
 			//Draw the menu item
 			Oled::setCursor({COL(1) + MENU_LEFT_OFFSET + MENU_SELECTOR_SPACING, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
 			//Title reduced to 9 characters to fit on screen
-			string reducedTitle = activeMenu.items.at(i + activeMenu.getSelectedIndex() - indexShift).title.at(LANG).substr(i == indexShift ? scrollIndex : 0, 8);
+			string reducedTitle = activeMenu.getSelectedItem(i - indexShift).getTitle(LANG).substr(i == indexShift ? scrollIndex : 0, 8);
 			Oled::writeString(reducedTitle, MENU_FONT, Oled::Color::WHITE);
 			
 		}
@@ -154,10 +167,11 @@ namespace GUI{
 	}
 
 	void scroll_callback(){
+		size_t titleLength = activeMenu.getSelectedItem().getTitle(LANG).length();
 		if(hadScrollPause){
-			if(scrollIndex < activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() - 9){
+			if(scrollIndex < titleLength - 9){
 				scrollIndex++;
-			}else if(scrollIndex == activeMenu.items.at(activeMenu.getSelectedIndex()).title.at(LANG).length() - 9){
+			}else if(scrollIndex == titleLength - 9){
 				menuScrollScheduler.pause();
 				menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 				menuScrollScheduler.reset();
@@ -192,10 +206,10 @@ namespace GUI{
 			scrollIndex = 0;
 			activeMenu.setSelectedIndex(activeMenu.getSelectedIndex() + 1);
 		}else if(key == UserInput::Key::ENTER){
-			if(activeMenu.items.at(activeMenu.getSelectedIndex()).callbackType == Item::CallbackType::FUNCTION){
+			if(activeMenu.getSelectedItem().callbackType() == Item::CallbackType::FUNCTION){
 				void * ptr;
-				(*activeMenu.items.at(activeMenu.getSelectedIndex()).callback)(ptr);
-			}else if(activeMenu.items.at(activeMenu.getSelectedIndex()).callbackType == Item::CallbackType::SUBMENU){
+				(*activeMenu.getSelectedItem().callback)(ptr);
+			}else if(activeMenu.getSelectedItem().callbackType() == Item::CallbackType::SUBMENU){
 				//GUI::display(activeMenu.items.at(activeMenu.getSelectedIndex()).child);
 			}
 		}
