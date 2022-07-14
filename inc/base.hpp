@@ -3,11 +3,12 @@
 #define BASE_H
 
 #include <stm32/gpio.h>
-#include <cm3/nvic.h>
 #include <string>
 
 namespace Base{
+	
     using namespace std;
+
     static string DEVICE_NAME = "MIDIControl";
     static string DEVICE_TYPE = "BASE";
     static string FW_VERSION = "2.0.0";
@@ -15,10 +16,11 @@ namespace Base{
     void init(void);
 
     namespace CurrentSource{
+		
         bool isEnabled();
         void enable();
         void disable();
-        void toggle();
+        void toggle(void);
     };
 
     namespace Encoder{

@@ -7,7 +7,6 @@
 #include "led.hpp"
 #include "ble.hpp"
 
-
 #include <utility>
 
 #include <stm32/exti.h>

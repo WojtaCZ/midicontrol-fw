@@ -1,9 +1,6 @@
 #include "base.hpp"
-#include "oled.hpp"
 #include "menu.hpp"
 
-
-#include <string>
 #include <stm32/exti.h>
 #include <stm32/gpio.h>
 #include <stm32/rcc.h>
@@ -124,7 +121,7 @@ namespace Base::CurrentSource{
 		}
 	}
 
-	void toggle(){
+	void toggle(void){
 		if(isEnabled()){
 			disable();
 		} else enable();
@@ -142,6 +139,13 @@ namespace Base::Encoder{
 
 		//Read the state of encoder switch gpio
 		gpioState = gpio_get(GPIO::PORTB, GPIO::PIN1);
+
+		//Dont actually generate any event when turned on for the first time
+		if(gpioStateOld == 0xffff){
+			gpioStateOld = gpioState;
+			return;
+		}
+
 		//If the state differs from the previous one
 		if(gpioState != gpioStateOld){
 			//Update the old state
@@ -172,20 +176,16 @@ namespace Base::Encoder{
 
 		//Handle a shift in position
 		if(pos > 0){
-			Oled::wakeupCallback();
 			GUI::keypress(UserInput::Key::DOWN);
 			pos = 0;
 		}else if(pos < 0){
-			Oled::wakeupCallback();
 			GUI::keypress(UserInput::Key::UP);
 			pos = 0;
 		}
 
 		if(pressed){
-			Oled::wakeupCallback();
 			GUI::keypress(UserInput::Key::ENTER);
 			pressed = false;
-
 		}
 
 	}

@@ -73,7 +73,7 @@ set(W_ERRORS "-Werror=switch -Werror=return-type -Werror=stringop-overflow -Werr
 set(W_IGNORED "-Wno-unused-function " CACHE INTERNAL "Supressed warnings")
 set(VALIDATION_OPTS "${W_ERRORS} ${W_IGNORED} -Wall -Wextra -Wundef -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wcast-align -Wvla -Wmissing-format-attribute -Wuninitialized -Winit-self -Wdouble-promotion -Wstrict-aliasing -Wno-unused-parameter -pedantic" CACHE INTERNAL "Sources validation options")
 set(OTHER_C "-Werror=int-conversion -Werror=incompatible-pointer-types -Werror=implicit-function-declaration" CACHE INTERNAL "Other C specific options")
-set(OTHER_CPP "-fno-use-cxa-atexit -Wint-to-pointer-cast -Wold-style-cast -Weffc++ -Wno-register -fno-rtti -fno-exceptions -fno-threadsafe-statics" CACHE INTERNAL "Other CPP specific options")
+set(OTHER_CPP "-fno-use-cxa-atexit -Wint-to-pointer-cast -Wold-style-cast -Weffc++ -Wno-register -fno-exceptions -fno-threadsafe-statics" CACHE INTERNAL "Other CPP specific options")
 set(OPTIMIZATIONS "-funsigned-char -funsigned-bitfields -fdiagnostics-color=always -fstack-protector-strong -finline-small-functions -findirect-inlining -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables" CACHE INTERNAL "Optimizations options")
 set(LIBS "--specs=nano.specs --specs=nosys.specs" CACHE INTERNAL "which libs to use")
 
