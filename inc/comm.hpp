@@ -33,6 +33,8 @@ namespace Communication{
     };
 
     void decode(string data);
+    void send(string data);
+    void send(char c);
 
 }
 

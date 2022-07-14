@@ -1,5 +1,4 @@
 #include "comm.hpp"
-#include "usb.h"
 #include "scheduler.hpp"
 #include "base.hpp"
 #include "menu.hpp"
@@ -7,8 +6,10 @@
 
 #include <cstdlib>
 
+extern "C" uint32_t usb_cdc_tx(void *buf, int len);
 
 namespace Communication{
+	
 
 	//Command definitions
 	namespace MUSIC{
@@ -31,11 +32,57 @@ namespace Communication{
 		void letterCallback(string data, Command::Type type){}
 		void ledCallback(string data, Command::Type type){}
 
-		Command status = Command("display status", &statusCallback);
-		Command song = Command("display song", &songCallback);
-		Command verse = Command("display verse", &verseCallback);
-		Command letter = Command("display letter", &letterCallback);
-		Command led = Command("display led", &ledCallback);
+		Command status = Command("display status", [](string data, Command::Type type){
+			if(type == Command::Type::GET){
+				send(Display::getConnected() ? "connected" : "disconnected");
+			}
+		});
+		Command song = Command("display song", [](string data, Command::Type type){
+			if(type == Command::Type::GET){
+				send(to_string(Display::getSong()));
+			}else if(type == Command::Type::SET) Display::setSong(stoi(data), data == "" ? false : true);
+		});
+		Command verse = Command("display verse", [](string data, Command::Type type){
+			if(type == Command::Type::GET){
+				send(to_string(Display::getVerse()));
+			}else if(type == Command::Type::SET) Display::setVerse(stoi(data), data == "" ? false : true);
+		});
+		Command letter = Command("display letter", [](string data, Command::Type type){
+			if(type == Command::Type::GET){
+				send(Display::getLetter());
+			}else if(type == Command::Type::SET) Display::setLetter(data.at(0), data == "" ? false : true);
+		});
+		Command led = Command("display led", [](string data, Command::Type type){
+			if(type == Command::Type::GET){
+				switch(Display::getLed()){
+					case Display::LED::RED:
+						send("red");
+					break;
+
+					case Display::LED::GREEN:
+						send("green");
+					break;
+
+					case Display::LED::BLUE:
+						send("blue");
+					break;
+
+					case Display::LED::YELLOW:
+						send("yellow");
+					break;
+
+					default:
+						send("off");
+					break;
+				}
+			}else if(type == Command::Type::SET){
+				if(data == "red") Display::setLed(Display::LED::RED);
+				if(data == "green") Display::setLed(Display::LED::GREEN);
+				if(data == "blue") Display::setLed(Display::LED::BLUE);
+				if(data == "yellow") Display::setLed(Display::LED::YELLOW);
+				if(data == "off") Display::setLed(Display::LED::OFF);
+			}
+		});
 	}
 
 	namespace BASE{
@@ -100,6 +147,17 @@ namespace Communication{
 				return;
 			}
 		}
+	}
+
+	void send(string data){
+		data += "\n\r";
+		usb_cdc_tx((void *)data.c_str(), data.length());
+	}
+
+	void send(char c){
+		string data;
+		data = c + "\n\r";
+		usb_cdc_tx((void *)data.c_str(), data.length());
 	}
 }
 

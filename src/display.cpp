@@ -8,6 +8,7 @@
 #include <stm32/usart.h>
 #include <stm32/rcc.h>
 #include <cm3/nvic.h>
+#include <stm32/exti.h>
 
 
 /* PROTOCOL NOTE
@@ -30,8 +31,10 @@ array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0}
 //Receive buffer
 array<uint8_t, 9> rxBuffer;
 array<uint8_t, 9> txBuffer;
+bool connected = false;
 
 namespace Display{
+    
     void init(){
         //USART RX pin
 		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN10);
@@ -41,7 +44,11 @@ namespace Display{
 		gpio_set_af(GPIO::PORTA, GPIO_AF7, GPIO::PIN9);
 
         //VSENSE pin
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO::PIN15);
+		gpio_mode_setup(GPIO::PORTC, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO::PIN13);
+        nvic_enable_irq(NVIC_EXTI3_IRQ);
+        exti_select_source(EXTI3, GPIO::PORTC);
+        exti_set_trigger(EXTI3, EXTI_TRIGGER_BOTH);
+        exti_enable_request(EXTI3);
 
 		//DMA Receive
 		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);
@@ -141,13 +148,8 @@ namespace Display{
         send(state);
     }
 
-    void setLed(uint8_t led, uint8_t visible){
-        if(visible){
-            state.at(8) = 0x07 & led;
-        }else{
-            state.at(8) = 0xe0;
-        }
-
+    void setLed(LED led){
+        state.at(8) = led;
         send(state);
     }
 
@@ -165,7 +167,11 @@ namespace Display{
     }
 
     LED getLed(){
-        return (LED)(state.at(8) & 0x07);
+        return (LED)(state.at(8));
+    }
+
+    bool getConnected(){
+        return connected;
     }
 }
 
@@ -199,3 +205,11 @@ extern "C" void DMA2_Channel4_IRQHandler(){
     
 }
 
+extern "C" void EXTI3_IRQHandler(){
+    exti_reset_request(EXTI3);
+    if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
+        connected = false;
+    }else{
+        connected = true;
+    }
+}

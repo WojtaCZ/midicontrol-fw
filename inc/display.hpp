@@ -27,6 +27,7 @@ namespace Display{
     uint8_t getVerse();
     char getLetter();
     LED getLed();
+    bool getConnected();
 
 }
 

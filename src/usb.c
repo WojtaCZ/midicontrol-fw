@@ -24,6 +24,8 @@
 extern void comm_decode(char * data, int len);
 extern void midi_send(char * data, int len);
 
+uint8_t buffer[4];
+
 usbd_device *usbd_fs_device;
 
 #define INTERFACE_COUNT 4
@@ -108,7 +110,7 @@ static const struct usb_endpoint_descriptor bulk_endp[] = {{
 	.bDescriptorType = USB_DT_ENDPOINT,
 	.bEndpointAddress = ENDPOINT_MIDI_DATA_OUT,
 	.bmAttributes = USB_ENDPOINT_ATTR_BULK,
-	.wMaxPacketSize = 0x40,
+	.wMaxPacketSize = 64,
 	.bInterval = 0x00,
 
 	.extra = &midi_bulk_endp[0],
@@ -118,7 +120,7 @@ static const struct usb_endpoint_descriptor bulk_endp[] = {{
 	.bDescriptorType = USB_DT_ENDPOINT,
 	.bEndpointAddress = ENDPOINT_MIDI_DATA_IN,
 	.bmAttributes = USB_ENDPOINT_ATTR_BULK,
-	.wMaxPacketSize = 0x40,
+	.wMaxPacketSize = 64,
 	.bInterval = 0x00,
 
 	.extra = &midi_bulk_endp[1],
