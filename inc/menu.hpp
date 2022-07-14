@@ -68,6 +68,30 @@ namespace GUI{
 		CS
 	};
 
+	class Splash{
+		public:
+			enum class CallbackType{
+				NONE,
+				FUNCTION
+			};
+		private:
+			string title;
+			string subtitle;
+			string comment;
+			CallbackType clbType;
+		public:
+		void (*callback)(Splash * splash) = nullptr;
+			Splash(string title, string subtitle = "", string comment = "") : title(title), subtitle(subtitle), comment(comment), clbType(CallbackType::NONE){};
+			Splash(string title, string subtitle, string comment, void (*callback)(Splash * splash)) : title(title), subtitle(subtitle), comment(comment), callback(callback), clbType(CallbackType::FUNCTION){};
+			void setTitle(string title);
+			void setSubtitle(string subtitle);
+			void setComment(string comment);
+			string getTitle();
+			string getSubtitle();
+			string getComment();
+			CallbackType callbackType();
+	};
+
 	//Menu Item class
 	class Item{
 		public:
@@ -169,7 +193,11 @@ namespace GUI{
 	};
 
 	void display(Menu * menu);
+	void display(Splash * splash);
+	void displayActiveMenu();
+	void displayActiveSplash();
 	void render(void);
+	void renderSplash();
 	void keypress(UserInput::Key key);
 	void back(Item * itm);
 	void scroll_callback(void);

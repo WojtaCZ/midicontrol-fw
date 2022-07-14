@@ -4,6 +4,7 @@
 #include "base.hpp"
 
 #include <cstdint>
+#include <functional>
 
 class Scheduler{
     private:
@@ -11,13 +12,17 @@ class Scheduler{
         int interval;
         //Callback to a function
         void (*callback)();
+        //function <void(void)> lambdaCallback;
         //Flags
         uint16_t flags;
         //Counter
         int counter;
+        //Function type
+        bool isLambda;
     public:
         //Scheduler constructor
-        Scheduler(int interval, void (*callback)(), uint16_t flags = 0, int counter = 0) : interval(interval), callback(callback), flags(flags), counter(counter){};
+        Scheduler(int interval, void (*callback)(), uint16_t flags = 0, int counter = 0) : interval(interval), callback(callback), flags(flags), counter(counter), isLambda(false){};
+        //Scheduler(int interval, function<void(void)> & callback, uint16_t flags = 0, int counter = 0) : interval(interval), lambdaCallback(callback), flags(flags), counter(counter), isLambda(true){};
         void increment();
         void dispatch();
         uint16_t setFlags(uint16_t flags);

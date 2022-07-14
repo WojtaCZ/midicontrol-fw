@@ -12,35 +12,43 @@ Scheduler guiRenderScheduler(30, &GUI::render, Scheduler::PERIODICAL | Scheduler
 Scheduler menuScrollScheduler(2000, &GUI::scroll_callback, Scheduler::PERIODICAL | Scheduler::DISPATCH_ON_INCREMENT);
 
 namespace GUI{
-
+	//Variables global to the namespace
 	bool forceRender = 0;
 	int scrollIndex = 0;
 	bool hadScrollPause = false;
 	Language LANG = Language::CS;
+	bool displaySplash = true;
 
+	//Menu declarations
 	extern Menu menu_main;
 	extern Menu menu_songlist;
 
+	//Menu callback declarations
 	void toggleCallback(Item * itm);
 
-	
-
+	//Back button definition
 	Item itm_back({{Language::EN, "Back"},{Language::CS, "Zpet"}}, &back, Oled::Icon::LEFT_ARROW_SEL, Oled::Icon::LEFT_ARROW_UNSEL);
-	Checkbox chck_power({{Language::EN, "Organ Power"},{Language::CS, "Napajeni Varhan"}}, &toggleCallback);
 
-	void toggleCallback(Item * itm){
-		if(Base::CurrentSource::isEnabled()){
-			Base::CurrentSource::disable();
-			chck_power.setChecked(false);
-		}else{
-			Base::CurrentSource::enable();
-			chck_power.setChecked(true);
-		}
-	}
-
+	//Menu item definitions
 	Item itm_play({{Language::EN, "Play"},{Language::CS, "Prehraj"}}, &menu_songlist);
+
 	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}});
 
+	Checkbox chck_power({{Language::EN, "Organ Power"},{Language::CS, "Napajeni Varhan"}},
+		[](Item * itm){
+			if(Base::CurrentSource::isEnabled()){
+				Base::CurrentSource::disable();
+				chck_power.setChecked(false);
+			}else{
+				Base::CurrentSource::enable();
+				chck_power.setChecked(true);
+			}
+		}
+	);
+
+	
+	
+	//Menu definitions
 	Menu menu_main({{Language::EN, "Main menu"},{Language::CS, "Hlavni menu"}}, 
 		{
 			&itm_play,
@@ -51,7 +59,19 @@ namespace GUI{
 
 	Menu menu_songlist({{Language::EN, "Song list"},{Language::CS, "Seznam pisni"}},{&itm_back}, &menu_main);
 
+	void exit(Splash * s);
+	Splash splash_welcome(Base::DEVICE_NAME, Base::DEVICE_TYPE, Base::FW_VERSION, &exit);
+
+	void exit(Splash * s){
+		displaySplash = false;
+	}
+
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 	Menu * activeMenu = &menu_main;
+	Splash * activeSplash = &splash_welcome;
 
 	int Menu::getSelectedIndex(){
 		return this->selectedIndex;
@@ -151,6 +171,20 @@ namespace GUI{
 
 	void display(Menu * menu){
 		activeMenu = menu;
+		displaySplash = false;
+	}
+
+	void display(Splash * splash){
+		activeSplash = splash;
+		displaySplash = true;
+	}
+
+	void displayActiveMenu(){
+		displaySplash = false;
+	}
+
+	void displayActiveSplash(){
+		displaySplash = true;
 	}
 
 	void back(Item * itm){
@@ -159,6 +193,11 @@ namespace GUI{
 	}
 
 	void render(void){
+		//If there is a splash screen to display, render it
+		if(displaySplash){
+			renderSplash();
+			return;
+		}
 		//If there is nothing to update, return
 		if(!activeMenu->selectedIndexChanged() && !forceRender) return;
 		//Zero out the force render flag
@@ -205,6 +244,9 @@ namespace GUI{
 			scrollIndex = 0;
 			hadScrollPause = false;
 			menuScrollScheduler.pause();
+			menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
+			menuScrollScheduler.reset();
+			menuScrollScheduler.resume();
 		}else if (titleLength < 9) menuScrollScheduler.pause();
 
 		int indexShift = 0;
@@ -238,15 +280,79 @@ namespace GUI{
 		Oled::update();
 	}
 
+	void Splash::setTitle(string title){
+		this->title = title;
+	}
+
+	void Splash::setSubtitle(string subtitle){
+		this->subtitle = subtitle;
+	}
+
+	void Splash::setComment(string comment){
+		this->comment = comment;
+	}
+
+	string Splash::getTitle(){
+		return this->title;
+	}
+
+	string Splash::getSubtitle(){
+		return this->subtitle;
+	}
+
+	string Splash::getComment(){
+		return this->comment;
+	}
+
+	Splash::CallbackType Splash::callbackType(){
+		return this->clbType;
+	}
+
+
+	void renderSplash(){
+		Oled::fill(Oled::Color::BLACK);
+
+		Oled::setCursor({64 - (activeSplash->getTitle().substr(0,11).length() * 11)/2, 0});
+		Oled::writeString(activeSplash->getTitle().substr(0,11), Font_11x18, Oled::Color::WHITE);
+
+		//If the text is too long to display, enable scrolling
+		if(activeSplash->getSubtitle().length() > 12 && !menuScrollScheduler.isActive()){
+			scrollIndex = 0;
+			hadScrollPause = false;
+			menuScrollScheduler.pause();
+			menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
+			menuScrollScheduler.reset();
+			menuScrollScheduler.resume();
+		}else if (activeSplash->getSubtitle().length() < 12) menuScrollScheduler.pause();
+
+		string reducedTitle = activeSplash->getSubtitle().substr(scrollIndex, 11);
+		Oled::setCursor({64 - (reducedTitle.length() * 11)/2, 25});
+		Oled::writeString(reducedTitle, Font_11x18, Oled::Color::WHITE);
+
+		Oled::setCursor({64 - (activeSplash->getComment().substr(0,18).length() * 7)/2, 53});
+		Oled::writeString(activeSplash->getComment().substr(0,18), Font_7x10, Oled::Color::WHITE);
+
+		Oled::wakeupCallback();
+		Oled::update();
+	}
+
 	void scroll_callback(){
 
-		if(activeMenu->items.empty()) return;
-
+		int limit = 9;
 		size_t titleLength = activeMenu->getSelectedItem().getTitle(LANG).length();
+
+		if(activeMenu->items.empty() && !displaySplash) return;
+
+		if(displaySplash){
+			limit = 12;
+			titleLength = activeSplash->getSubtitle().length();
+		}
+
+		
 		if(hadScrollPause){
-			if(scrollIndex < titleLength - 9){
+			if(scrollIndex < titleLength - limit){
 				scrollIndex++;
-			}else if(scrollIndex == titleLength - 9){
+			}else if(scrollIndex == titleLength - limit){
 				menuScrollScheduler.pause();
 				menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 				menuScrollScheduler.reset();
@@ -269,6 +375,14 @@ namespace GUI{
 	}
 	
 	void keypress(UserInput::Key key){
+
+		if(displaySplash){
+			if(activeSplash->callbackType() == Splash::CallbackType::FUNCTION && key == UserInput::Key::ENTER){
+				(*activeSplash->callback)(activeSplash);
+			}
+
+			return;
+		}
 
 		if(Oled::isSleeping()){
 			Oled::wakeupCallback();

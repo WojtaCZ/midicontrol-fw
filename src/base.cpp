@@ -30,14 +30,14 @@ namespace Base{
 					.pll_source = RCC_PLLCFGR_PLLSRC_HSE,
 					.hpre = RCC_CFGR_HPRE_NODIV,
 					.ppre1 = RCC_CFGR_PPREx_NODIV,
-					.ppre2 = RCC_CFGR_PPREx_NODIV,
+					.ppre2 = RCC_CFGR_PPREx_DIV8,
 					.vos_scale = PWR_SCALE1,
 					.boost = true,
 					.flash_config = FLASH_ACR_DCEN | FLASH_ACR_ICEN,
 					.flash_waitstates = 6,
 					.ahb_frequency  = 144000000,
 					.apb1_frequency = 144000000,
-					.apb2_frequency = 144000000,
+					.apb2_frequency = 18000000,
 				}
 			};
 
