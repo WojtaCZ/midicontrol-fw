@@ -1,6 +1,5 @@
 #include "ble.hpp"
 #include "menu.hpp"
-#include "comm.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -20,18 +19,19 @@ PA2 - TX
 PA3 - RX
 PA0 - MODE
 PA1 - RST
-
-
 */
 using namespace std;
 
 extern "C" uint32_t usb_cdc_tx(void *buf, int len);
+extern "C" void comm_decode(char * data, int len);
 
 namespace BLE{
 
 	unsigned char bleFifo[256];
 
 	uint8_t bleFifoIndex = 0, bleGotMessage;
+
+	bool connected = false;
 
 	void init(void){
 
@@ -106,39 +106,52 @@ namespace BLE{
 
 	}
 
-}
-
-extern "C" void DMA1_Channel2_IRQHandler(){
-	dma_disable_channel(DMA1, DMA_CHANNEL2);
-	usart_disable_tx_dma(USART2);
-	dma_clear_interrupt_flags(DMA1, DMA_CHANNEL2, DMA_TCIF);
-    nvic_clear_pending_irq(NVIC_DMA1_CHANNEL2_IRQ);
-	
-}
-
-
-extern "C" void DMA1_Channel1_IRQHandler(){
-	dma_disable_channel(DMA1, DMA_CHANNEL1);
-	usart_disable_rx_dma(USART2);
-
-	dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&BLE::bleFifo[++BLE::bleFifoIndex]);
-    dma_set_number_of_data(DMA1, DMA_CHANNEL1, 1);
-
-	if(BLE::bleFifo[BLE::bleFifoIndex-1] == '%'){
-		memset(BLE::bleFifo, 0, BLE::bleFifoIndex);
-		BLE::bleFifoIndex = 0;
-		dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&BLE::bleFifo[BLE::bleFifoIndex]);
-	}else if(BLE::bleFifo[BLE::bleFifoIndex-1] == 0x0A){
-		comm_decode((char *)BLE::bleFifo, BLE::bleFifoIndex);
-		memset(BLE::bleFifo, 0, BLE::bleFifoIndex);
-		BLE::bleFifoIndex = 0;
-		dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&BLE::bleFifo[BLE::bleFifoIndex]);
+	bool isConnected(){
+		return connected;
 	}
 
-	dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
-    nvic_clear_pending_irq(NVIC_DMA1_CHANNEL1_IRQ);
-	usart_enable_rx_dma(USART2);
-	dma_enable_channel(DMA1, DMA_CHANNEL1);
-	usart_enable(USART2);
-}
+	extern "C" void DMA1_Channel2_IRQHandler(){
+		dma_disable_channel(DMA1, DMA_CHANNEL2);
+		usart_disable_tx_dma(USART2);
+		dma_clear_interrupt_flags(DMA1, DMA_CHANNEL2, DMA_TCIF);
+		nvic_clear_pending_irq(NVIC_DMA1_CHANNEL2_IRQ);
+	
+	}
 
+
+	extern "C" void DMA1_Channel1_IRQHandler(){
+		dma_disable_channel(DMA1, DMA_CHANNEL1);
+		usart_disable_rx_dma(USART2);
+
+		dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&bleFifo[++bleFifoIndex]);
+		dma_set_number_of_data(DMA1, DMA_CHANNEL1, 1);
+
+		if(bleFifo[bleFifoIndex-1] == '%'){
+			if(string((char *)&bleFifo[0]).find("STREAM_OPEN") != string::npos){
+				connected = true;
+				GUI::renderForce();
+			}else if(string((char *)&bleFifo[0]).find("DISCONNECT") != string::npos){
+				connected = false;
+				GUI::renderForce();
+			}
+
+			memset(bleFifo, 0, bleFifoIndex);
+			bleFifoIndex = 0;
+			dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&bleFifo[bleFifoIndex]);
+		}else if(bleFifo[bleFifoIndex-1] == 0x0A){
+			comm_decode((char *)bleFifo, bleFifoIndex);
+			memset(bleFifo, 0, bleFifoIndex);
+			bleFifoIndex = 0;
+			dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)&bleFifo[bleFifoIndex]);
+		}
+
+		dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
+		nvic_clear_pending_irq(NVIC_DMA1_CHANNEL1_IRQ);
+		usart_enable_rx_dma(USART2);
+		dma_enable_channel(DMA1, DMA_CHANNEL1);
+		usart_enable(USART2);
+	}
+
+
+
+}

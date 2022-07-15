@@ -20,25 +20,29 @@
 #include <cm3/nvic.h>
 #include <cm3/systick.h>
 #include <cm3/assert.h>
+#include <cm3/scb.h>
 
 extern Scheduler oledSleepScheduler;
 extern Scheduler keypressScheduler;
 extern Scheduler keepaliveScheduler;
 extern Scheduler guiRenderScheduler;
 extern Scheduler menuScrollScheduler;
+extern Scheduler commTimeoutScheduler;
 
-Scheduler startupSplashScheduler(2000, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume();}, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
-
-
-
+Scheduler startupSplashScheduler(2000, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
 extern "C" void usb_init();
 
 extern "C" void SystemInit(void) {
+
 	//Initialize io and other stuff related to the base unit
 	Base::init();
 	//Initialize the OLED
 	Oled::init();
+	//Check if we want to enable DFU
+	//Base::dfuCheck();
+	//Start the watchdog
+	Base::wdtStart();
 	//Initialize MIDI
 	MIDI::init();
 	//Initialize USB
@@ -55,30 +59,25 @@ extern "C" void SystemInit(void) {
 }
 
 extern "C" void SysTick_Handler(void){
-	//commTimeout.check();
-	//keepaliveScheduler.increment();
 	oledSleepScheduler.increment();
 	keypressScheduler.increment();
 	guiRenderScheduler.increment();
 	menuScrollScheduler.increment();
 	startupSplashScheduler.increment();
-	//Process inputs 
+	commTimeoutScheduler.increment();
 }
 
 
 extern "C" int main(void)
 {
-	
-	Display::send({1, 2, 3, 4, 5, 6, 7, 8, 9});
-
 	while (1) {
 		int i = 0;
-		while(i < 1000000){
+		while(i < 100){
 			__asm__("nop");
 			i++;
 		}
 
-		
+		iwdg_reset();
 
 	}
 
@@ -89,7 +88,13 @@ extern "C" int main(void)
 
 extern "C" void HardFault_Handler(void) {
 	Base::CurrentSource::disable();
+
+	scb_reset_system();
+	scb_reset_core();
+
 	while(1){
 		__asm__("nop");
 	}
 }
+
+

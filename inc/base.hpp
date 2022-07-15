@@ -14,6 +14,8 @@ namespace Base{
     static string FW_VERSION = "2.0.0";
 
     void init(void);
+	void dfuCheck();
+	void wdtStart();
 
     namespace CurrentSource{
 		

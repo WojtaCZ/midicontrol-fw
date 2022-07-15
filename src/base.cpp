@@ -52,6 +52,12 @@ namespace Base{
 		rcc_wait_for_osc_ready(RCC_LSE);
 		pwr_enable_backup_domain_write_protect();
 
+		//Enable LSI
+		pwr_disable_backup_domain_write_protect();
+		rcc_osc_on(RCC_LSI);
+		rcc_wait_for_osc_ready(RCC_LSI);
+		pwr_enable_backup_domain_write_protect();
+
 		//Enable clock for peripherals
 		rcc_periph_clock_enable(RCC_GPIOA);
 		rcc_periph_clock_enable(RCC_GPIOB);
@@ -92,6 +98,32 @@ namespace Base{
 
 		//Initialize rotary encoder GPIO
 		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO::PIN0 | GPIO::PIN1 | GPIO::PIN2);
+	}
+
+	void dfuCheck(){
+		//If the encoder isnt pressed
+		if(gpio_get(GPIO::PORTB, GPIO::PIN1)) return;
+
+		int i = 0;
+
+		while(i < 1000)
+		{
+			i++;
+			if(gpio_get(GPIO::PORTB, GPIO::PIN1)) return;
+		}
+		
+		GUI::display(new GUI::Splash("MIDIControl", "DFU MODE", "Program over USB"));
+		GUI::render();
+
+		#define FW_ADDR    0x1FFF0000
+		SCB_VTOR = FW_ADDR & 0xFFFF;
+		__asm__ volatile("msr msp, %0"::"g"(*(volatile uint32_t *)FW_ADDR));
+		(*(void (**)())(FW_ADDR + 4))();
+	}
+
+	void wdtStart(){
+		iwdg_set_period_ms(2000);
+		iwdg_start();
 	}
 }
 
@@ -195,14 +227,4 @@ namespace Base::Encoder{
 
 
 //Some bootloader magic happening here
-/*
-void bootloader_check(){
-	#define FW_ADDR    0x1FFF0000
-
-	SCB_VTOR = FW_ADDR & 0xFFFF;
-
-	__asm__ volatile("msr msp, %0"::"g"(*(volatile uint32_t *)FW_ADDR));
-
-	(*(void (**)())(FW_ADDR + 4))();
-}*/
 

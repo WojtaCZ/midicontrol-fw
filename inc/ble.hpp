@@ -7,6 +7,7 @@
 namespace BLE{
     void init(void);
     void send(std::string data);
+    bool isConnected();
 }
 
 

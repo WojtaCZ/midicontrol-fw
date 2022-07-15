@@ -77,88 +77,89 @@ namespace MIDI{
 		nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ);
 		dma_enable_channel(DMA1, DMA_CHANNEL5);
 	}
-}
 
-//Transmit handler for MIDI
-extern "C" void DMA1_Channel5_IRQHandler(void){
-	dma_disable_channel(DMA1, DMA_CHANNEL5);
-	usart_disable_tx_dma(USART3);
-	dma_clear_interrupt_flags(DMA1, DMA_CHANNEL5, DMA_TCIF);
-    nvic_clear_pending_irq(NVIC_DMA1_CHANNEL5_IRQ);
-}
-
-
-//Receive handler for midi
-extern "C" void DMA1_Channel4_IRQHandler(void){
-	//Disable DMA so it doesnt fire while were in the interrupt
-	dma_disable_channel(DMA1, DMA_CHANNEL4);
-	usart_disable_rx_dma(USART3);
-
-	//Read the message type
-	uint8_t msgType = MIDI::fifo.at(0);
-
-	//If the message type is valid
-	if((msgType & 0xF0) >= 0x80 && !MIDI::gotMessage){
-		MIDI::gotMessage = true;
-
-		//Treat messages with 2 bytes
-		if((msgType >= 0x80 && msgType <= 0xBF) || (msgType & 0xF0) == 0xE0 || msgType == 0xF2 || msgType == 0xF0){
-			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex]));
-    		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 2);
-			MIDI::fifoIndex += 2;
-		}else if((msgType & 0xF0) == 0xC0 ||  (msgType & 0xF0) == 0xD0 || msgType == 0xF3){
-			//Treat sysex and other variable size messages
-			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-    		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-		}else{
-			MIDI::fifoIndex = 0;
-			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-    		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-		}
-
-
-	}else if(MIDI::gotMessage){
-		//If the message type was sysex and we got sysex end
-		if(msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex-1) == 0xF7){
-			MIDI::fifoIndex = 0;
-			MIDI::fifo.at(MIDI::fifoIndex) = 0;
-			MIDI::gotMessage = false;
-			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-    		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-		}else if(msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex-1) != 0xF7){
-			//If the message type was sysex and we got data
-			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-    		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-		}else{
-			//Other messages
-			//Create a buffer to send over usb
-			array<uint8_t, 4> buffer = {(uint8_t)((uint8_t)(MIDI::fifo.at(0) >> 4) & 0x0F), MIDI::fifo.at(0),MIDI::fifo.at(1),MIDI::fifo.at(2)};
-
-			//Transmit the buffer
-			usb_midi_tx(&buffer[0], 4);
-
-			//Begin a new receive
-			MIDI::fifoIndex = 0;
-			MIDI::gotMessage = false;
-			MIDI::fifo.at(MIDI::fifoIndex) = 0;
-			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-    		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-		}
-	}else{
-		//If an invalid midi message was received, continue receiving
-		MIDI::gotMessage = false;
-		MIDI::fifoIndex = 0;
-		MIDI::fifo.at(MIDI::fifoIndex) = 0;
-		dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-    	dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+	//Transmit handler for MIDI
+	extern "C" void DMA1_Channel5_IRQHandler(void){
+		dma_disable_channel(DMA1, DMA_CHANNEL5);
+		usart_disable_tx_dma(USART3);
+		dma_clear_interrupt_flags(DMA1, DMA_CHANNEL5, DMA_TCIF);
+		nvic_clear_pending_irq(NVIC_DMA1_CHANNEL5_IRQ);
 	}
 
-	//Reenable the DMA
-	dma_clear_interrupt_flags(DMA1, DMA_CHANNEL4, DMA_TCIF);
-    nvic_clear_pending_irq(NVIC_DMA1_CHANNEL4_IRQ);
-	usart_enable_rx_dma(USART3);
-	dma_enable_channel(DMA1, DMA_CHANNEL4);
-	usart_enable(USART3);
+
+	//Receive handler for midi
+	extern "C" void DMA1_Channel4_IRQHandler(void){
+		//Disable DMA so it doesnt fire while were in the interrupt
+		dma_disable_channel(DMA1, DMA_CHANNEL4);
+		usart_disable_rx_dma(USART3);
+
+		//Read the message type
+		uint8_t msgType = MIDI::fifo.at(0);
+
+		//If the message type is valid
+		if((msgType & 0xF0) >= 0x80 && !MIDI::gotMessage){
+			MIDI::gotMessage = true;
+
+			//Treat messages with 2 bytes
+			if((msgType >= 0x80 && msgType <= 0xBF) || (msgType & 0xF0) == 0xE0 || msgType == 0xF2 || msgType == 0xF0){
+				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex]));
+				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 2);
+				MIDI::fifoIndex += 2;
+			}else if((msgType & 0xF0) == 0xC0 ||  (msgType & 0xF0) == 0xD0 || msgType == 0xF3){
+				//Treat sysex and other variable size messages
+				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
+				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+			}else{
+				MIDI::fifoIndex = 0;
+				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
+				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+			}
+
+
+		}else if(MIDI::gotMessage){
+			//If the message type was sysex and we got sysex end
+			if(msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex-1) == 0xF7){
+				MIDI::fifoIndex = 0;
+				MIDI::fifo.at(MIDI::fifoIndex) = 0;
+				MIDI::gotMessage = false;
+				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
+				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+			}else if(msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex-1) != 0xF7){
+				//If the message type was sysex and we got data
+				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
+				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+			}else{
+				//Other messages
+				//Create a buffer to send over usb
+				array<uint8_t, 4> buffer = {(uint8_t)((uint8_t)(MIDI::fifo.at(0) >> 4) & 0x0F), MIDI::fifo.at(0),MIDI::fifo.at(1),MIDI::fifo.at(2)};
+
+				//Transmit the buffer
+				usb_midi_tx(&buffer[0], 4);
+
+				//Begin a new receive
+				MIDI::fifoIndex = 0;
+				MIDI::gotMessage = false;
+				MIDI::fifo.at(MIDI::fifoIndex) = 0;
+				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
+				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+			}
+		}else{
+			//If an invalid midi message was received, continue receiving
+			MIDI::gotMessage = false;
+			MIDI::fifoIndex = 0;
+			MIDI::fifo.at(MIDI::fifoIndex) = 0;
+			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
+			dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+		}
+
+		//Reenable the DMA
+		dma_clear_interrupt_flags(DMA1, DMA_CHANNEL4, DMA_TCIF);
+		nvic_clear_pending_irq(NVIC_DMA1_CHANNEL4_IRQ);
+		usart_enable_rx_dma(USART3);
+		dma_enable_channel(DMA1, DMA_CHANNEL4);
+		usart_enable(USART3);
+	}
+
 }
 
 //Wrapper for usb.h to call

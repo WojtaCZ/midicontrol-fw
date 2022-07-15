@@ -198,16 +198,14 @@ namespace GUI{
 	void displayActiveSplash();
 	void render(void);
 	void renderSplash();
+	void renderForce();
 	void keypress(UserInput::Key key);
 	void back(Item * itm);
 	void scroll_callback(void);
-
-
-	void show_splash(void (*callback)(void), void * param);
-	void hide_splash(void);
-
-	void start_splash(void);
-	void error_splash(char * msg);
+	
+	extern Menu menu_main;
+	extern Item itm_back;
+	extern Checkbox chck_power;
 
 }
 

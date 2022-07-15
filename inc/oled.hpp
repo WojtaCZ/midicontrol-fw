@@ -47,7 +47,8 @@ namespace Oled{
         CHECKBOX_UNSEL_UNCH = 38,
         CHECKBOX_UNSEL_CHCK = 39,
         DOT_SEL = 32,
-        DOT_UNSEL = 33
+        DOT_UNSEL = 33,
+        SIG_4 = 18
     };
 
     void setCoordinates(pair<uint16_t, uint16_t> coord);

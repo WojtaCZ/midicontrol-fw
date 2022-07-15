@@ -219,60 +219,7 @@ namespace LED{
 		for (index = 0; index < ((strip == LED_STRIP_FRONT) ? LED_FRONT_NUMBER : LED_BACK_NUMBER); index++)
 			set_color(strip, index, RED, GREEN, BLUE);
 	}
-/*
-	void fill_buff_black(uint8_t strip){
-		uint32_t index, buffIndex;
-		buffIndex = 0;
-
-		for (index = 0; index < LED_RESET_SLOTS_BEGIN; index++) {
-			if(strip == LED_STRIP_FRONT){
-				ledFrontBuffer[buffIndex] = LED_RESET;
-			}else ledBackBuffer[buffIndex] = LED_RESET;
-			
-			buffIndex++;
-		}
-		for (index = 0; index < ((strip == LED_STRIP_FRONT) ? LED_FRONT_DATA_SIZE : LED_BACK_DATA_SIZE); index++) {
-			if(strip == LED_STRIP_FRONT){
-				ledFrontBuffer[buffIndex] = LED_0;
-			}else ledBackBuffer[buffIndex] = LED_0;
-			buffIndex++;
-		}
-		buffIndex++;
-		for (index = 0; index < LED_RESET_SLOTS_END; index++) {
-			if(strip == LED_STRIP_FRONT){
-				ledFrontBuffer[buffIndex] = 0;
-			}else ledBackBuffer[buffIndex] = 0;
-			buffIndex++;
-		}
-	}
-
-	void fill_buff_white(uint8_t strip){
-		uint32_t index, buffIndex;
-		buffIndex = 0;
-
-		for (index = 0; index < LED_RESET_SLOTS_BEGIN; index++) {
-			if(strip == LED_STRIP_FRONT){
-				ledFrontBuffer[buffIndex] = LED_RESET;
-			}else ledBackBuffer[buffIndex] = LED_RESET;
-			
-			buffIndex++;
-		}
-		for (index = 0; index < ((strip == LED_STRIP_FRONT) ? LED_FRONT_DATA_SIZE : LED_BACK_DATA_SIZE); index++) {
-			if(strip == LED_STRIP_FRONT){
-				ledFrontBuffer[buffIndex] = LED_1;
-			}else ledBackBuffer[buffIndex] = LED_1;
-			buffIndex++;
-		}
-		buffIndex++;
-		for (index = 0; index < LED_RESET_SLOTS_END; index++) {
-			if(strip == LED_STRIP_FRONT){
-				ledFrontBuffer[buffIndex] = 0;
-			}else ledBackBuffer[buffIndex] = 0;
-			buffIndex++;
-		}
-	}
-*/
-
+	
 	void Peripheral::setColor(Color color){
 		uint8_t tempBuffer[24];
 		uint32_t i;

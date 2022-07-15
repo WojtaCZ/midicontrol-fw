@@ -26,15 +26,16 @@ Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most
 */
 
 using namespace std;
-//Default state - all off
-array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0};
-//Receive buffer
-array<uint8_t, 9> rxBuffer;
-array<uint8_t, 9> txBuffer;
-bool connected = false;
 
 namespace Display{
-    
+    //Default state - all off
+    array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0};
+    //Receive buffer
+    array<uint8_t, 9> rxBuffer;
+    array<uint8_t, 9> txBuffer;
+    bool connected = false;
+
+
     void init(){
         //USART RX pin
 		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN10);
@@ -45,10 +46,10 @@ namespace Display{
 
         //VSENSE pin
 		gpio_mode_setup(GPIO::PORTC, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO::PIN13);
-        nvic_enable_irq(NVIC_EXTI3_IRQ);
-        exti_select_source(EXTI3, GPIO::PORTC);
-        exti_set_trigger(EXTI3, EXTI_TRIGGER_BOTH);
-        exti_enable_request(EXTI3);
+        nvic_enable_irq(NVIC_EXTI15_10_IRQ);
+        exti_select_source(EXTI13, GPIO::PORTC);
+        exti_set_trigger(EXTI13, EXTI_TRIGGER_BOTH);
+        exti_enable_request(EXTI13);
 
 		//DMA Receive
 		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);
@@ -97,6 +98,7 @@ namespace Display{
     }
 
     void send(array<uint8_t, 9> data){
+        if(!connected) return; 
         txBuffer = data;
         dma_disable_channel(DMA2, DMA_CHANNEL3);
         dma_set_peripheral_address(DMA2, DMA_CHANNEL4, (uint32_t)&USART1_TDR);
@@ -173,43 +175,44 @@ namespace Display{
     bool getConnected(){
         return connected;
     }
-}
 
-extern "C" void USART1_IRQHandler(){
-    //if we get an incomplete frame, throw it away
-    if(dma_get_number_of_data(DMA2, DMA_CHANNEL3) != 9){
-        dma_disable_channel(DMA2, DMA_CHANNEL3);
-        dma_set_peripheral_address(DMA2, DMA_CHANNEL3, (uint32_t)&USART1_RDR);
-        dma_set_memory_address(DMA2, DMA_CHANNEL3, (uint32_t)&rxBuffer[0]);
-		dma_set_number_of_data(DMA2, DMA_CHANNEL3, 9);
+    extern "C" void EXTI15_10_IRQHandler(){
+        exti_reset_request(EXTI13);
+        if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
+            connected = false;
+        }else{
+            connected = true;
+        }
+    }
+
+    extern "C" void USART1_IRQHandler(){
+        //if we get an incomplete frame, throw it away
+        if(dma_get_number_of_data(DMA2, DMA_CHANNEL3) != 9){
+            dma_disable_channel(DMA2, DMA_CHANNEL3);
+            dma_set_peripheral_address(DMA2, DMA_CHANNEL3, (uint32_t)&USART1_RDR);
+            dma_set_memory_address(DMA2, DMA_CHANNEL3, (uint32_t)&rxBuffer[0]);
+            dma_set_number_of_data(DMA2, DMA_CHANNEL3, 9);
+            dma_enable_channel(DMA2, DMA_CHANNEL3);
+        }
+
+        //Clear the flags
+        USART1_ICR |= USART_ISR_RTOF;
+        nvic_clear_pending_irq(NVIC_USART1_IRQ);    
+    }
+
+    extern "C" void DMA2_Channel3_IRQHandler(){
+        state = rxBuffer;
+        dma_clear_interrupt_flags(DMA2, DMA_CHANNEL3, DMA_TCIF);
+        nvic_clear_pending_irq(NVIC_DMA2_CHANNEL3_IRQ);
+    }
+
+    extern "C" void DMA2_Channel4_IRQHandler(){
+        dma_disable_channel(DMA2, DMA_CHANNEL4);
+        usart_disable_tx_dma(USART1);
+        dma_clear_interrupt_flags(DMA2, DMA_CHANNEL4, DMA_TCIF);
+        nvic_clear_pending_irq(NVIC_DMA2_CHANNEL4_IRQ);
         dma_enable_channel(DMA2, DMA_CHANNEL3);
-    }
-
-    //Clear the flags
-    USART1_ICR |= USART_ISR_RTOF;
-    nvic_clear_pending_irq(NVIC_USART1_IRQ);    
-}
-
-extern "C" void DMA2_Channel3_IRQHandler(){
-    state = rxBuffer;
-    dma_clear_interrupt_flags(DMA2, DMA_CHANNEL3, DMA_TCIF);
-    nvic_clear_pending_irq(NVIC_DMA2_CHANNEL3_IRQ);
-}
-
-extern "C" void DMA2_Channel4_IRQHandler(){
-	dma_disable_channel(DMA2, DMA_CHANNEL4);
-	usart_disable_tx_dma(USART1);
-	dma_clear_interrupt_flags(DMA2, DMA_CHANNEL4, DMA_TCIF);
-    nvic_clear_pending_irq(NVIC_DMA2_CHANNEL4_IRQ);
-    dma_enable_channel(DMA2, DMA_CHANNEL3);
-    
-}
-
-extern "C" void EXTI3_IRQHandler(){
-    exti_reset_request(EXTI3);
-    if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
-        connected = false;
-    }else{
-        connected = true;
+        
     }
 }
+

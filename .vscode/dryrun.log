@@ -1,0 +1,6 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory '/mnt/data/programovani/stm32/midicontrol-fw'
+make: Leaving directory '/mnt/data/programovani/stm32/midicontrol-fw'
+ 
+make: *** No targets specified and no makefile found.  Stop.
+
