@@ -28,6 +28,8 @@ namespace Display{
     char getLetter();
     LED getLed();
     bool getConnected();
+    array<uint8_t, 9> * getRawState();
+    uint8_t getRawState(int index);
 
 }
 

@@ -1,6 +1,5 @@
 #include "display.hpp"
 #include "base.hpp"
-
 #include <stm32/gpio.h>
 #include <stm32/timer.h>
 #include <stm32/dma.h>
@@ -27,6 +26,8 @@ Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most
 
 using namespace std;
 
+extern "C" uint32_t usb_midi_tx(void *buf, int len);
+
 namespace Display{
     //Default state - all off
     array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0};
@@ -50,6 +51,13 @@ namespace Display{
         exti_select_source(EXTI13, GPIO::PORTC);
         exti_set_trigger(EXTI13, EXTI_TRIGGER_BOTH);
         exti_enable_request(EXTI13);
+        
+        //Check if the display wasnt aleready connected at startup
+        if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
+            connected = false;
+        }else{
+            connected = true;
+        }
 
 		//DMA Receive
 		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);
@@ -176,6 +184,15 @@ namespace Display{
         return connected;
     }
 
+    array<uint8_t, 9> * getRawState(){
+        return &state;
+    }
+
+    uint8_t getRawState(int index){
+        if(index > state.size() || index < 0) return 0;
+        return state.at(index);
+    }
+
     extern "C" void EXTI15_10_IRQHandler(){
         exti_reset_request(EXTI13);
         if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
@@ -200,10 +217,15 @@ namespace Display{
         nvic_clear_pending_irq(NVIC_USART1_IRQ);    
     }
 
+    //Receive complete interrupt
     extern "C" void DMA2_Channel3_IRQHandler(){
         state = rxBuffer;
         dma_clear_interrupt_flags(DMA2, DMA_CHANNEL3, DMA_TCIF);
         nvic_clear_pending_irq(NVIC_DMA2_CHANNEL3_IRQ);
+        
+        //If display state changes, send out the buffer over midi as sysex
+        uint8_t buff[] = {0xF0, 0x7E, state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7], state[8], 0xF7};
+        usb_midi_tx((void *) buff, 12);
     }
 
     extern "C" void DMA2_Channel4_IRQHandler(){

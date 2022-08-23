@@ -1,8 +1,9 @@
 #include "menu.hpp"
-#include "usb.h"
 #include "scheduler.hpp"
 #include "ble.hpp"
 #include "comm.hpp"
+#include "git.hpp"
+#include "display.hpp"
 
 #include <string>
 #include <algorithm>
@@ -13,7 +14,7 @@ using namespace std;
 Scheduler guiRenderScheduler(30, &GUI::render, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 Scheduler menuScrollScheduler(2000, &GUI::scroll_callback, Scheduler::PERIODICAL | Scheduler::DISPATCH_ON_INCREMENT);
 
-
+extern "C" uint32_t usb_midi_tx(void *buf, int len);
 
 namespace GUI{
 	//Variables global to the namespace
@@ -21,11 +22,13 @@ namespace GUI{
 	int scrollIndex = 0;
 	bool hadScrollPause = false;
 	Language LANG = Language::CS;
-	bool displaySplash = true;
+	ScreenType screenType = ScreenType::SPLASH;
 
 	//Menu declarations
 	extern Menu menu_main;
 	extern Menu menu_songlist;
+	extern Menu menu_settings;
+	extern Paragraph paragraph_firmwareInfo;
 
 	//Menu callback declarations
 	void toggleCallback(Item * itm);
@@ -40,7 +43,21 @@ namespace GUI{
 		}
 	);
 
-	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}});
+	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}}, [](Item * itm){
+		
+		//If recording is started, send over state of the display
+        uint8_t buff1[] = {0x04, 0xF0, 0x7E, Display::getRawState(0)};
+		uint8_t buff2[] = {0x04, Display::getRawState(1), Display::getRawState(2), Display::getRawState(3)};
+		uint8_t buff3[] = {0x04, Display::getRawState(4), Display::getRawState(5), Display::getRawState(6)};
+		uint8_t buff4[] = {0x07, Display::getRawState(7), Display::getRawState(8), 0xF7};
+        usb_midi_tx((void *) buff1, 4);
+		usb_midi_tx((void *) buff2, 4);
+		usb_midi_tx((void *) buff3, 4);
+		usb_midi_tx((void *) buff4, 4);
+
+	 });
+
+	Item itm_settings({{Language::EN, "Settings"},{Language::CS, "Nastaveni"}}, &menu_settings);
 
 	Checkbox chck_power({{Language::EN, "Organ Power"},{Language::CS, "Napajeni Varhan"}},
 		[](Item * itm){
@@ -54,6 +71,37 @@ namespace GUI{
 		}
 	);
 
+	Item itm_firmware({{Language::EN, "Firmware"},{Language::CS, "Firmware"}}, [](Item * itm){ display(&paragraph_firmwareInfo); });
+	Item itm_display({{Language::EN, "Display"},{Language::CS, "Display"}}, [](Item * itm){ 
+		string led;
+		switch(Display::getLed()){
+			case Display::LED::RED:
+				led = "RED";
+			break;
+			case Display::LED::GREEN:
+				led = "GREEN";
+			break;
+			case Display::LED::BLUE:
+				led = "BLUE";
+			break;
+			case Display::LED::YELLOW:
+				led = "YELLOW";
+			break;
+			case Display::LED::OFF:
+				led = "OFF";
+			break;
+		}
+
+		display(new Paragraph({
+				"Connected: " + string((Display::getConnected() == true) ? "true" : "false"),
+				"Song: " + to_string(Display::getSong()),
+				"Verse: " + to_string(Display::getVerse()),
+				"Letter: " + string(1, Display::getLetter()),
+				"LED: " + led
+				}, [](Paragraph * paragraph){ displayActiveMenu(); })
+		);
+		}
+	);
 	
 	
 	//Menu definitions
@@ -61,18 +109,31 @@ namespace GUI{
 		{
 			&itm_play,
 			&itm_record,
-			dynamic_cast<Item*>(&chck_power)
+			dynamic_cast<Item*>(&chck_power),
+			&itm_settings
 		}
 	);
 
 	Menu menu_songlist({{Language::EN, "Song list"},{Language::CS, "Seznam pisni"}},{&itm_back}, &menu_main);
 
-	void exit(Splash * s);
-	Splash splash_welcome(Base::DEVICE_NAME, Base::DEVICE_TYPE, Base::FW_VERSION, &exit);
+	Menu menu_settings({{Language::EN, "Settings"},{Language::CS, "Nastaveni"}}, 
+		{
+			&itm_firmware,
+			&itm_display,
+			&itm_back
+		}, &menu_main
+	);
 
-	void exit(Splash * s){
-		displaySplash = false;
-	}
+	Splash splash_welcome(Base::DEVICE_NAME, Base::DEVICE_TYPE, GIT::REVISION + " (" + GIT::DIRTY + ")", [](Splash * splash){ displayActiveMenu(); });
+	
+	Paragraph paragraph_firmwareInfo({
+		"Build: " + GIT::REVISION,
+	 	"Dirty: " + string((GIT::DIRTY == "dirty") ? "true" : "false"),
+		"Date: " + GIT::DATE, "Time: " + GIT::TIME,
+		"Branch: " + GIT::BRANCH},
+		[](Paragraph * paragraph){ displayActiveMenu();}
+	);
+
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -80,6 +141,7 @@ namespace GUI{
 
 	Menu * activeMenu = &menu_main;
 	Splash * activeSplash = &splash_welcome;
+	Paragraph * activeParagraph = nullptr;
 
 	int Menu::getSelectedIndex(){
 		return this->selectedIndex;
@@ -183,7 +245,7 @@ namespace GUI{
 		menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 		scrollIndex = 0;
 		activeMenu = menu;
-		displaySplash = false;
+		screenType = ScreenType::MENU;
 		activeMenu->setSelectedIndex(0);
 		renderForce();
 	}
@@ -193,17 +255,31 @@ namespace GUI{
 		menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 		scrollIndex = 0;
 		activeSplash = splash;
-		displaySplash = true;
+		screenType = ScreenType::SPLASH;
+		renderForce();
+	}
+
+	void display(Paragraph * paragraph){
+		menuScrollScheduler.pause();
+		menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
+		scrollIndex = 0;
+		activeParagraph = paragraph;
+		screenType = ScreenType::PARAGRAPH;
 		renderForce();
 	}
 
 	void displayActiveMenu(){
-		displaySplash = false;
+		screenType = ScreenType::MENU;
 		renderForce();
 	}
 
 	void displayActiveSplash(){
-		displaySplash = true;
+		screenType =  ScreenType::SPLASH;
+		renderForce();
+	}
+
+	void displayActiveParagraph(){
+		screenType =  ScreenType::PARAGRAPH;
 		renderForce();
 	}
 
@@ -214,10 +290,63 @@ namespace GUI{
 
 	void render(void){
 		//If there is a splash screen to display, render it
-		if(displaySplash){
+		if(screenType == ScreenType::SPLASH){
 			renderSplash();
 			return;
+		}else if(screenType == ScreenType::PARAGRAPH){
+			renderParagraph();
+			return;
+		}else if(screenType == ScreenType::MENU){
+			renderMenu();
+			return;
 		}
+	}
+
+	void Splash::setTitle(string title){
+		this->title = title;
+	}
+
+	void Splash::setSubtitle(string subtitle){
+		this->subtitle = subtitle;
+	}
+
+	void Splash::setComment(string comment){
+		this->comment = comment;
+	}
+
+	string Splash::getTitle(){
+		return this->title;
+	}
+
+	string Splash::getSubtitle(){
+		return this->subtitle;
+	}
+
+	string Splash::getComment(){
+		return this->comment;
+	}
+
+	Splash::CallbackType Splash::callbackType(){
+		return this->clbType;
+	}
+
+	void Paragraph::setText(vector<string> text){
+		this->text = text;
+	}
+
+	vector<string> Paragraph::getText(){
+		return this->text;
+	}
+
+	Paragraph::CallbackType Paragraph::callbackType(){
+		return this->clbType;
+	}
+
+	void renderForce(){
+		forceRender = true;
+	}
+
+	void renderMenu(){
 		//If there is nothing to update, return
 		if(!activeMenu->selectedIndexChanged() && !forceRender) return;
 		//Zero out the force render flag
@@ -274,7 +403,7 @@ namespace GUI{
 			menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 			menuScrollScheduler.reset();
 			menuScrollScheduler.resume();
-		}else if (titleLength < 9) menuScrollScheduler.pause();
+		}else if (titleLength <= 9) menuScrollScheduler.pause();
 
 		int indexShift = 0;
 
@@ -299,46 +428,13 @@ namespace GUI{
 			//Draw the menu item
 			Oled::setCursor({COL(1) + MENU_LEFT_OFFSET + MENU_SELECTOR_SPACING, ROW(i) + MENU_TOP_OFFSET + MENU_TEXT_SPACING*i});
 			//Title reduced to 9 characters to fit on screen
-			string reducedTitle = activeMenu->getSelectedItem(i - indexShift).getTitle(LANG).substr(i == indexShift ? scrollIndex : 0, 8);
+			string reducedTitle = activeMenu->getSelectedItem(i - indexShift).getTitle(LANG).substr(i == indexShift ? scrollIndex : 0, 9);
 			Oled::writeString(reducedTitle, MENU_FONT, Oled::Color::WHITE);
 			
 		}
 
 		Oled::update();
 	}
-
-	void Splash::setTitle(string title){
-		this->title = title;
-	}
-
-	void Splash::setSubtitle(string subtitle){
-		this->subtitle = subtitle;
-	}
-
-	void Splash::setComment(string comment){
-		this->comment = comment;
-	}
-
-	string Splash::getTitle(){
-		return this->title;
-	}
-
-	string Splash::getSubtitle(){
-		return this->subtitle;
-	}
-
-	string Splash::getComment(){
-		return this->comment;
-	}
-
-	Splash::CallbackType Splash::callbackType(){
-		return this->clbType;
-	}
-
-	void renderForce(){
-		forceRender = true;
-	}
-
 
 	void renderSplash(){
 		Oled::fill(Oled::Color::BLACK);
@@ -367,23 +463,37 @@ namespace GUI{
 		Oled::update();
 	}
 
+	void renderParagraph(){
+		Oled::fill(Oled::Color::BLACK);
+
+		int ycord = 0;
+		for(string line : activeParagraph->getText()){
+			Oled::setCursor({2, ycord});
+			Oled::writeString(line.substr(0,18), Font_7x10, Oled::Color::WHITE);
+			ycord += 12;
+		}
+
+		Oled::wakeupCallback();
+		Oled::update();
+	}
+
 	void scroll_callback(){
 
 		int limit = 9;
 		size_t titleLength = activeMenu->getSelectedItem().getTitle(LANG).length();
 
-		if(activeMenu->items.empty() && !displaySplash) return;
+		if(activeMenu->items.empty() && !(screenType == ScreenType::SPLASH)) return;
 
-		if(displaySplash){
+		if(screenType == ScreenType::SPLASH){
 			limit = 12;
 			titleLength = activeSplash->getSubtitle().length();
 		}
 
 		
 		if(hadScrollPause){
-			if(scrollIndex < titleLength - limit){
+			if(scrollIndex < titleLength - limit - 1){
 				scrollIndex++;
-			}else if(scrollIndex == titleLength - limit){
+			}else if(scrollIndex == titleLength - limit - 1){
 				menuScrollScheduler.pause();
 				menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 				menuScrollScheduler.reset();
@@ -407,12 +517,21 @@ namespace GUI{
 	
 	void keypress(UserInput::Key key){
 
-		if(displaySplash){
+		if(screenType == ScreenType::SPLASH){
 			if(activeSplash->callbackType() == Splash::CallbackType::FUNCTION && key == UserInput::Key::ENTER){
 				menuScrollScheduler.pause();
 				menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
 				scrollIndex = 0;
 				(*activeSplash->callback)(activeSplash);
+			}
+
+			return;
+		}else if(screenType == ScreenType::PARAGRAPH){
+			if(activeParagraph->callbackType() == Paragraph::CallbackType::FUNCTION && key == UserInput::Key::ENTER){
+				menuScrollScheduler.pause();
+				menuScrollScheduler.setInterval(MENU_SCROLL_PAUSE);
+				scrollIndex = 0;
+				(*activeParagraph->callback)(activeParagraph);
 			}
 
 			return;
