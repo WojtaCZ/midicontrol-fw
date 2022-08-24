@@ -28,6 +28,7 @@ extern Scheduler keepaliveScheduler;
 extern Scheduler guiRenderScheduler;
 extern Scheduler menuScrollScheduler;
 extern Scheduler commTimeoutScheduler;
+extern Scheduler dispChangeScheduler;
 
 Scheduler startupSplashScheduler(2000, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
@@ -65,6 +66,7 @@ extern "C" void SysTick_Handler(void){
 	menuScrollScheduler.increment();
 	startupSplashScheduler.increment();
 	commTimeoutScheduler.increment();
+	dispChangeScheduler.increment();
 }
 
 

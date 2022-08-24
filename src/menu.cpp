@@ -44,17 +44,8 @@ namespace GUI{
 	);
 
 	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}}, [](Item * itm){
-		
-		//If recording is started, send over state of the display
-        uint8_t buff1[] = {0x04, 0xF0, 0x7E, Display::getRawState(0)};
-		uint8_t buff2[] = {0x04, Display::getRawState(1), Display::getRawState(2), Display::getRawState(3)};
-		uint8_t buff3[] = {0x04, Display::getRawState(4), Display::getRawState(5), Display::getRawState(6)};
-		uint8_t buff4[] = {0x07, Display::getRawState(7), Display::getRawState(8), 0xF7};
-        usb_midi_tx((void *) buff1, 4);
-		usb_midi_tx((void *) buff2, 4);
-		usb_midi_tx((void *) buff3, 4);
-		usb_midi_tx((void *) buff4, 4);
-
+		//Send over state of the display when recording is started
+		Display::sendToMIDI();
 	 });
 
 	Item itm_settings({{Language::EN, "Settings"},{Language::CS, "Nastaveni"}}, &menu_settings);

@@ -18,6 +18,7 @@ namespace Display{
 
     void init();
     void send(array<uint8_t, 9> data);
+    void send();
     void setSong(uint16_t song, uint8_t visible);
     void setVerse(uint8_t verse, uint8_t visible);
     void setLetter(char letter, uint8_t visible);
@@ -28,10 +29,16 @@ namespace Display{
     char getLetter();
     LED getLed();
     bool getConnected();
+    bool wasChanged();
     array<uint8_t, 9> * getRawState();
     uint8_t getRawState(int index);
+    void setRawState(array<uint8_t, 9> state);
+    void setRawState(uint8_t data, int index);
+    uint8_t getRawSysex(int index);
+    void sendToMIDI();
 
 }
 
+extern "C" void display_setRawSysex(uint8_t data, int index);
 
 #endif

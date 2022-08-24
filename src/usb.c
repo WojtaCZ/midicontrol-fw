@@ -23,6 +23,8 @@
 //Wrappers for CPP functions 
 extern void comm_decode(char * data, int len);
 extern void midi_send(char * data, int len);
+extern void display_setRawSysex(uint8_t data, int index);
+
 
 uint8_t buffer[4];
 
@@ -458,23 +460,28 @@ static enum usbd_request_return_codes usb_cdc_control(usbd_device *usbd_dev, str
 
 /* SysEx identity message, preformatted with correct USB framing information */
 const uint8_t sysex_identity[] = {
-	0x04,	/* USB Framing (3 byte SysEx) */
-	0xf0,	/* SysEx start */
-	0x7e,	/* non-realtime */
-	0x00,	/* Channel 0 */
-	0x66,	/* Family code (byte 2) */
-	0x04,	/* USB Framing (3 byte SysEx) */
-	0x51,	/* Model number (byte 1) */
-	0x19,	/* Model number (byte 2) */
-	0x00,	/* Version number (byte 1) */
-	0x04,	/* USB Framing (3 byte SysEx) */
-	0x00,	/* Version number (byte 2) */
-	0x01,	/* Version number (byte 3) */
-	0x00,	/* Version number (byte 4) */
-	0x05,	/* USB Framing (1 byte SysEx) */
-	0xf7,	/* SysEx end */
-	0x00,	/* Padding */
-	0x00,	/* Padding */
+    0x04,	/* USB Framing (3 byte SysEx) */
+    0xf0,	/* SysEx start */
+    0x7e,	/* non-realtime */
+    0x00,	/* Channel 0 */
+    
+
+    0x04,	/* USB Framing (3 byte SysEx) */
+    0x66,	/* Family code (byte 2) */
+    0x51,	/* Model number (byte 1) */
+    0x19,	/* Model number (byte 2) */
+    
+
+    0x04,	/* USB Framing (3 byte SysEx) */
+    0x00,	/* Version number (byte 1) */
+    0x00,	/* Version number (byte 2) */
+    0x01,	/* Version number (byte 3) */
+    
+    
+    0x06,	/* USB Framing (1 byte SysEx) */
+    0x00,	/* Version number (byte 4) */
+    0xf7,	/* SysEx end */
+    0x00,	/* Padding */
 };
 
 static void usb_midi_rx(usbd_device *dev, uint8_t ep){
@@ -483,12 +490,24 @@ static void usb_midi_rx(usbd_device *dev, uint8_t ep){
 	uint8_t buf[64];
 	int len = usbd_ep_read_packet(dev, ENDPOINT_MIDI_DATA_OUT, buf, 64);
 
+    //If we received sysex intended to set the display state
+    if(buf[0] == 0x04 && buf[1] == 0xf0 && buf[2] == 0x7e && buf[3] == 0x01){
+        display_setRawSysex(buf[5], 1);
+        display_setRawSysex(buf[6], 2);
+        display_setRawSysex(buf[7], 3);
+        display_setRawSysex(buf[9], 4);
+        display_setRawSysex(buf[10], 5);
+        display_setRawSysex(buf[11], 6);
+        display_setRawSysex(buf[13], 7);
+        display_setRawSysex(buf[14], 8);
+    }
+
     //Send the received packet over MIDI
     midi_send(&buf[1], len);
 
-	if(len){
+	/*if(len){
 		usbd_ep_write_packet(dev, ENDPOINT_MIDI_DATA_IN, sysex_identity, sizeof(sysex_identity));
-	}
+	}*/
 }
 
 static void usb_cdc_rx(usbd_device *usbd_dev, uint8_t ep){
