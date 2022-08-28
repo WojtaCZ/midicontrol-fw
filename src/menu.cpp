@@ -66,6 +66,7 @@ namespace GUI{
 	Item itm_display({{Language::EN, "Display"},{Language::CS, "Display"}}, [](Item * itm){ 
 		string led;
 		switch(Display::getLed()){
+			
 			case Display::LED::RED:
 				led = "RED";
 			break;
