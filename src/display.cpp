@@ -29,7 +29,7 @@ using namespace std;
 
 namespace Display{
     //Default state - all off
-    array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0};
+    array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0x0e, 0xe0};
     //Receive buffer
     array<uint8_t, 9> rxBuffer;
     array<uint8_t, 9> txBuffer;
@@ -141,7 +141,7 @@ namespace Display{
 
     void setLetter(char letter, uint8_t visible){
         if(visible){
-            if(letter > 'E' || letter < 'A') letter = 'A';
+            if(letter > 'D' || letter < 'A') letter = 'A';
             state.at(7) = 0x0f & (letter - 55);
         }else{
             state.at(7) = 0xe0;

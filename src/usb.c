@@ -484,7 +484,7 @@ static void usb_midi_rx(usbd_device *dev, uint8_t ep){
 	int len = usbd_ep_read_packet(dev, ENDPOINT_MIDI_DATA_OUT, buf, 64);
 
     //Send the received packet over MIDI
-    midi_send(&buf[1], len);
+    midi_send(&buf[1], len-1);
 
 	if(len){
 		usbd_ep_write_packet(dev, ENDPOINT_MIDI_DATA_IN, sysex_identity, sizeof(sysex_identity));

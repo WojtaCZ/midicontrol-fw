@@ -16,10 +16,10 @@ extern "C" uint32_t usb_cdc_tx(void *buf, int len);
 extern "C" uint32_t usb_midi_tx(void *buf, int len);
 
 namespace MIDI{
-
 	array<uint8_t, 100> fifo;
 	int fifoIndex = 0;
 	bool gotMessage = 0;
+	vector<byte> fifoData;
 
 	void init(void){
 
@@ -69,9 +69,10 @@ namespace MIDI{
 	}
 
 	void send(vector<byte> data){
+		fifoData = data;
 		//Send the payload over MIDI
 		dma_set_peripheral_address(DMA1, DMA_CHANNEL5, reinterpret_cast<uint32_t>(&USART3_TDR));
-		dma_set_memory_address(DMA1, DMA_CHANNEL5, reinterpret_cast<uint32_t>(&data[0]));
+		dma_set_memory_address(DMA1, DMA_CHANNEL5, reinterpret_cast<uint32_t>(&fifoData[0]));
 		dma_set_number_of_data(DMA1, DMA_CHANNEL5, data.size());
 		usart_enable_tx_dma(USART3);
 		nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ);

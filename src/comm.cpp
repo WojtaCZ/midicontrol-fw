@@ -45,7 +45,9 @@ namespace Communication{
 		Command play = Command("music play", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
 			
-			}else if(type == Command::Type::SET) error(Error::unsupported);
+			}else if(type == Command::Type::SET){
+				send(play, Command::Type::SET, data);	
+			}
 
 		});
 
@@ -119,7 +121,7 @@ namespace Communication{
 					Display::setLetter('A', false);
 					ok();
 				}else{
-					if(!data.empty() && data.find_first_not_of("0123456789") == std::string::npos){
+					if(!data.empty()){
 						Display::setLetter(data.at(0), true);
 						ok();
 					}else{
