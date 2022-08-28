@@ -71,9 +71,9 @@ namespace Communication{
 		Command status = Command("display status", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
 				send(Display::getConnected() ? "connected" : "disconnected");
-			}else if(type == Command::Type::SET) error(Error::unsupported);
-
-			error(Error::unknown);
+			}else if(type == Command::Type::SET){
+				error(Error::unsupported);
+			}else error(Error::unknown);
 		});
 		Command song = Command("display song", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
@@ -90,9 +90,7 @@ namespace Communication{
 						error(Error::wrong_input);
 					}
 				}
-			}
-
-			error(Error::unknown);
+			}else error(Error::unknown);
 		});
 		Command verse = Command("display verse", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
@@ -109,9 +107,7 @@ namespace Communication{
 						error(Error::wrong_input);
 					}
 				}
-			}
-
-			error(Error::unknown);
+			}else error(Error::unknown);
 		});
 		Command letter = Command("display letter", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
@@ -121,16 +117,14 @@ namespace Communication{
 					Display::setLetter('A', false);
 					ok();
 				}else{
-					if(!data.empty()){
+					if(!data.empty() && data.find_first_not_of("ABCD") == std::string::npos){
 						Display::setLetter(data.at(0), true);
 						ok();
 					}else{
 						error(Error::wrong_input);
 					}
 				}
-			}
-
-			error(Error::unknown);
+			}else error(Error::unknown);
 		});
 
 		Command led = Command("display led", [](string data, Command::Type type){
@@ -173,9 +167,7 @@ namespace Communication{
 					Display::setLed(Display::LED::OFF);
 					ok();
 				}else error(Error::wrong_input);
-			}
-
-			error(Error::unknown);
+			}else error(Error::unknown);
 		});
 	}
 
@@ -325,7 +317,7 @@ namespace Communication{
 
 	void send(char c){
 		string data;
-		data = c + "\n\r";
+		data = string(1,c) + "\n\r";
 		usb_cdc_tx((void *)data.c_str(), data.length());
 	}
 

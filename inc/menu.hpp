@@ -68,6 +68,12 @@ namespace GUI{
 		CS
 	};
 
+	enum class ScreenType{
+		MENU,
+		SPLASH,
+		PARAGRAPH
+	};
+
 	class Splash{
 		public:
 			enum class CallbackType{
@@ -89,6 +95,24 @@ namespace GUI{
 			string getTitle();
 			string getSubtitle();
 			string getComment();
+			CallbackType callbackType();
+	};
+
+	class Paragraph{
+		public:
+			enum class CallbackType{
+				NONE,
+				FUNCTION
+			};
+		private:
+			vector<string> text;
+			CallbackType clbType;
+		public:
+			void (*callback)(Paragraph * paragraph) = nullptr;
+			Paragraph(vector<string> text) : text(text), clbType(CallbackType::NONE){};
+			Paragraph(vector<string> text, void (*callback)(Paragraph * paragraph)) : text(text), callback(callback), clbType(CallbackType::FUNCTION){};
+			void setText(vector<string> text);
+			vector<string> getText();
 			CallbackType callbackType();
 	};
 
@@ -194,10 +218,14 @@ namespace GUI{
 
 	void display(Menu * menu);
 	void display(Splash * splash);
+	void display(Paragraph * paragraph);
 	void displayActiveMenu();
 	void displayActiveSplash();
+	void displayActiveParagraph();
 	void render(void);
 	void renderSplash();
+	void renderMenu();
+	void renderParagraph();
 	void renderForce();
 	void keypress(UserInput::Key key);
 	void back(Item * itm);

@@ -106,8 +106,8 @@ namespace MIDI{
 				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex]));
 				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 2);
 				MIDI::fifoIndex += 2;
-			}else if((msgType & 0xF0) == 0xC0 ||  (msgType & 0xF0) == 0xD0 || msgType == 0xF3){
-				//Treat sysex and other variable size messages
+			}else if((msgType & 0xF0) == 0xC0 ||  (msgType & 0xF0) == 0xD0 || msgType == 0xF3 || msgType == 0xF1){
+				//Treat messages with one byte
 				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
 				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
 			}else{

@@ -28,6 +28,17 @@ set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/STM32G431CBTx_FLASH.ld)
 #base path for sources
 set(SOURCE_BASE ${CMAKE_SOURCE_DIR}/src)
 
+# Add a custom command that produces version.cpp, plus
+# a dummy output that's not actually produced, in order
+# to force version.cmake to always be re-run before the build
+include(git)
+
+add_custom_command(
+    OUTPUT ${CMAKE_SOURCE_DIR}/git.tmp
+    COMMAND ${CMAKE_COMMAND} -P
+            ${CMAKE_SOURCE_DIR}/cmake/git.cmake)
+
+
 set(SOURCES
 	# list your c/pp sources here
 	# cmake can do source globbing, but it is generally not recommended
@@ -38,7 +49,6 @@ set(SOURCES
 	${SOURCE_BASE}/display.cpp
     ${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/scheduler.cpp
-
 	${SOURCE_BASE}/ble.cpp
 	${SOURCE_BASE}/comm.cpp
 	${SOURCE_BASE}/led.cpp

@@ -24,7 +24,61 @@ namespace Oled{
     array<uint8_t, OLED_SCREENBUF_SIZE> screenBuffer;
     //Buffers used for initialization
     array<uint8_t, 4> pageBuffer;
-    array<uint8_t, 29> initBuffer;
+
+    const array<uint8_t, 29> initBuffer = {
+        //CMD type
+        OLED_MEM_CMD, 
+        //Display Off
+        0xae,
+        //Memory addressing mode
+        0x20, 
+        //00,Horizontal Addressing Mode;
+        //01,Vertical Addressing Mode;
+        //10,Page Addressing Mode (RESET); 
+        0x10, 
+        //Set page start address
+        0xb0, 
+        //COM Out scan direction
+        0xc8, 
+        //Low column address
+        0x00, 
+        //High column address
+        0x10, 
+        //Start line address
+        0x40, 
+        //Contrast
+        0x81, 
+        0xff, 
+        //Segment remap 0 to 127
+        0xa1, 
+        //Normal color
+        0xa6, 
+        //Set MUX ratio
+        0xa8, 
+        0x3f,
+        //Output follows RAM 
+        0xa4, 
+        //Set oled offset
+        0xd3, 
+        0x00,
+        //Set oled clock divide ratio 
+        0xd5, 
+        0xf0, 
+        //Set precharge period
+        0xd9, 
+        0x34,
+        //Set COM pin HW config 
+        0xda, 
+        0x12, 
+        //Set VCOMH (0.77*Vcc)
+        0xdb, 
+        0x20, 
+        //Set DC-DC enable
+        0x8d, 
+        0x14, 
+        //Turn on oled
+        0xaf
+    };
 
     //DMA flags
     uint8_t dmaStatus;
@@ -111,62 +165,6 @@ namespace Oled{
         i2c_set_7bit_addr_mode(I2C1);
         i2c_peripheral_enable(I2C1);
         i2c_set_7bit_address(I2C1, OLED_ADD);
-
-
-        //Create data frame to configure the oled
-
-        //Display Off
-        initBuffer.at(0) =  OLED_MEM_CMD;
-        //Display Off
-        initBuffer.at(1) = 0xAE;
-        //Memory addressing mode
-        initBuffer.at(2) = 0x20;
-        //00,Horizontal Addressing Mode;
-        //01,Vertical Addressing Mode;
-        //10,Page Addressing Mode (RESET); 
-        initBuffer.at(3) = 0x10;
-        //Set page start address
-        initBuffer.at(4) = 0xB0;
-        //COM Out scan direction
-        initBuffer.at(5) = 0xC8;
-        //Low column addressoled
-        initBuffer.at(6) = 0x00;
-        //High column address
-        initBuffer.at(7) = 0x10;
-        //Start line address
-        initBuffer.at(8) = 0x40;
-        //Contrast
-        initBuffer.at(9) = 0x81;
-        initBuffer.at(10) = 0xFF;
-        //Segment remap 0 to 127
-        initBuffer.at(11) = 0xA1;
-        //Normal color
-        initBuffer.at(12) = 0xA6;
-        //Set MUX ratio
-        initBuffer.at(13) = 0xA8;
-        initBuffer.at(14) = 0x3F;
-        //Output follows RAM
-        initBuffer.at(15) = 0xA4;
-        //Set oled offset
-        initBuffer.at(16) = 0xD3;
-        initBuffer.at(17) = 0x00;
-        //Set oled clock divide ratio
-        initBuffer.at(18) = 0xD5;
-        initBuffer.at(19) = 0xF0;
-        //Set precharge period
-        initBuffer.at(20) = 0xD9;
-        initBuffer.at(21) = 0x34;
-        //Set COM pin HW config
-        initBuffer.at(22) = 0xDA;
-        initBuffer.at(23) = 0x12;
-        //Set VCOMH (0.77*Vcc)
-        initBuffer.at(24) = 0xDB;
-        initBuffer.at(25) = 0x20;
-        //Set DC-DC enable
-        initBuffer.at(26) = 0x8D;
-        initBuffer.at(27) = 0x14;
-        //Turn on oled
-        initBuffer.at(28) = 0xAF;
         
         //Setup the DMA channel to get data from the prepared buffer
         dma_set_memory_address(DMA1, DMA_CHANNEL3, reinterpret_cast<uint32_t> (&initBuffer[0]));

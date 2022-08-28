@@ -1,6 +1,6 @@
 #include "display.hpp"
 #include "base.hpp"
-
+#include "scheduler.hpp"
 #include <stm32/gpio.h>
 #include <stm32/timer.h>
 #include <stm32/dma.h>
@@ -27,6 +27,9 @@ Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most
 
 using namespace std;
 
+extern "C" uint32_t usb_midi_tx(void *buf, int len);
+Scheduler dispChangeScheduler(300, [](){ if(Display::wasChanged() && Display::getConnected()) Display::send();}, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL | Scheduler::ACTIVE);
+
 namespace Display{
     //Default state - all off
     array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0x0e, 0xe0};
@@ -34,6 +37,7 @@ namespace Display{
     array<uint8_t, 9> rxBuffer;
     array<uint8_t, 9> txBuffer;
     bool connected = false;
+    bool changed = true;
 
 
     void init(){
@@ -50,6 +54,13 @@ namespace Display{
         exti_select_source(EXTI13, GPIO::PORTC);
         exti_set_trigger(EXTI13, EXTI_TRIGGER_BOTH);
         exti_enable_request(EXTI13);
+        
+        //Check if the display wasnt aleready connected at startup
+        if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
+            connected = false;
+        }else{
+            connected = true;
+        }
 
 		//DMA Receive
 		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);
@@ -100,6 +111,9 @@ namespace Display{
     void send(array<uint8_t, 9> data){
         if(!connected) return; 
         txBuffer = data;
+        //Send display state over midi if changed
+        sendToMIDI();
+        //Send data ove USART
         dma_disable_channel(DMA2, DMA_CHANNEL3);
         dma_set_peripheral_address(DMA2, DMA_CHANNEL4, (uint32_t)&USART1_TDR);
 		dma_set_memory_address(DMA2, DMA_CHANNEL4, (uint32_t)&txBuffer[0]);
@@ -107,6 +121,10 @@ namespace Display{
 		usart_enable_tx_dma(USART1);
 		nvic_enable_irq(NVIC_DMA2_CHANNEL4_IRQ);
 		dma_enable_channel(DMA2, DMA_CHANNEL4);
+    }
+
+    void send(){
+        send(state);
     }
 
     void setSong(uint16_t song, uint8_t visible){
@@ -176,6 +194,69 @@ namespace Display{
         return connected;
     }
 
+    bool wasChanged(){
+        return changed;
+    }
+
+    array<uint8_t, 9> * getRawState(){
+        return &state;
+    }
+
+    uint8_t getRawState(int index){
+        if(index > state.size() || index < 0) return 0;
+        return state.at(index);
+    }
+
+    //Send display state to MIDI as sysex
+    void sendToMIDI(){
+        //Create a MIDI message
+        const uint8_t buff[] = {
+            //Header - sysex start + real-time + ID (assigned 1 to display)
+			0x04, 0xF0, 0x7E, 0x01, 
+			0x04, Display::getRawSysex(1), Display::getRawSysex(2), Display::getRawSysex(3),
+			0x04, Display::getRawSysex(4), Display::getRawSysex(5), Display::getRawSysex(6),
+			0x07, Display::getRawSysex(7), Display::getRawSysex(8), 0xF7
+		};
+
+        //send the message over
+        usb_midi_tx((void *)buff, sizeof(buff));
+    }
+
+    //Returns the raw state bytes formatted for midi sysex message
+    uint8_t getRawSysex(int index){
+        if(index > state.size() || index < 0) return 0;
+        //Sysex doesnt allow high bits set in data- reformat 0xE0 to 0x0E
+        if(state.at(index) > 0x0F && index != 8) return (getRawState(index) >> 4) & 0x0F;
+        //Handle LED byte which needs a format of 0x2X
+        if(index == 8 && (state.at(index) & 0xF0) == 0xE0) return 0x0E;
+
+        return state.at(index) & 0x0F;
+    }
+
+    void setRawState(array<uint8_t, 9> state){
+        int index = 0;
+        for(uint8_t byte : state){
+            setRawState(byte, index);
+            index++;
+        }
+    }
+
+    void setRawState(uint8_t data, int index){
+        if(index > state.size() || index < 0) return;
+        state.at(index) = data;
+        changed = true;
+    }
+
+    extern "C" void display_setRawSysex(uint8_t data, int index){
+        //Reinterpret invalid data as digit off
+        if(data >= 0x0E && index != 8) data = 0xE0;
+        //Handle LED byte with specific format
+        if(data > 3 && index == 8) data = 0xE0;
+        if(data <= 3 && index == 8) data |= 0x20;
+
+        setRawState(data, index);
+    }
+
     extern "C" void EXTI15_10_IRQHandler(){
         exti_reset_request(EXTI13);
         if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
@@ -200,19 +281,24 @@ namespace Display{
         nvic_clear_pending_irq(NVIC_USART1_IRQ);    
     }
 
+    //Receive complete interrupt
     extern "C" void DMA2_Channel3_IRQHandler(){
         state = rxBuffer;
         dma_clear_interrupt_flags(DMA2, DMA_CHANNEL3, DMA_TCIF);
         nvic_clear_pending_irq(NVIC_DMA2_CHANNEL3_IRQ);
+        
+        //Send display state over midi if changed
+        sendToMIDI();
     }
 
+    //Transmit complete interrupt
     extern "C" void DMA2_Channel4_IRQHandler(){
         dma_disable_channel(DMA2, DMA_CHANNEL4);
         usart_disable_tx_dma(USART1);
         dma_clear_interrupt_flags(DMA2, DMA_CHANNEL4, DMA_TCIF);
         nvic_clear_pending_irq(NVIC_DMA2_CHANNEL4_IRQ);
         dma_enable_channel(DMA2, DMA_CHANNEL3);
-        
+        changed = false;
     }
 }
 
