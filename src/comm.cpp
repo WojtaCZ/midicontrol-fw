@@ -253,7 +253,7 @@ namespace Communication{
             for(auto command : commands){
                if(command.requiresResponse() && !command.gotResponse()){
                     //If we havent received the whole buffer yet
-                    if(data.find("\n\r") == string::npos){
+                    if(data.find("\r\n") == string::npos){
                         dataBuffer += data;
                     }else{
                         dataBuffer += data;
@@ -291,7 +291,7 @@ namespace Communication{
 	}
 
 	void send(string data){
-		data += "\n\r";
+		data += "\r\n";
 		usb_cdc_tx((void *)data.c_str(), data.length());
 	}
 
@@ -309,7 +309,7 @@ namespace Communication{
             typeString = "set";
         }
 
-		string dataStr = typeString + " " + cmd.getCommand() + (data.empty() ? "" : " " + data) + "\n\r";
+		string dataStr = typeString + " " + cmd.getCommand() + (data.empty() ? "" : " " + data) + "\r\n";
         commTimeoutScheduler.reset();
         commTimeoutScheduler.resume();
 		usb_cdc_tx((void *)dataStr.c_str(), dataStr.length());
@@ -317,7 +317,7 @@ namespace Communication{
 
 	void send(char c){
 		string data;
-		data = string(1,c) + "\n\r";
+		data = string(1,c) + "\r\n";
 		usb_cdc_tx((void *)data.c_str(), data.length());
 	}
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.0)
+cmake_minimum_required(VERSION 3.6.0)
 #adjust your project name here
 #then please adjust binary (elf) names in launch.json accordingly
 project(MIDIControl LANGUAGES CXX C ASM VERSION 0.1.0)
