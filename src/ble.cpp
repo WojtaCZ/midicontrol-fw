@@ -5,6 +5,7 @@
 #include <string.h>
 #include <string>
 
+
 #include <stm32/gpio.h>
 #include <stm32/timer.h>
 #include <stm32/dma.h>
@@ -28,6 +29,8 @@ extern "C" void comm_decode(char * data, int len);
 namespace BLE{
 
 	unsigned char bleFifo[256];
+	char bleTxBuffer[1024];
+	int bleTxBufferPointer = 0;
 
 	uint8_t bleFifoIndex = 0, bleGotMessage;
 
@@ -97,8 +100,11 @@ namespace BLE{
 
 
 	void send(std::string data){
+		//Copy the data into the local buffer (clip the size to the maximum 1024)
+		memcpy(bleTxBuffer, data.c_str(), std::min((int)data.length(), 1024));
+
 		dma_set_peripheral_address(DMA1, DMA_CHANNEL2, (uint32_t)&USART2_TDR);
-		dma_set_memory_address(DMA1, DMA_CHANNEL2, (uint32_t)data[0]);
+		dma_set_memory_address(DMA1, DMA_CHANNEL2, (uint32_t)&bleTxBuffer);
 		dma_set_number_of_data(DMA1, DMA_CHANNEL2, data.length());
 		usart_enable_tx_dma(USART2);
 		nvic_enable_irq(NVIC_DMA1_CHANNEL2_IRQ);
@@ -155,3 +161,27 @@ namespace BLE{
 
 
 }
+
+//Wrappers to allow sending data from C files
+extern "C" void ble_send(char * data, int len){
+	std::string str(data, len);
+	BLE::send(str);
+}
+
+extern "C" bool ble_isConnected(){
+	return BLE::isConnected();
+}
+
+extern "C" void ble_loadBuffer(char * data, int len){
+	memcpy(&BLE::bleTxBuffer[BLE::bleTxBufferPointer], data, len);
+	BLE::bleTxBufferPointer += len;
+
+	std::string data_str(data, len);
+
+	if(data_str.find("\r\n") != string::npos){
+		ble_send(&BLE::bleTxBuffer[0], BLE::bleTxBufferPointer);
+		BLE::bleTxBufferPointer = 0;
+
+	}
+}
+

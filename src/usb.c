@@ -25,6 +25,11 @@ extern void comm_decode(char * data, int len);
 extern void midi_send(char * data, int len);
 extern void display_setRawSysex(uint8_t data, int index);
 
+extern void ble_send(char * data, uint8_t len);
+extern bool ble_isConnected();
+extern void ble_loadBuffer(char * data, int len);
+
+
 
 uint8_t buffer[4];
 
@@ -515,7 +520,14 @@ static void usb_cdc_rx(usbd_device *usbd_dev, uint8_t ep){
 	uint8_t buf[64];
 	int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
 
+    //Forward received data to the bluetooth interface if connected
+    if(ble_isConnected()){
+        ble_loadBuffer(buf, len);
+    }
+
+    //Decode received data locally
     comm_decode(buf, len);
+
 
 	if(len){
 		usbd_ep_write_packet(usbd_dev, 0x82, buf, len);

@@ -5,6 +5,8 @@ project(MIDIControl LANGUAGES CXX C ASM VERSION 0.1.0)
 
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR arm)
+set(CMAKE_COLOR_MAKEFILE FALSE)
+set(CMAKE_COLOR_DIAGNOSTICS FALSE)
 
 # Set a default build type if none was specified
 set(default_build_type "Debug")
