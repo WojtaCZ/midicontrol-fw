@@ -9,6 +9,7 @@ namespace BLE{
     void init(void);
     void send(std::string data);
     bool isConnected();
+    void clearBuffer();
 }
 
 // Wrappers to allow sending data from C files

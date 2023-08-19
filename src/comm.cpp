@@ -3,6 +3,7 @@
 #include "base.hpp"
 #include "menu.hpp"
 #include "display.hpp"
+#include "ble.hpp"
 
 #include <cstdlib>
 
@@ -16,7 +17,8 @@ namespace Communication{
 	namespace MUSIC{
 		Command songlist = Command("music songlist",  [](string data, Command::Type type){
 			if(type == Command::Type::GET){
-                error(Error::unsupported);
+				std::string s = "get music songlist\r\n";
+                usb_cdc_tx((void *)s.c_str(), s.length());
 			}else if(type == Command::Type::SET) error(Error::unsupported);
 
 		}, [](string data){
@@ -51,17 +53,34 @@ namespace Communication{
 
 		});
 
+		Command bind_play = Command("music bind play", [](string data, Command::Type type){
+			if(type == Command::Type::GET){
+			
+			}else if(type == Command::Type::SET){
+				std::string s = "set music bind play " + data + "\r\n";
+				usb_cdc_tx((void *)s.c_str(), s.length());	
+			}
+
+		});
+
 		Command record = Command("music record", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
 			
-			}else if(type == Command::Type::SET) error(Error::unsupported);
+			}else if(type == Command::Type::SET){
+				GUI::display(new GUI::Splash("Nahravam",  data, "Zastavite stiskem", [](GUI::Splash * splash){Communication::send(MUSIC::stop, Command::Type::SET); GUI::display(&GUI::menu_main);}));
+				//Send over state of the display when recording is started
+				Display::sendToMIDI();
+			}
 
 		});
 
 		Command stop = Command("music stop", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
 			
-			}else if(type == Command::Type::SET) error(Error::unsupported);
+			}else if(type == Command::Type::SET){
+				std::string s = "set music stop\r\n";
+				usb_cdc_tx((void *)s.c_str(), s.length());	
+			}
 
 		});
 
@@ -172,7 +191,8 @@ namespace Communication{
 	}
 
 	namespace BASE{
-		void currentCallback(string data, Command::Type type){
+
+		Command current = Command("base current", [](string data, Command::Type type){
 			if(type == Command::Type::SET){
 				if(data == "on"){
 					Base::CurrentSource::enable();
@@ -190,15 +210,14 @@ namespace Communication{
                     Communication::send("off");
                 }
 			}
-		}
-
-		Command current = Command("base current", &currentCallback);
+		});
 	}
 
 	//Create a list of commands
 	vector<Command> commands = {
 		MUSIC::songlist,
 		MUSIC::play,
+		MUSIC::bind_play,
 		MUSIC::record,
 		MUSIC::stop,
 		DISPLAY::status,
@@ -214,7 +233,10 @@ namespace Communication{
     string dataBuffer;
 
     void commTimeoutCallback(){
+		commTimeoutScheduler.pause();
+        commTimeoutScheduler.reset();
         awaitResponse = false;
+		BLE::clearBuffer();
     }
 
 	//Call the receive callback function
@@ -292,7 +314,9 @@ namespace Communication{
 
 	void send(string data){
 		data += "\r\n";
+		BLE::send(data);
 		usb_cdc_tx((void *)data.c_str(), data.length());
+		
 	}
 
     void send(Command cmd, Command::Type type){
@@ -305,20 +329,24 @@ namespace Communication{
             awaitResponse = cmd.requiresResponse();
             cmd.gotResponse(false);
             typeString = "get";
+			commTimeoutScheduler.reset();
+        	commTimeoutScheduler.resume();
         }else if(type == Command::Type::SET){
             typeString = "set";
         }
 
 		string dataStr = typeString + " " + cmd.getCommand() + (data.empty() ? "" : " " + data) + "\r\n";
-        commTimeoutScheduler.reset();
-        commTimeoutScheduler.resume();
+		BLE::send(dataStr);
 		usb_cdc_tx((void *)dataStr.c_str(), dataStr.length());
+		
 	}
 
 	void send(char c){
 		string data;
 		data = string(1,c) + "\r\n";
+		BLE::send(data);
 		usb_cdc_tx((void *)data.c_str(), data.length());
+		
 	}
 
 	void error(){

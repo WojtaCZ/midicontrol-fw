@@ -44,8 +44,7 @@ namespace GUI{
 	);
 
 	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}}, [](Item * itm){
-		//Send over state of the display when recording is started
-		Display::sendToMIDI();
+		Communication::send("set music record");
 	 });
 
 	Item itm_settings({{Language::EN, "Settings"},{Language::CS, "Nastaveni"}}, &menu_settings);

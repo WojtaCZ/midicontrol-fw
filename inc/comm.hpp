@@ -61,6 +61,7 @@ namespace Communication{
     namespace MUSIC{
         extern Command songlist;
         extern Command play;
+        extern Command bind_play;
         extern Command record;
         extern Command stop;
     }

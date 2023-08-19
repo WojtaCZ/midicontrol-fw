@@ -79,7 +79,6 @@ namespace BLE{
 		dma_set_read_from_memory(DMA1, DMA_CHANNEL2);
 
 		dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL2);
-
 		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL2, DMAMUX_CxCR_DMAREQ_ID_UART2_TX);
 
 		usart_set_baudrate(USART2, 115200);
@@ -114,6 +113,11 @@ namespace BLE{
 
 	bool isConnected(){
 		return connected;
+	}
+
+	void clearBuffer(){
+		memset(bleFifo, 0, bleFifoIndex);
+		bleFifoIndex = 0;
 	}
 
 	extern "C" void DMA1_Channel2_IRQHandler(){
@@ -161,6 +165,8 @@ namespace BLE{
 
 
 }
+
+
 
 //Wrappers to allow sending data from C files
 extern "C" void ble_send(char * data, int len){
