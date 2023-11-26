@@ -276,6 +276,9 @@ namespace Display{
             dma_enable_channel(DMA2, DMA_CHANNEL3);
         }
 
+        if(dma_get_number_of_data(DMA2, DMA_CHANNEL3) == 5){
+            __asm__("nop");
+        }
         //Clear the flags
         USART1_ICR |= USART_ISR_RTOF;
         nvic_clear_pending_irq(NVIC_USART1_IRQ);    
