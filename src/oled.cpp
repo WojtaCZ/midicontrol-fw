@@ -10,6 +10,10 @@
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/cm3/nvic.h>
 
+#include <stm32g431xx.h>
+#include <core_cm4.h>
+#include <cmsis_compiler.h>
+
 //Scheduler used to time oled sleep
 Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
@@ -24,6 +28,10 @@ namespace Oled{
     array<uint8_t, OLED_SCREENBUF_SIZE> screenBuffer;
     //Buffers used for initialization
     array<uint8_t, 4> pageBuffer;
+
+    //DMA flags
+    uint8_t dmaStatus;
+    uint16_t dmaIndex;
 
     const array<uint8_t, 29> initBuffer = {
         //CMD type
@@ -80,9 +88,78 @@ namespace Oled{
         0xaf
     };
 
-    //DMA flags
-    uint8_t dmaStatus;
-    uint16_t dmaIndex;
+     void init(){
+        //PA15 is SCL
+        //PB7 is SDA
+
+        //Set up PA15 mode as alternate function
+        GPIOA->MODER |= (0b10 << GPIO_MODER_MODE15_Pos);
+        //Set up PB7 mode as alternate function
+        GPIOB->MODER |= (0b10 << GPIO_MODER_MODE7_Pos);
+
+        //Enable pullup on PA15
+        GPIOA->PUPDR |= (0b01 << GPIO_PUPDR_PUPD15_Pos);
+        //Enable pullup on PB7
+        GPIOB->PUPDR |= (0b01 << GPIO_PUPDR_PUPD7_Pos);
+
+        ///Set PA15 to be very high speed
+        GPIOA->OSPEEDR |= (0b11 << GPIO_OSPEEDR_OSPEED15_Pos);
+        ///Set PB7 to be very high speed
+        GPIOB->OSPEEDR |= (0b11 << GPIO_OSPEEDR_OSPEED7_Pos);
+
+        //Set PA15 to be AF4 (SCL)
+        GPIOA->AFR[1] |= (4 << GPIO_AFRH_AFSEL15_Pos);
+        //Set PB7 to be AF4 (SDA)
+        GPIOB->AFR[0] |= (4 << GPIO_AFRL_AFSEL7_Pos);
+
+        
+        //Set up DMA priority to be high
+        DMA1_Channel3->CCR |= (0b10 << DMA_CCR_PL_Pos);
+        //Set direction to read from memory
+        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_DIR_Pos);
+        //Enable memory increment mode
+        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_MINC_Pos);
+        //Set DMA memory address
+        DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&initBuffer[0]);
+        //Set DMA peripheral address
+        DMA1_Channel3->CPAR = reinterpret_cast<uint32_t>(I2C1->TXDR);
+        //Set number of data to be the size of the initialization buffer
+        DMA1_Channel3->CNDTR = initBuffer.size();
+        
+        //Set up the DMA MUX request ID to be I2C1 TX
+        DMAMUX1_Channel3->CCR |= (17 << DMAMUX_CxCR_DMAREQ_ID_Pos);
+        
+        //Set up prescaler to 5
+        I2C1->TIMINGR |= (5 << I2C_TIMINGR_PRESC_Pos);
+        //Set SCL low period to be 14 cycles
+        I2C1->TIMINGR |= (14 << I2C_TIMINGR_SCLL_Pos);
+        //Set SCL high period to be 3 cycles
+        I2C1->TIMINGR |= (5 << I2C_TIMINGR_SCLH_Pos);
+        //Set setup time 
+        I2C1->TIMINGR |= (1 << I2C_TIMINGR_SCLDEL_Pos);
+        //Set hold time
+        I2C1->TIMINGR |= (1 << I2C_TIMINGR_SDADEL_Pos);
+
+        //Set slave address (for 7bit address, the address needs to be shifted by 1)
+        I2C1->CR2 |= (OLED_ADD << (I2C_CR2_SADD_Pos + 1));
+        //Set up number of bytes to be transfered (the init frame size)
+        I2C1->CR2 |= (initBuffer.size() << I2C_CR2_NBYTES_Pos);
+        //Enable autoend mode
+        I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
+        //Enable transmit DMA
+        I2C1->CR1 |= (0b1 << I2C_CR1_TXDMAEN_Pos);
+        //Enable the peripheral
+        I2C1->CR1 |= (0b1 << I2C_CR1_PE_Pos);
+
+        //Enable the DMA channel
+        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
+        //Enable transfer complete interrupt
+        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_TCIE_Pos);
+        NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+
+        //Generate start
+        I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
+    }
 
     //Wakeup function for the oled
     void wakeup(){
@@ -120,66 +197,6 @@ namespace Oled{
         return inverted;
     }
 
-    void init(){
-
-        //Setup the GPIO for I2C
-        gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO::PIN15);
-        gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO::PIN7);
-        gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_OD, GPIO_OSPEED_100MHZ, GPIO::PIN15);
-        gpio_set_output_options(GPIO::PORTB, GPIO_OTYPE_OD, GPIO_OSPEED_100MHZ, GPIO::PIN7);
-        gpio_set_af(GPIO::PORTA, GPIO_AF4, GPIO::PIN15);
-        gpio_set_af(GPIO::PORTB, GPIO_AF4, GPIO::PIN7);
-
-        //Setup DMA channel
-        dma_set_priority(DMA1, DMA_CHANNEL3, DMA_CCR_PL_HIGH);
-        dma_set_memory_size(DMA1, DMA_CHANNEL3, DMA_CCR_MSIZE_8BIT);
-        dma_set_peripheral_size(DMA1, DMA_CHANNEL3, DMA_CCR_PSIZE_8BIT);
-        dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL3);
-        dma_set_read_from_memory(DMA1, DMA_CHANNEL3);
-
-        //Enable interrupts
-        dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL3);
-        //nvic_set_priority(NVIC_DMA1_CHANNEL3_IRQ, );
-        nvic_enable_irq(NVIC_DMA1_CHANNEL3_IRQ);
-
-        dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL3, DMAMUX_CxCR_DMAREQ_ID_I2C1_TX);
-
-        //Configure transmit register
-        dma_set_peripheral_address(DMA1, DMA_CHANNEL3, (uint32_t)&I2C1_TXDR);
-
-        i2c_peripheral_disable(I2C1);
-
-        //Setup filtering
-        i2c_enable_analog_filter(I2C1);
-        i2c_set_digital_filter(I2C1, 0);
-
-        //Setup I2C clocks
-        i2c_set_prescaler(I2C1, 5);
-        i2c_set_scl_low_period(I2C1, 14);
-        i2c_set_scl_high_period(I2C1, 3);
-        i2c_set_data_hold_time(I2C1, 1);
-        i2c_set_data_setup_time(I2C1, 1);
-        i2c_enable_stretching(I2C1);
-
-        //Setup adresses
-        i2c_set_7bit_addr_mode(I2C1);
-        i2c_peripheral_enable(I2C1);
-        i2c_set_7bit_address(I2C1, OLED_ADD);
-        
-        //Setup the DMA channel to get data from the prepared buffer
-        dma_set_memory_address(DMA1, DMA_CHANNEL3, reinterpret_cast<uint32_t> (&initBuffer[0]));
-        dma_set_number_of_data(DMA1, DMA_CHANNEL3, 29);
-        i2c_set_bytes_to_transfer(I2C1, 29);
-        //i2c_enable_interrupt(I2C1, I2C_CR1_TCIE);
-        i2c_enable_autoend(I2C1);
-
-        dma_enable_channel(DMA1, DMA_CHANNEL3);
-
-        //Enable DMA and start sending data
-        i2c_enable_txdma(I2C1);
-        i2c_send_start(I2C1);
-    }
-
     void update(){
         if(isInitialized() && !isSleeping()){
             //Prepare the buffer to contain frame data
@@ -200,28 +217,32 @@ namespace Oled{
             dmaStatus = 0;
             dmaIndex = 0;
 
-            //Setup DMA to point to this buffer correctly
-            dma_set_memory_address(DMA1, DMA_CHANNEL3, reinterpret_cast<uint32_t> (&pageBuffer[0]));
-            dma_set_number_of_data(DMA1, DMA_CHANNEL3, 4);
-            i2c_set_bytes_to_transfer(I2C1, 4);
-            //i2c_enable_interrupt(I2C1, I2C_CR1_TCIE);
-            i2c_enable_autoend(I2C1);
-
-            //Enable DMA
-            dma_enable_channel(DMA1, DMA_CHANNEL3);
-
-            //Start I2C DMA transfer
-            i2c_enable_txdma(I2C1);
-            i2c_send_start(I2C1);
+            //Set DMA memory address
+            DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&pageBuffer[0]);
+            //Set number of data to be the size of the initialization buffer
+            DMA1_Channel3->CNDTR = pageBuffer.size();
+            //Set up number of bytes to be transfered (the init frame size)
+            I2C1->CR2 |= (pageBuffer.size() << I2C_CR2_NBYTES_Pos);
+            //Enable autoend mode
+            I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
+            //Enable the DMA channel
+            DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
+            //Enable transmit DMA
+            I2C1->CR1 |= (0b1 << I2C_CR1_TXDMAEN_Pos);
+            //Generate start
+            I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
         }
 
     }
 
     extern "C" void DMA1_Channel3_IRQHandler(void){
-        //Disable DMA so it doesnt fire while in interrupt
-        dma_disable_channel(DMA1, DMA_CHANNEL3);
-        dma_clear_interrupt_flags(DMA1, DMA_CHANNEL3, DMA_TCIF);
-        nvic_clear_pending_irq(NVIC_DMA1_CHANNEL3_IRQ);
+        //Disable the DMA channel
+        DMA1_Channel3->CCR &= ~(0b1 << DMA_CCR_EN_Pos);
+        //Clear the transfer complete flag
+        DMA1->IFCR |= (0b1 << DMA_IFCR_CTCIF3_Pos);
+        //Clear the pending IRQ
+        NVIC_ClearPendingIRQ(DMA1_Channel3_IRQn);
+
 
         //Check if the init sequence has been done
         if(isInitialized()){
