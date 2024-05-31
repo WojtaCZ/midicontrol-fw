@@ -1,17 +1,17 @@
 #include "display.hpp"
 #include "base.hpp"
 #include "scheduler.hpp"
-#include <stm32/gpio.h>
-#include <stm32/timer.h>
-#include <stm32/dma.h>
-#include <stm32/dmamux.h>
-#include <stm32/usart.h>
-#include <stm32/rcc.h>
-#include <cm3/nvic.h>
-#include <stm32/exti.h>
 
 
-/* PROTOCOL NOTE
+#include "register.hpp"
+#include "gpio.hpp"
+#include <stm32g431xx.h>
+#include <core_cm4.h>
+#include <cmsis_compiler.h>
+
+
+
+/* DISPLAY PROTOCOL NOTE
 Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most significant word) means the segment is turned off. Frame structure follows:
 0: Flag     - always equal 0xb0
 1: Verse    - singles
@@ -41,26 +41,17 @@ namespace Display{
 
 
     void init(){
-        //USART RX pin
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN10);
-        gpio_set_af(GPIO::PORTA, GPIO_AF7, GPIO::PIN10);
-        //USART TX pin
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN9);
-		gpio_set_af(GPIO::PORTA, GPIO_AF7, GPIO::PIN9);
 
-        //VSENSE pin
-		gpio_mode_setup(GPIO::PORTC, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO::PIN13);
-        nvic_enable_irq(NVIC_EXTI15_10_IRQ);
-        exti_select_source(EXTI13, GPIO::PORTC);
-        exti_set_trigger(EXTI13, EXTI_TRIGGER_BOTH);
-        exti_enable_request(EXTI13);
+        gpio::gpio<gpio::port::porta, 10, gpio::mode::af7, gpio::otype::pushpull> gpioUsartRX;
+        gpio::gpio<gpio::port::porta, 9, gpio::mode::af7, gpio::otype::pushpull> gpioUsartTX;
+        gpio::gpio<gpio::port::portc, 13, gpio::mode::input, gpio::otype::pushpull> gpioVsense;
+
+        //Enable external interrupt lines 10-15
+        NVIC_EnableIRQ(EXTI15_10_IRQn);
+        gpioVsense.enableInterrupt(gpio::edge::both);
         
-        //Check if the display wasnt aleready connected at startup
-        if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
-            connected = false;
-        }else{
-            connected = true;
-        }
+        //Check the current state of the display
+        connected = !gpioVsense.read();
 
 		//DMA Receive
 		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);
