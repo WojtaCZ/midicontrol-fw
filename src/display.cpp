@@ -32,7 +32,7 @@ Scheduler dispChangeScheduler(300, [](){ if(Display::wasChanged() && Display::ge
 
 namespace display{
 
-    namespace pins{
+    namespace pin{
         //USART1 is used for the display communication
         gpio::pin<gpio::port::porta, 10> uartRx(gpio::mode::af7, gpio::otype::pushpull);
         gpio::pin<gpio::port::porta, 9> uartTx(gpio::mode::af7, gpio::otype::pushpull);
@@ -52,10 +52,10 @@ namespace display{
     void init(){
         //Enable external interrupt for the vsense
         NVIC_EnableIRQ(EXTI15_10_IRQn);
-        display::pins::vsense.enableInterrupt(gpio::interrupt::edge::both);
+        display::pin::vsense.enableInterrupt(gpio::interrupt::edge::both);
         
         //Check the state of the display
-        connected = !display::pins::vsense.read();
+        connected = !display::pin::vsense.read();
 
 		//DMA Receive
 		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);

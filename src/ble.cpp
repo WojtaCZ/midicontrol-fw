@@ -30,7 +30,7 @@ extern "C" void comm_decode(char * data, int len);
 
 namespace ble{
 
-	namespace pins{
+	namespace pin{
 		//Application mode config and reset pins
 		gpio::pin<gpio::port::porta, 0> config(gpio::mode::output, gpio::otype::pushpull);
 		gpio::pin<gpio::port::porta, 1> reset(gpio::mode::output, gpio::otype::pushpull);
@@ -52,8 +52,8 @@ namespace ble{
 	void init(void){
 
 		//Enable application mode and reset the module
-		ble::pins::config.set();
-		ble::pins::reset.clear();
+		ble::pin::config.set();
+		ble::pin::reset.clear();
 		
 
 
