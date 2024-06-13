@@ -14,6 +14,8 @@
 #include <stm32/rcc.h>
 #include <cm3/nvic.h>
 
+#include "gpio.hpp"
+
 /*
 USART 2 - 
 PA2 - TX
@@ -26,7 +28,18 @@ using namespace std;
 extern "C" uint32_t usb_cdc_tx(void *buf, int len);
 extern "C" void comm_decode(char * data, int len);
 
-namespace BLE{
+namespace ble{
+
+	namespace pins{
+		//Application mode config and reset pins
+		gpio::pin<gpio::port::porta, 0> config(gpio::mode::output, gpio::otype::pushpull);
+		gpio::pin<gpio::port::porta, 1> reset(gpio::mode::output, gpio::otype::pushpull);
+
+		// USART2 is used for the bluetooth module
+		gpio::pin<gpio::port::porta, 2> usartTx(gpio::mode::af7, gpio::otype::pushpull);
+		gpio::pin<gpio::port::porta, 3> usartRx(gpio::mode::af7, gpio::otype::pushpull);
+	}
+
 
 	unsigned char bleFifo[256];
 	char bleTxBuffer[1024];
@@ -38,20 +51,9 @@ namespace BLE{
 
 	void init(void){
 
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO::PIN0 | GPIO::PIN1);
-		gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO::PIN0);
-		gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO::PIN1);
-
-
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN2);
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN3);
-		gpio_set_af(GPIO::PORTA, GPIO_AF7, GPIO::PIN2);
-		gpio_set_af(GPIO::PORTA, GPIO_AF7, GPIO::PIN3);
-
-
-
-		gpio_set(GPIO::PORTA, GPIO::PIN0);
-		gpio_clear(GPIO::PORTA, GPIO::PIN1);
+		//Enable application mode and reset the module
+		ble::pins::config.set();
+		ble::pins::reset.clear();
 		
 
 

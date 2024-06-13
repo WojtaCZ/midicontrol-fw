@@ -75,6 +75,7 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
 	${CMAKE_SOURCE_DIR}/lib/libopencm3/lib/stm32/g4
 	${CMAKE_SOURCE_DIR}/lib/libopencm3/include/libopencm3
 
+	${CMAKE_SOURCE_DIR}/lib/stm-cpp
 	${CMAKE_SOURCE_DIR}/lib/CMSIS/Include
 	${CMAKE_SOURCE_DIR}/lib/CMSIS/Device/ST/STM32G4xx/Include
 

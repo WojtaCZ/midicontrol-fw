@@ -11,24 +11,26 @@
 #include <string.h>
 #include <array>
 
+#include "gpio.hpp"
+
 //Functions to transmit midi over usb
 extern "C" uint32_t usb_cdc_tx(void *buf, int len);
 extern "C" uint32_t usb_midi_tx(void *buf, int len);
 
-namespace MIDI{
+namespace midi{
+
+	namespace pin{
+		//USART3 used for display communication
+		gpio::pin<gpio::port::portb, 10> usartTx(gpio::mode::af7, gpio::otype::pushpull, gpio::pull::nopull, gpio::speed::medium);
+		gpio::pin<gpio::port::portb, 11> usartRx(gpio::mode::af7, gpio::otype::pushpull, gpio::pull::nopull, gpio::speed::medium);
+	}
+
 	array<uint8_t, 100> fifo;
 	int fifoIndex = 0;
 	bool gotMessage = 0;
 	vector<byte> fifoData;
 
 	void init(void){
-
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN10);
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN11);
-		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN10);
-		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN11);
-
-
 		//Initialize RX DMA
 		dma_set_priority(DMA1, DMA_CHANNEL4, DMA_CCR_PL_VERY_HIGH);
 		dma_set_memory_size(DMA1, DMA_CHANNEL4, DMA_CCR_MSIZE_8BIT);

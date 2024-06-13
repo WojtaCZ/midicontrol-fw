@@ -7,8 +7,15 @@
 #include <stm32/dmamux.h>
 #include <cm3/nvic.h>
 
+#include "gpio.hpp"s
 
-namespace LED{
+
+namespace led{
+
+	namespace pin{
+		gpio::pin<gpio::port::portb, 14> dataFront(gpio::mode::af1, gpio::otype::pushpull, gpio::pull::nopull, gpio::speed::medium);
+		gpio::pin<gpio::port::portb, 5> dataRear(gpio::mode::af10, gpio::otype::pushpull, gpio::pull::nopull, gpio::speed::medium);
+	}
 
 	Peripheral USB(LedID::USB);
 	Peripheral Display(LedID::DISPLAY);
@@ -24,12 +31,6 @@ namespace LED{
 	uint32_t led_statuses[LED_BACK_NUMBER];
 
 	void init(){
-
-		
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN14 | GPIO::PIN5);
-		gpio_set_output_options(GPIO::PORTB, GPIO_OTYPE_PP, GPIO_OSPEED_100MHZ, GPIO::PIN14 | GPIO::PIN5);
-		gpio_set_af(GPIO::PORTB, GPIO_AF10, GPIO::PIN5);
-		gpio_set_af(GPIO::PORTB, GPIO_AF1, GPIO::PIN14);
 
 		//Setup for back led
 		dma_set_priority(DMA2, DMA_CHANNEL1, DMA_CCR_PL_LOW);

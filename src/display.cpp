@@ -30,7 +30,16 @@ using namespace std;
 extern "C" uint32_t usb_midi_tx(void *buf, int len);
 Scheduler dispChangeScheduler(300, [](){ if(Display::wasChanged() && Display::getConnected()) Display::send();}, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL | Scheduler::ACTIVE);
 
-namespace Display{
+namespace display{
+
+    namespace pins{
+        //USART1 is used for the display communication
+        gpio::pin<gpio::port::porta, 10> uartRx(gpio::mode::af7, gpio::otype::pushpull);
+        gpio::pin<gpio::port::porta, 9> uartTx(gpio::mode::af7, gpio::otype::pushpull);
+        //Display present sensing pin
+        gpio::pin<gpio::port::portc, 13> vsense(gpio::mode::input, gpio::otype::pushpull);
+    }
+
     //Default state - all off
     array<uint8_t, 9> state = {0xb0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0x0e, 0xe0};
     //Receive buffer
@@ -41,17 +50,12 @@ namespace Display{
 
 
     void init(){
-
-        gpio::gpio<gpio::port::porta, 10, gpio::mode::af7, gpio::otype::pushpull> gpioUsartRX;
-        gpio::gpio<gpio::port::porta, 9, gpio::mode::af7, gpio::otype::pushpull> gpioUsartTX;
-        gpio::gpio<gpio::port::portc, 13, gpio::mode::input, gpio::otype::pushpull> gpioVsense;
-
-        //Enable external interrupt lines 10-15
+        //Enable external interrupt for the vsense
         NVIC_EnableIRQ(EXTI15_10_IRQn);
-        gpioVsense.enableInterrupt(gpio::edge::both);
+        display::pins::vsense.enableInterrupt(gpio::interrupt::edge::both);
         
-        //Check the current state of the display
-        connected = !gpioVsense.read();
+        //Check the state of the display
+        connected = !display::pins::vsense.read();
 
 		//DMA Receive
 		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);

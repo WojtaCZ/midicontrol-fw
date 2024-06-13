@@ -14,10 +14,19 @@
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
 
+#include "gpio.hpp"
+
 //Scheduler used to time oled sleep
 Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
-namespace Oled{
+namespace oled{
+
+    namespace pin{
+        //I2C1 used for the communication
+        gpio::pin<gpio::port::porta, 15> i2cScl(gpio::mode::af7, gpio::otype::opendrain, gpio::pull::pullup, gpio::speed::veryhigh);
+        gpio::pin<gpio::port::portb, 7> i2cSda(gpio::mode::af7, gpio::otype::opendrain, gpio::pull::pullup, gpio::speed::veryhigh);
+    }
+
     //Coordinates on the oled
     pair<uint16_t, uint16_t> coordinates;
     //Flags
@@ -89,30 +98,7 @@ namespace Oled{
     };
 
      void init(){
-        //PA15 is SCL
-        //PB7 is SDA
-
-        //Set up PA15 mode as alternate function
-        GPIOA->MODER |= (0b10 << GPIO_MODER_MODE15_Pos);
-        //Set up PB7 mode as alternate function
-        GPIOB->MODER |= (0b10 << GPIO_MODER_MODE7_Pos);
-
-        //Enable pullup on PA15
-        GPIOA->PUPDR |= (0b01 << GPIO_PUPDR_PUPD15_Pos);
-        //Enable pullup on PB7
-        GPIOB->PUPDR |= (0b01 << GPIO_PUPDR_PUPD7_Pos);
-
-        ///Set PA15 to be very high speed
-        GPIOA->OSPEEDR |= (0b11 << GPIO_OSPEEDR_OSPEED15_Pos);
-        ///Set PB7 to be very high speed
-        GPIOB->OSPEEDR |= (0b11 << GPIO_OSPEEDR_OSPEED7_Pos);
-
-        //Set PA15 to be AF4 (SCL)
-        GPIOA->AFR[1] |= (4 << GPIO_AFRH_AFSEL15_Pos);
-        //Set PB7 to be AF4 (SDA)
-        GPIOB->AFR[0] |= (4 << GPIO_AFRL_AFSEL7_Pos);
-
-        
+               
         //Set up DMA priority to be high
         DMA1_Channel3->CCR |= (0b10 << DMA_CCR_PL_Pos);
         //Set direction to read from memory
