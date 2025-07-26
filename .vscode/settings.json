@@ -70,7 +70,10 @@
 		"cinttypes": "cpp",
 		"valarray": "cpp",
 		"variant": "cpp",
-		"ble.hpp": "c"
+		"ble.hpp": "c",
+		"csetjmp": "cpp",
+		"charconv": "cpp",
+		"text_encoding": "cpp"
 	},
 	"C_Cpp.errorSquiggles": "Enabled",
 	"cortex-debug.variableUseNaturalFormat": true,

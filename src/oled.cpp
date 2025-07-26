@@ -9,6 +9,7 @@
 
 //#include "stmcpp/gpio.hpp"
 #include "stmcpp/register.hpp"
+#include "stmcpp/gpio.hpp"
 
 //Scheduler used to time oled sleep
 Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
@@ -87,86 +88,48 @@ namespace Oled{
     };
 
     void init(){
-        //PA15 is SCL
-        //PB7 is SDA
 
-        // Set as AF
-        stmcpp::reg::change(std::ref(GPIOA->MODER), GPIO_MODER_MODE15_Msk, 0b10, GPIO_MODER_MODE15_Pos);
-        stmcpp::reg::change(std::ref(GPIOB->MODER), GPIO_MODER_MODE7_Msk, 0b10, GPIO_MODER_MODE7_Pos);
+        // Set PA15 as SCL, PB7 as SDA
+        stmcpp::gpio::pin<stmcpp::gpio::port::porta, 15> oledScl (stmcpp::gpio::mode::af4, stmcpp::gpio::otype::openDrain, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::pullUp);
+        stmcpp::gpio::pin<stmcpp::gpio::port::portb, 7> oledSda (stmcpp::gpio::mode::af4, stmcpp::gpio::otype::openDrain, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::pullUp);
 
-        // Set pins as open drain
-        stmcpp::reg::change(std::ref(GPIOA->OTYPER), GPIO_OTYPER_OT15_Msk, 0b1, GPIO_OTYPER_OT15_Pos);
-        stmcpp::reg::change(std::ref(GPIOB->OTYPER), GPIO_OTYPER_OT7_Msk, 0b1, GPIO_OTYPER_OT15_Pos);
 
-        stmcpp::reg::change(std::ref(GPIOA->OSPEEDR), GPIO_OSPEEDR_OSPEED15_Msk, 0b11, GPIO_OSPEEDR_OSPEED15_Pos);
-        stmcpp::reg::change(std::ref(GPIOB->OSPEEDR), GPIO_OSPEEDR_OSPEED7_Msk, 0b11, GPIO_OSPEEDR_OSPEED7_Pos);
+        stmcpp::reg::write(std::ref(DMA1_Channel3->CCR), 
+            (0b10 << DMA_CCR_PL_Pos) | // High priority
+            (0b1 << DMA_CCR_DIR_Pos) | // Memory to peripheral direction
+            (0b1 << DMA_CCR_MINC_Pos) | // Memory increment mode
+            (0b1 << DMA_CCR_TCIE_Pos)   // Transfer complete interrupt enable
+            
+        );
 
-        stmcpp::reg::change(std::ref(GPIOA->AFR[1]), GPIO_AFRH_AFSEL15_Msk, 4, GPIO_AFRH_AFSEL15_Pos);
-        stmcpp::reg::change(std::ref(GPIOB->AFR[0]), GPIO_AFRL_AFSEL7_Msk, 4, GPIO_AFRL_AFSEL7_Pos);
+        // Set up the DMA memory and peripheral
+        stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&initBuffer[0]));
+        stmcpp::reg::write(std::ref(DMA1_Channel3->CPAR), reinterpret_cast<uint32_t>(&I2C1->TXDR));
+        stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), initBuffer.size());
 
-    
+        // Set up DMAMUX routing (DMAMUX channels start from 0, DMA from 1, thats why the offset in numbering)
+        stmcpp::reg::write(std::ref(DMAMUX1_Channel2->CCR), (17 << DMAMUX_CxCR_DMAREQ_ID_Pos));
 
-        //Enable pullup on PA15
-        GPIOA->PUPDR |= (0b01 << GPIO_PUPDR_PUPD15_Pos);
-        //Enable pullup on PB7
-        GPIOB->PUPDR |= (0b01 << GPIO_PUPDR_PUPD7_Pos);
+        // Set up I2C
+        stmcpp::reg::write(std::ref(I2C1->CR1), I2C_CR1_TXDMAEN); 
+        stmcpp::reg::write(std::ref(I2C1->CR2), 
+            (0b1 << I2C_CR2_AUTOEND_Pos) | // Autoend mode
+            (OLED_ADD << (I2C_CR2_SADD_Pos + 1)) | // Device address
+            (initBuffer.size() << I2C_CR2_NBYTES_Pos) // Buffer size
+        );
 
-        ///Set PA15 to be very high speed
-        GPIOA->OSPEEDR |= (0b11 << GPIO_OSPEEDR_OSPEED15_Pos);
-        ///Set PB7 to be very high speed
-        GPIOB->OSPEEDR |= (0b11 << GPIO_OSPEEDR_OSPEED7_Pos);
-
-        //Set PA15 to be AF4 (SCL)
-        GPIOA->AFR[1] |= (4 << GPIO_AFRH_AFSEL15_Pos);
-        //Set PB7 to be AF4 (SDA)
-        GPIOB->AFR[0] |= (4 << GPIO_AFRL_AFSEL7_Pos);
-
-        //Set up DMA priority to be high
-        DMA1_Channel3->CCR |= (0b10 << DMA_CCR_PL_Pos);
-        //Set direction to read from memory
-        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_DIR_Pos);
-        //Enable memory increment mode
-        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_MINC_Pos);
-        //Set DMA memory address
-        DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&initBuffer[0]);
-        //Set DMA peripheral address
-        DMA1_Channel3->CPAR = reinterpret_cast<uint32_t>(&I2C1->TXDR);
-        //Set number of data to be the size of the initialization buffer
-        DMA1_Channel3->CNDTR = initBuffer.size();
-        //Enable transfer complete interrupt
-        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_TCIE_Pos);
+        // Set up I2C timing to be 1MHz (super speed)
+        stmcpp::reg::write(std::ref(I2C1->TIMINGR), 0x0070215B);
         
-        //Set up the DMA MUX request ID to be I2C1 TX
-        DMAMUX1_Channel2->CCR |= (17 << DMAMUX_CxCR_DMAREQ_ID_Pos);
-        
-        I2C1->TIMINGR = 0x0070215B;
-        //I2C1->TIMINGR = 0x00E057FD;
-        //I2C1->TIMINGR = 0x20B0D9FF;
-
-        //Set slave address (for 7bit address, the address needs to be shifted by 1)
-        I2C1->CR2 |= (OLED_ADD << (I2C_CR2_SADD_Pos + 1));
-        //Set up number of bytes to be transferred (the init frame size)
-        I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
-        I2C1->CR2 |= (initBuffer.size() << I2C_CR2_NBYTES_Pos);
-        //Enable autoend mode
-        I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
-
-        //Enable the peripheral
-        I2C1->CR1 |= (0b1 << I2C_CR1_PE_Pos);
-        // Enable I2C1 clock stretching
-        I2C1->CR1 &= ~(0b1 << I2C_CR1_NOSTRETCH_Pos);
-
-        //Enable the DMA channel
-
+        // Enable DMA and TX complete interrupt
+        stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
         NVIC_EnableIRQ(DMA1_Channel3_IRQn);
-        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
 
+        //Enable the I2C peripheral 
+        stmcpp::reg::set(std::ref(I2C1->CR1), I2C_CR1_PE);
 
-
-        //Enable transmit DMA
-        I2C1->CR1 |= (0b1 << I2C_CR1_TXDMAEN_Pos);
         //Generate start
-        I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
+        stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
     }
 
     //Wakeup function for the oled
@@ -226,33 +189,23 @@ namespace Oled{
             dmaIndex = 0;
 
 
+            // Reinitialize the DMA and SPI buffer to use the image buffer instead
+            stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&pageBuffer[0]));
+            stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), pageBuffer.size());
+            stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, pageBuffer.size(), I2C_CR2_NBYTES_Pos);
 
-            //Set DMA memory address
-            DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&pageBuffer[0]);
-            //Set number of data to be the size of the initialization buffer
-            DMA1_Channel3->CNDTR = pageBuffer.size();
-            //Set up number of bytes to be transferred (the init frame size)
-            I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
-            I2C1->CR2 |= (pageBuffer.size() << I2C_CR2_NBYTES_Pos);
-            //Enable autoend mode
-            I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
+            // Reenable DMA
+            stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
 
-            //Enable the DMA channel
-            DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
-            //Enable transmit DMA
-            I2C1->CR1 |= (0b1 << I2C_CR1_TXDMAEN_Pos);
             //Generate start
-            I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
+            stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
         }
     }
 
     extern "C" void DMA1_Channel3_IRQHandler(void){
-        //Disable the DMA channel
-        DMA1_Channel3->CCR &= ~(0b1 << DMA_CCR_EN_Pos);
-        //Clear the transfer complete flag
-        DMA1->IFCR |= (0b1 << DMA_IFCR_CTCIF3_Pos);
-        //Clear the pending IRQ
-        NVIC_ClearPendingIRQ(DMA1_Channel3_IRQn);
+        //Disable DMA and clear the flag
+        stmcpp::reg::clear(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
+    
 
         //Check if the init sequence has been done
         if(isInitialized()){
@@ -260,31 +213,41 @@ namespace Oled{
                 if(dmaStatus % 2){
                     pageBuffer.at(1)++;
                     dmaIndex += 131;
-                    DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&pageBuffer[0]);
-                    DMA1_Channel3->CNDTR = 4;
-                    I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
-                    I2C1->CR2 |= (4 << I2C_CR2_NBYTES_Pos);
-                    DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
+
+                    // Reinitialize the DMA and SPI buffer to use the image buffer instead
+                    stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&pageBuffer[0]));
+                    stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), 4);
+                    stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, 4, I2C_CR2_NBYTES_Pos);
+
+                    
                 }else{
-                    DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&screenBuffer[dmaIndex]);
-                    DMA1_Channel3->CNDTR = 131;
-                    I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
-                    I2C1->CR2 |= (131 << I2C_CR2_NBYTES_Pos);
-                    DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
+
+                    // Reinitialize the DMA and SPI buffer to use the image buffer instead
+                    stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&screenBuffer[dmaIndex]));
+                    stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), 131);
+                    stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, 131, I2C_CR2_NBYTES_Pos);
                 }
+
+                // Reenable DMA
+                stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
+
                 dmaStatus++;
-                I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
-                I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
+
+                //Generate start
+                stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
+
             }else{
-                DMA1_Channel3->CCR &= ~(0b1 << DMA_CCR_EN_Pos);
+                //Disable DMA
+                stmcpp::reg::clear(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
             }
         }else{
-            DMA1_Channel3->CCR &= ~(0b1 << DMA_CCR_EN_Pos);
-            I2C1->CR1 &= ~(0b1 << I2C_CR1_TXDMAEN_Pos);
+            //Disable DMA
+            stmcpp::reg::clear(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
             setInitialized(true);
         }
 
-        DMA1->IFCR |= (0b1 << DMA_IFCR_CTCIF3_Pos);
+        //Clear the pending IRQ
+        stmcpp::reg::set(std::ref(DMA1->IFCR), DMA_IFCR_CTCIF3);
         NVIC_ClearPendingIRQ(DMA1_Channel3_IRQn);
     }
 

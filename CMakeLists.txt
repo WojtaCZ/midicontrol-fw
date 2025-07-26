@@ -12,6 +12,8 @@ cmake_minimum_required(VERSION 3.10.0)
 # Set the device type
 set(DEVICE STM32G431xx)
 
+add_compile_definitions(DEVICE=${DEVICE})
+
 #set(TOOLCHAIN_PREFIX "C:/Program Files (x86)/GNU Arm Embedded Toolchain/10/")
 
 # Replace with appropriate linker script
