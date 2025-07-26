@@ -104,6 +104,7 @@ ${CMAKE_SOURCE_DIR}/lib/
 ${CMAKE_SOURCE_DIR}/lib/CMSIS/Include
 ${CMAKE_SOURCE_DIR}/lib/CMSIS/Device/ST/STM32G4xx/Include
 ${CMAKE_SOURCE_DIR}/lib/tinyusb/src/
+${CMAKE_SOURCE_DIR}/lib/stmcpp
 
 )
 

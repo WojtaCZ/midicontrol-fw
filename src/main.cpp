@@ -72,7 +72,7 @@ extern "C" void SysTick_Handler(void){
 	menuScrollScheduler.increment();
 	startupSplashScheduler.increment();
 	//commTimeoutScheduler.increment();
-	//dispChangeScheduler.increment();
+	dispChangeScheduler.increment();
 }
 
 

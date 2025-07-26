@@ -7,8 +7,13 @@
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
 
+//#include "stmcpp/gpio.hpp"
+#include "stmcpp/register.hpp"
+
 //Scheduler used to time oled sleep
 Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
+
+array<uint8_t, OLED_SCREENBUF_SIZE> screenBuffer;
 
 namespace Oled{
     //Coordinates on the oled
@@ -18,7 +23,7 @@ namespace Oled{
     bool initialized;
     bool sleeping;
     //Screen buffer storing image data
-    array<uint8_t, OLED_SCREENBUF_SIZE> screenBuffer;
+    
     //Buffers used for initialization
     array<uint8_t, 4> pageBuffer;
 
@@ -85,16 +90,21 @@ namespace Oled{
         //PA15 is SCL
         //PB7 is SDA
 
-        //Set up PA15 mode as alternate function
-        GPIOA->MODER &= ~(0b11 << GPIO_MODER_MODE15_Pos);
-        GPIOA->MODER |= (0b10 << GPIO_MODER_MODE15_Pos);
-        //Set up PB7 mode as alternate function
-        GPIOB->MODER &= ~(0b11 << GPIO_MODER_MODE7_Pos);
-        GPIOB->MODER |= (0b10 << GPIO_MODER_MODE7_Pos);
-        //Set PA15 as open-drain
-        GPIOA->OTYPER |= (0b1 << GPIO_OTYPER_OT15_Pos);
-        //Set PB7 as open-drain
-        GPIOB->OTYPER |= (0b1 << GPIO_OTYPER_OT7_Pos);
+        // Set as AF
+        stmcpp::reg::change(std::ref(GPIOA->MODER), GPIO_MODER_MODE15_Msk, 0b10, GPIO_MODER_MODE15_Pos);
+        stmcpp::reg::change(std::ref(GPIOB->MODER), GPIO_MODER_MODE7_Msk, 0b10, GPIO_MODER_MODE7_Pos);
+
+        // Set pins as open drain
+        stmcpp::reg::change(std::ref(GPIOA->OTYPER), GPIO_OTYPER_OT15_Msk, 0b1, GPIO_OTYPER_OT15_Pos);
+        stmcpp::reg::change(std::ref(GPIOB->OTYPER), GPIO_OTYPER_OT7_Msk, 0b1, GPIO_OTYPER_OT15_Pos);
+
+        stmcpp::reg::change(std::ref(GPIOA->OSPEEDR), GPIO_OSPEEDR_OSPEED15_Msk, 0b11, GPIO_OSPEEDR_OSPEED15_Pos);
+        stmcpp::reg::change(std::ref(GPIOB->OSPEEDR), GPIO_OSPEEDR_OSPEED7_Msk, 0b11, GPIO_OSPEEDR_OSPEED7_Pos);
+
+        stmcpp::reg::change(std::ref(GPIOA->AFR[1]), GPIO_AFRH_AFSEL15_Msk, 4, GPIO_AFRH_AFSEL15_Pos);
+        stmcpp::reg::change(std::ref(GPIOB->AFR[0]), GPIO_AFRL_AFSEL7_Msk, 4, GPIO_AFRL_AFSEL7_Pos);
+
+    
 
         //Enable pullup on PA15
         GPIOA->PUPDR |= (0b01 << GPIO_PUPDR_PUPD15_Pos);
@@ -127,13 +137,16 @@ namespace Oled{
         DMA1_Channel3->CCR |= (0b1 << DMA_CCR_TCIE_Pos);
         
         //Set up the DMA MUX request ID to be I2C1 TX
-        DMAMUX1_Channel3->CCR |= (17 << DMAMUX_CxCR_DMAREQ_ID_Pos);
+        DMAMUX1_Channel2->CCR |= (17 << DMAMUX_CxCR_DMAREQ_ID_Pos);
         
         I2C1->TIMINGR = 0x0070215B;
+        //I2C1->TIMINGR = 0x00E057FD;
+        //I2C1->TIMINGR = 0x20B0D9FF;
 
         //Set slave address (for 7bit address, the address needs to be shifted by 1)
         I2C1->CR2 |= (OLED_ADD << (I2C_CR2_SADD_Pos + 1));
         //Set up number of bytes to be transferred (the init frame size)
+        I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
         I2C1->CR2 |= (initBuffer.size() << I2C_CR2_NBYTES_Pos);
         //Enable autoend mode
         I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
@@ -147,6 +160,8 @@ namespace Oled{
 
         NVIC_EnableIRQ(DMA1_Channel3_IRQn);
         DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
+
+
 
         //Enable transmit DMA
         I2C1->CR1 |= (0b1 << I2C_CR1_TXDMAEN_Pos);
@@ -210,14 +225,18 @@ namespace Oled{
             dmaStatus = 0;
             dmaIndex = 0;
 
+
+
             //Set DMA memory address
             DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&pageBuffer[0]);
             //Set number of data to be the size of the initialization buffer
             DMA1_Channel3->CNDTR = pageBuffer.size();
             //Set up number of bytes to be transferred (the init frame size)
+            I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
             I2C1->CR2 |= (pageBuffer.size() << I2C_CR2_NBYTES_Pos);
             //Enable autoend mode
             I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
+
             //Enable the DMA channel
             DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
             //Enable transmit DMA
@@ -243,11 +262,13 @@ namespace Oled{
                     dmaIndex += 131;
                     DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&pageBuffer[0]);
                     DMA1_Channel3->CNDTR = 4;
+                    I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
                     I2C1->CR2 |= (4 << I2C_CR2_NBYTES_Pos);
                     DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
                 }else{
                     DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&screenBuffer[dmaIndex]);
                     DMA1_Channel3->CNDTR = 131;
+                    I2C1->CR2 &= ~(I2C_CR2_NBYTES_Msk);
                     I2C1->CR2 |= (131 << I2C_CR2_NBYTES_Pos);
                     DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
                 }

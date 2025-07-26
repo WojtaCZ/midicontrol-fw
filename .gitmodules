@@ -1,3 +1,6 @@
 [submodule "lib/tinyusb"]
 	path = lib/tinyusb
 	url = https://github.com/hathach/tinyusb.git
+[submodule "lib/stmcpp"]
+	path = lib/stmcpp
+	url = git@github.com:WojtaCZ/stmcpp.git
