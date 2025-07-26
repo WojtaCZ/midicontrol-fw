@@ -65,12 +65,12 @@ namespace LED{
     };
 
     enum class LedID{
-        USB,
-        DISPLAY,
-        CURRENT,
-        MIDIA,
-        MIDIB,
-        BLUETOOTH
+        usb,
+        display,
+        current,
+        midia,
+        midib,
+        bluetooth
     };
 
     class Color{
@@ -113,7 +113,7 @@ namespace LED{
     void fill_buff_black(uint8_t strip);
     void fill_buff_white(uint8_t strip);
 
-    extern Peripheral USB;
+    extern Peripheral usb;
 }
 
 #endif

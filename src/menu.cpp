@@ -14,8 +14,6 @@ using namespace std;
 Scheduler guiRenderScheduler(30, &GUI::render, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 Scheduler menuScrollScheduler(2000, &GUI::scroll_callback, Scheduler::PERIODICAL | Scheduler::DISPATCH_ON_INCREMENT);
 
-extern "C" uint32_t usb_midi_tx(void *buf, int len);
-
 namespace GUI{
 	//Variables global to the namespace
 	bool forceRender = 0;

@@ -1,173 +1,162 @@
 #include "midi.hpp"
 #include "base.hpp"
 
-#include <stm32/gpio.h>
-#include <stm32/timer.h>
-#include <stm32/dma.h>
-#include <stm32/dmamux.h>
-#include <stm32/usart.h>
-#include <stm32/rcc.h>
-#include <cm3/nvic.h>
+#include <core_cm4.h>
+#include <cmsis_compiler.h>
+#include <stm32g431xx.h>
+#include <tinyusb/src/device/usbd.h>
+#include <tinyusb/src/class/midi/midi_device.h>
+
 #include <string.h>
 #include <array>
+#include <vector>
 
-//Functions to transmit midi over usb
-extern "C" uint32_t usb_cdc_tx(void *buf, int len);
-extern "C" uint32_t usb_midi_tx(void *buf, int len);
+using namespace std;
 
-namespace MIDI{
+
+
+namespace MIDI {
 	array<uint8_t, 100> fifo;
 	int fifoIndex = 0;
 	bool gotMessage = 0;
-	vector<byte> fifoData;
+	vector<uint8_t> fifoData;
 
-	void init(void){
+	void init(void) {
+		// Enable GPIOB clock
+		RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
 
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN10);
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN11);
-		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN10);
-		gpio_set_af(GPIO::PORTB, GPIO_AF7, GPIO::PIN11);
+		// Set PB10 and PB11 to alternate function mode
+		GPIOB->MODER &= ~(GPIO_MODER_MODER10 | GPIO_MODER_MODER11);
+		GPIOB->MODER |= (GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1);
 
+		// Set alternate function to USART3 (AF7)
+		GPIOB->AFR[1] &= ~((0xF << (4 * (10 - 8))) | (0xF << (4 * (11 - 8))));
+		GPIOB->AFR[1] |= ((7 << (4 * (10 - 8))) | (7 << (4 * (11 - 8))));
 
-		//Initialize RX DMA
-		dma_set_priority(DMA1, DMA_CHANNEL4, DMA_CCR_PL_VERY_HIGH);
-		dma_set_memory_size(DMA1, DMA_CHANNEL4, DMA_CCR_MSIZE_8BIT);
-		dma_set_peripheral_size(DMA1, DMA_CHANNEL4, DMA_CCR_PSIZE_8BIT);
-		dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL4);
-		dma_set_read_from_peripheral(DMA1, DMA_CHANNEL4);
+		// Enable DMA1 clock
+		RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
 
-		dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL4);
-		nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ);
+		// Enable USART3 clock
+		RCC->APB1ENR1 |= RCC_APB1ENR1_USART3EN;
 
-		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL4, DMAMUX_CxCR_DMAREQ_ID_UART3_RX);
+		// Initialize RX DMA (Channel 4)
+		DMA1_Channel4->CCR = DMA_CCR_PL_1 | DMA_CCR_MINC | DMA_CCR_TCIE | DMA_CCR_DIR;
+		DMA1_Channel4->CNDTR = 1;
+		DMA1_Channel4->CPAR = reinterpret_cast<uint32_t>(&USART3->RDR);
+		DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&fifo[0]);
+		DMA1_Channel4->CCR |= DMA_CCR_EN;
 
-		dma_set_peripheral_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&USART3_RDR));
-		dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t> (&fifo[0]));
-		dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+		// Enable DMA1 Channel4 interrupt
+		NVIC_EnableIRQ(DMA1_Channel4_IRQn);
 
-		//Initialize TX DMA
-		dma_set_priority(DMA1, DMA_CHANNEL5, DMA_CCR_PL_VERY_HIGH);
-		dma_set_memory_size(DMA1, DMA_CHANNEL5, DMA_CCR_MSIZE_8BIT);
-		dma_set_peripheral_size(DMA1, DMA_CHANNEL5, DMA_CCR_PSIZE_8BIT);
-		dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL5);
-		dma_set_read_from_memory(DMA1, DMA_CHANNEL5);
+		// Initialize TX DMA (Channel 5)
+		DMA1_Channel5->CCR = DMA_CCR_PL_1 | DMA_CCR_MINC | DMA_CCR_TCIE;
+		DMA1_Channel5->CNDTR = 1;
+		DMA1_Channel5->CPAR = reinterpret_cast<uint32_t>(&USART3->TDR);
 
-		dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL5);
+		// Enable DMA1 Channel5 interrupt
+		NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
-		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL5, DMAMUX_CxCR_DMAREQ_ID_UART3_TX);
+		// Configure USART3
+		USART3->BRR = 42000000 / 31250; // Assuming APB1 clock is 42 MHz
+		USART3->CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
 
-		usart_set_baudrate(USART3, 31250);
-		usart_set_databits(USART3, 8);
-		usart_set_parity(USART3, USART_PARITY_NONE);
-		usart_set_stopbits(USART3, USART_STOPBITS_1);
-		usart_set_flow_control(USART3, USART_FLOWCONTROL_NONE);
-		usart_set_mode(USART3, USART_MODE_TX_RX);
-		usart_enable_rx_dma(USART3);
-		dma_enable_channel(DMA1, DMA_CHANNEL4);
-		
-		usart_enable(USART3);
+		// Enable USART3 DMA requests
+		USART3->CR3 |= USART_CR3_DMAT | USART_CR3_DMAR;
+
+		// Enable USART3
+		USART3->CR1 |= USART_CR1_UE;
 	}
 
-	void send(vector<byte> data){
+	void send(vector<uint8_t> data) {
 		fifoData = data;
-		//Send the payload over MIDI
-		dma_set_peripheral_address(DMA1, DMA_CHANNEL5, reinterpret_cast<uint32_t>(&USART3_TDR));
-		dma_set_memory_address(DMA1, DMA_CHANNEL5, reinterpret_cast<uint32_t>(&fifoData[0]));
-		dma_set_number_of_data(DMA1, DMA_CHANNEL5, data.size());
-		usart_enable_tx_dma(USART3);
-		nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ);
-		dma_enable_channel(DMA1, DMA_CHANNEL5);
+		// Send the payload over MIDI
+		DMA1_Channel5->CMAR = reinterpret_cast<uint32_t>(&fifoData[0]);
+		DMA1_Channel5->CNDTR = data.size();
+		DMA1_Channel5->CCR |= DMA_CCR_EN;
 	}
 
-	//Transmit handler for MIDI
-	extern "C" void DMA1_Channel5_IRQHandler(void){
-		dma_disable_channel(DMA1, DMA_CHANNEL5);
-		usart_disable_tx_dma(USART3);
-		dma_clear_interrupt_flags(DMA1, DMA_CHANNEL5, DMA_TCIF);
-		nvic_clear_pending_irq(NVIC_DMA1_CHANNEL5_IRQ);
-	}
-
-
-	//Receive handler for midi
-	extern "C" void DMA1_Channel4_IRQHandler(void){
-		//Disable DMA so it doesnt fire while were in the interrupt
-		dma_disable_channel(DMA1, DMA_CHANNEL4);
-		usart_disable_rx_dma(USART3);
-
-		//Read the message type
-		uint8_t msgType = MIDI::fifo.at(0);
-
-		//If the message type is valid
-		if((msgType & 0xF0) >= 0x80 && !MIDI::gotMessage){
-			MIDI::gotMessage = true;
-
-			//Treat messages with 2 bytes
-			if((msgType >= 0x80 && msgType <= 0xBF) || (msgType & 0xF0) == 0xE0 || msgType == 0xF2 || msgType == 0xF0){
-				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex]));
-				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 2);
-				MIDI::fifoIndex += 2;
-			}else if((msgType & 0xF0) == 0xC0 ||  (msgType & 0xF0) == 0xD0 || msgType == 0xF3 || msgType == 0xF1){
-				//Treat messages with one byte
-				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-			}else{
-				MIDI::fifoIndex = 0;
-				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-			}
-
-
-		}else if(MIDI::gotMessage){
-			//If the message type was sysex and we got sysex end
-			if(msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex-1) == 0xF7){
-				MIDI::fifoIndex = 0;
-				MIDI::fifo.at(MIDI::fifoIndex) = 0;
-				MIDI::gotMessage = false;
-				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-			}else if(msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex-1) != 0xF7){
-				//If the message type was sysex and we got data
-				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-			}else{
-				//Other messages
-				//Create a buffer to send over usb
-				array<uint8_t, 4> buffer = {(uint8_t)((uint8_t)(MIDI::fifo.at(0) >> 4) & 0x0F), MIDI::fifo.at(0),MIDI::fifo.at(1),MIDI::fifo.at(2)};
-
-				//Transmit the buffer
-				usb_midi_tx(&buffer[0], 4);
-
-				//Begin a new receive
-				MIDI::fifoIndex = 0;
-				MIDI::gotMessage = false;
-				MIDI::fifo.at(MIDI::fifoIndex) = 0;
-				dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-				dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
-			}
-		}else{
-			//If an invalid midi message was received, continue receiving
-			MIDI::gotMessage = false;
-			MIDI::fifoIndex = 0;
-			MIDI::fifo.at(MIDI::fifoIndex) = 0;
-			dma_set_memory_address(DMA1, DMA_CHANNEL4, reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]));
-			dma_set_number_of_data(DMA1, DMA_CHANNEL4, 1);
+	// Transmit handler for MIDI
+	extern "C" void DMA1_Channel5_IRQHandler(void) {
+		if (DMA1->ISR & DMA_ISR_TCIF5) {
+			DMA1->IFCR |= DMA_IFCR_CTCIF5;
+			DMA1_Channel5->CCR &= ~DMA_CCR_EN;
 		}
-
-		//Reenable the DMA
-		dma_clear_interrupt_flags(DMA1, DMA_CHANNEL4, DMA_TCIF);
-		nvic_clear_pending_irq(NVIC_DMA1_CHANNEL4_IRQ);
-		usart_enable_rx_dma(USART3);
-		dma_enable_channel(DMA1, DMA_CHANNEL4);
-		usart_enable(USART3);
 	}
 
+	// Receive handler for MIDI
+	extern "C" void DMA1_Channel4_IRQHandler(void) {
+		if (DMA1->ISR & DMA_ISR_TCIF4) {
+			DMA1->IFCR |= DMA_IFCR_CTCIF4;
+			DMA1_Channel4->CCR &= ~DMA_CCR_EN;
+
+			// Read the message type
+			uint8_t msgType = MIDI::fifo.at(0);
+
+			// If the message type is valid
+			if ((msgType & 0xF0) >= 0x80 && !MIDI::gotMessage) {
+				MIDI::gotMessage = true;
+
+				// Treat messages with 2 bytes
+				if ((msgType >= 0x80 && msgType <= 0xBF) || (msgType & 0xF0) == 0xE0 || msgType == 0xF2 || msgType == 0xF0) {
+					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex]);
+					DMA1_Channel4->CNDTR = 2;
+					MIDI::fifoIndex += 2;
+				} else if ((msgType & 0xF0) == 0xC0 || (msgType & 0xF0) == 0xD0 || msgType == 0xF3 || msgType == 0xF1) {
+					// Treat messages with one byte
+					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
+					DMA1_Channel4->CNDTR = 1;
+				} else {
+					MIDI::fifoIndex = 0;
+					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
+					DMA1_Channel4->CNDTR = 1;
+				}
+			} else if (MIDI::gotMessage) {
+				// If the message type was sysex and we got sysex end
+				if (msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex - 1) == 0xF7) {
+					MIDI::fifoIndex = 0;
+					MIDI::fifo.at(MIDI::fifoIndex) = 0;
+					MIDI::gotMessage = false;
+					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
+					DMA1_Channel4->CNDTR = 1;
+				} else if (msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex - 1) != 0xF7) {
+					// If the message type was sysex and we got data
+					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
+					DMA1_Channel4->CNDTR = 1;
+				} else {
+					// Other messages
+					// Create a buffer to send over usb
+					array<uint8_t, 4> buffer = {(uint8_t)((uint8_t)(MIDI::fifo.at(0) >> 4) & 0x0F), MIDI::fifo.at(0), MIDI::fifo.at(1), MIDI::fifo.at(2)};
+
+					tud_midi_packet_write(&buffer[0]);
+
+					// Begin a new receive
+					MIDI::fifoIndex = 0;
+					MIDI::gotMessage = false;
+					MIDI::fifo.at(MIDI::fifoIndex) = 0;
+					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
+					DMA1_Channel4->CNDTR = 1;
+				}
+			} else {
+				// If an invalid midi message was received, continue receiving
+				MIDI::gotMessage = false;
+				MIDI::fifoIndex = 0;
+				MIDI::fifo.at(MIDI::fifoIndex) = 0;
+				DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
+				DMA1_Channel4->CNDTR = 1;
+			}
+
+			// Re-enable the DMA
+			DMA1_Channel4->CCR |= DMA_CCR_EN;
+		}
+	}
 }
 
-//Wrapper for usb.h to call
-extern "C" void midi_send(char * data, int len){
-	//Create vector from provided data
-	vector<byte> payload;
-	for(int i = 0; i < len; i++) payload.push_back((byte)data[i]);
-	//Call the send function
+// Wrapper for usb.h to call
+extern "C" void midi_send(char *data, int len) {
+	// Create vector from provided data
+	vector<uint8_t> payload;
+	for (int i = 0; i < len; i++) payload.push_back((uint8_t)data[i]);
+	// Call the send function
 	MIDI::send(payload);
 }

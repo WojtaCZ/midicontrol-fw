@@ -1,21 +1,18 @@
 #include "led.hpp"
 #include "base.hpp"
 
-#include <stm32/timer.h>
-#include <stm32/gpio.h>
-#include <stm32/dma.h>
-#include <stm32/dmamux.h>
-#include <cm3/nvic.h>
-
+#include <core_cm4.h>
+#include <cmsis_compiler.h>
+#include  <stm32g431xx.h>
 
 namespace LED{
 
-	Peripheral USB(LedID::USB);
-	Peripheral Display(LedID::DISPLAY);
-	Peripheral Current(LedID::CURRENT);
-	Peripheral MIDIA(LedID::MIDIA);
-	Peripheral MIDIB(LedID::MIDIB);
-	Peripheral Bluetooth(LedID::BLUETOOTH);
+	Peripheral usb(LedID::usb);
+	Peripheral Display(LedID::display);
+	Peripheral Current(LedID::current);
+	Peripheral MIDIA(LedID::midia);
+	Peripheral MIDIB(LedID::midib);
+	Peripheral Bluetooth(LedID::bluetooth);
 
 	uint8_t ledFrontBuffer[LED_FRONT_BUFFER_SIZE];
 	uint8_t ledBackBuffer[LED_BACK_BUFFER_SIZE];
@@ -25,70 +22,61 @@ namespace LED{
 
 	void init(){
 
-		
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN14 | GPIO::PIN5);
-		gpio_set_output_options(GPIO::PORTB, GPIO_OTYPE_PP, GPIO_OSPEED_100MHZ, GPIO::PIN14 | GPIO::PIN5);
-		gpio_set_af(GPIO::PORTB, GPIO_AF10, GPIO::PIN5);
-		gpio_set_af(GPIO::PORTB, GPIO_AF1, GPIO::PIN14);
+		// GPIO setup
+		RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN; // Enable GPIOB clock
 
-		//Setup for back led
-		dma_set_priority(DMA2, DMA_CHANNEL1, DMA_CCR_PL_LOW);
-		dma_set_memory_size(DMA2, DMA_CHANNEL1, DMA_CCR_MSIZE_8BIT);
-		dma_set_peripheral_size(DMA2, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
-		dma_enable_memory_increment_mode(DMA2, DMA_CHANNEL1);
-		dma_enable_circular_mode(DMA2, DMA_CHANNEL1);
-		dma_set_read_from_memory(DMA2, DMA_CHANNEL1);
+		GPIOB->MODER = (GPIOB->MODER & ~(GPIO_MODER_MODE14_Msk | GPIO_MODER_MODE5_Msk)) | (GPIO_MODER_MODE14_1 | GPIO_MODER_MODE5_1); // Alternate function mode
+		GPIOB->OTYPER &= ~(GPIO_OTYPER_OT14 | GPIO_OTYPER_OT5); // Push-pull
+		GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEED14 | GPIO_OSPEEDR_OSPEED5); // High speed
+		GPIOB->AFR[1] = (GPIOB->AFR[1] & ~(GPIO_AFRH_AFSEL14_Msk)) | (1 << GPIO_AFRH_AFSEL14_Pos); // AF1 for TIM17_CH1
+		GPIOB->AFR[0] = (GPIOB->AFR[0] & ~(GPIO_AFRL_AFSEL5_Msk)) | (10 << GPIO_AFRL_AFSEL5_Pos); // AF10 for TIM15_CH1
 
-		//Plus 8 offset to select channels intended for DMA 2 - libopencm3 doesnt have a define for this :(
-		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL1+8, DMAMUX_CxCR_DMAREQ_ID_TIM17_CH1);
+		// DMA setup for back LED
+		RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN; // Enable DMA2 clock
+		RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN; // Enable DMAMUX1 clock
 
-		dma_set_peripheral_address(DMA2, DMA_CHANNEL1, (uint32_t)&TIM17_CCR1);
-		dma_set_memory_address(DMA2, DMA_CHANNEL1, (uint32_t)&ledBackBuffer);
-		dma_set_number_of_data(DMA2, DMA_CHANNEL1, LED_BACK_BUFFER_SIZE);
+		DMA2_Channel1->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_DIR; // Low priority, memory increment, circular mode, read from memory
+		DMAMUX1_Channel0->CCR = 0x47; // TIM17_CH1 request
 
-		timer_enable_preload(TIM17);
-		timer_update_on_overflow(TIM17);
-		timer_set_dma_on_update_event(TIM17);
-		timer_enable_irq(TIM17, TIM_DIER_CC1DE);
-		timer_generate_event(TIM17, TIM_EGR_CC1G);
-		timer_set_oc_mode(TIM17, TIM_OC1, TIM_OCM_PWM1);
-		timer_enable_oc_output(TIM17, TIM_OC1);
-		timer_enable_break_main_output(TIM17);
-		timer_set_period(TIM17, LED_TIMER_PERIOD-1);
+		DMA2_Channel1->CPAR = (uint32_t)&TIM17->CCR1;
+		DMA2_Channel1->CMAR = (uint32_t)ledBackBuffer;
+		DMA2_Channel1->CNDTR = LED_BACK_BUFFER_SIZE;
 
-		timer_enable_counter(TIM17);
-		dma_enable_channel(DMA2, DMA_CHANNEL1);
+		// Timer setup for back LED
+		RCC->APB2ENR |= RCC_APB2ENR_TIM17EN; // Enable TIM17 clock
 
-		//Setup for front led
-		dma_set_priority(DMA2, DMA_CHANNEL2, DMA_CCR_PL_LOW);
-		dma_set_memory_size(DMA2, DMA_CHANNEL2, DMA_CCR_MSIZE_8BIT);
-		dma_set_peripheral_size(DMA2, DMA_CHANNEL2, DMA_CCR_PSIZE_16BIT);
-		dma_enable_memory_increment_mode(DMA2, DMA_CHANNEL2);
-		dma_enable_circular_mode(DMA2, DMA_CHANNEL2);
-		dma_set_read_from_memory(DMA2, DMA_CHANNEL2);
+		TIM17->CR1 = TIM_CR1_ARPE; // Auto-reload preload enable
+		TIM17->DIER = TIM_DIER_UDE; // DMA request on update event
+		TIM17->EGR = TIM_EGR_UG; // Generate an update event
+		TIM17->CCMR1 = TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1; // PWM mode 1
+		TIM17->CCER = TIM_CCER_CC1E; // Enable output
+		TIM17->BDTR = TIM_BDTR_MOE; // Main output enable
+		TIM17->ARR = LED_TIMER_PERIOD - 1;
 
-		//Plus 8 offset to select channels intended for DMA 2 - libopencm3 doesnt have a define for this :( 
-		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL2+8, DMAMUX_CxCR_DMAREQ_ID_TIM15_CH1);
+		TIM17->CR1 |= TIM_CR1_CEN; // Enable counter
+		DMA2_Channel1->CCR |= DMA_CCR_EN; // Enable DMA channel
 
-		dma_set_peripheral_address(DMA2, DMA_CHANNEL2, (uint32_t)&TIM15_CCR1);
-		dma_set_memory_address(DMA2, DMA_CHANNEL2, (uint32_t)&ledFrontBuffer);
-		dma_set_number_of_data(DMA2, DMA_CHANNEL2, LED_FRONT_BUFFER_SIZE);
+		// DMA setup for front LED
+		DMA2_Channel2->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_DIR; // Low priority, memory increment, circular mode, read from memory
+		DMAMUX1_Channel1->CCR = 0x46; // TIM15_CH1 request
 
-		timer_enable_preload(TIM15);
-		timer_update_on_overflow(TIM15);
-		timer_set_dma_on_update_event(TIM15);
-		timer_enable_irq(TIM15, TIM_DIER_CC1DE);
-		timer_generate_event(TIM15, TIM_EGR_CC1G);
-		timer_set_oc_mode(TIM15, TIM_OC1, TIM_OCM_PWM1);
-		timer_enable_oc_output(TIM15, TIM_OC1);
-		timer_enable_break_main_output(TIM15);
-		timer_set_period(TIM15, LED_TIMER_PERIOD-1);
+		DMA2_Channel2->CPAR = (uint32_t)&TIM15->CCR1;
+		DMA2_Channel2->CMAR = (uint32_t)ledFrontBuffer;
+		DMA2_Channel2->CNDTR = LED_FRONT_BUFFER_SIZE;
 
-		timer_enable_counter(TIM15);
-		dma_enable_channel(DMA2, DMA_CHANNEL2);
+		// Timer setup for front LED
+		RCC->APB2ENR |= RCC_APB2ENR_TIM15EN; // Enable TIM15 clock
 
+		TIM15->CR1 = TIM_CR1_ARPE; // Auto-reload preload enable
+		TIM15->DIER = TIM_DIER_UDE; // DMA request on update event
+		TIM15->EGR = TIM_EGR_UG; // Generate an update event
+		TIM15->CCMR1 = TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1; // PWM mode 1
+		TIM15->CCER = TIM_CCER_CC1E; // Enable output
+		TIM15->BDTR = TIM_BDTR_MOE; // Main output enable
+		TIM15->ARR = LED_TIMER_PERIOD - 1;
 
-
+		TIM15->CR1 |= TIM_CR1_CEN; // Enable counter
+		DMA2_Channel2->CCR |= DMA_CCR_EN; // Enable DMA channel
 	}
 
 	//Nastaveni barvy LED podle statusu

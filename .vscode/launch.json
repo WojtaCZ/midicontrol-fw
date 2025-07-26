@@ -5,14 +5,13 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"preLaunchTask": "build",
+
+			"preLaunchTask": "Build Debug",
 			"type": "cortex-debug",
 			"request": "launch",
-			"name": "OpenOCD debug",
-			"demangle" : true,
+			"name": "OpenOCD Debug",
 			"showDevDebugOutput": "none",
 			"servertype": "openocd",
-			//this is right place to define adapter speeds
 			 "postStartSessionCommands": [
 			 	"monitor adapter speed 500"
 			 ],
@@ -20,53 +19,56 @@
 			 	"monitor adapter speed 500"
 			 ],
 			"interface": "swd",
-			"cwd": "${workspaceRoot}",
-			"executable": "${workspaceRoot}/build/MIDIControl.elf",
-			"svdFile": "${workspaceRoot}/STM32G431xx.svd",
+			"cwd": "${workspaceFolder}",
+			"executable": "${workspaceFolder}/build/${command:cmake.getLaunchTargetFilename}",
+			"svdFile": "${workspaceFolder}/STM32G431xx.svd",
 			"configFiles": [
-				"${workspaceRoot}/openocd.cfg",
+				"${workspaceFolder}/openocd.cfg",
 			],
 			"breakAfterReset": false
-			// configure SWO
-			// "swoConfig": {
-			// 	"enabled": true,
-			// 	"source": "probe",
-			// 	"swoFrequency":   1000000,
-			// 	"cpuFrequency": 72000000,
-			// 	"decoders": [
-			// 		{
-			// 			"port": 0,
-			// 			"type": "console",
-			// 			"showOnStartup": true,
-			// 			"label": "SWO output",
-			// 			"encoding": "ascii"
-			// 		},
-			// 	],
-			// },
 		},
 
 		{
 			"type": "cortex-debug",
 			// there is also attach mode, that that has several issues
 			"request": "attach",
-			"name": "OpenOCD SEC ATTACH",
-			"demangle" : true,
+			"name": "OpenOCD Attach",
 			"showDevDebugOutput": "none",
 			"servertype": "openocd",
 			"configFiles": [
-				"${workspaceRoot}/openocd.cfg",
+				"${workspaceFolder}/openocd.cfg",
 			],
-			//this is right place to define adapter speeds
-			// "postStartSessionCommands": [
-			// 	"monitor adapter speed 500"
-			// ],
-			// "postRestartSessionCommands": [
-			// 	"monitor adapter speed 500"
-			// ],
-			"cwd": "${workspaceRoot}",
-			"executable": "${workspaceRoot}/build/MIDIControl.elf",
-			"svdFile": "${workspaceRoot}/STM32G431xx.svd"
+			"cwd": "${workspaceFolder}",
+			"executable": "${workspaceFolder}/build/${command:cmake.getLaunchTargetFilename}",
+			"svdFile": "${workspaceFolder}/STM32G431xx.svd"
 		},
+
+		{
+            "name": "BlackMagic Debug",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/${command:cmake.getLaunchTargetFilename}",
+            "request": "launch",    
+            "preLaunchTask": "Build Debug",
+			"preResetCommands": ["set mem inaccessible-by-default off", "monitor connect_rst enable"],
+            "type": "cortex-debug",
+            "servertype": "bmp",
+            "interface": "swd",
+            "BMPGDBSerialPort": "/dev/ttyBmpGdb",  // Use whatever serial port makes sense for your OS and BMP setup
+            "runToEntryPoint": "main",
+			"svdFile": "${workspaceFolder}/STM32G431xx.svd",
+        },
+
+		{
+            "name": "BlackMagic Attach",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/${command:cmake.getLaunchTargetFilename}",
+            "request": "attach",    // "launch" also works perhaps
+            "type": "cortex-debug",
+            "servertype": "bmp",
+            "interface": "swd",
+            "BMPGDBSerialPort": "/dev/ttyBmpGdb",  // Use whatever serial port makes sense for your OS and BMP setup
+			"svdFile": "${workspaceFolder}/STM32G431xx.svd",
+        },
 
 	]
 }

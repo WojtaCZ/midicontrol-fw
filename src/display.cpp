@@ -1,15 +1,11 @@
 #include "display.hpp"
 #include "base.hpp"
 #include "scheduler.hpp"
-#include <stm32/gpio.h>
-#include <stm32/timer.h>
-#include <stm32/dma.h>
-#include <stm32/dmamux.h>
-#include <stm32/usart.h>
-#include <stm32/rcc.h>
-#include <cm3/nvic.h>
-#include <stm32/exti.h>
-
+#include <stm32g431xx.h>
+#include <core_cm4.h>
+#include <cmsis_compiler.h>
+#include <tinyusb/src/device/usbd.h>
+#include <tinyusb/src/class/midi/midi_device.h>
 
 /* PROTOCOL NOTE
 Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most significant word) means the segment is turned off. Frame structure follows:
@@ -22,12 +18,10 @@ Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most
 6: Song     - thousands
 7: Letter   - A to D represented in HEX 
 8: LED      - 0 to 3 representing R, Y, G, B
-
 */
 
 using namespace std;
 
-extern "C" uint32_t usb_midi_tx(void *buf, int len);
 Scheduler dispChangeScheduler(300, [](){ if(Display::wasChanged() && Display::getConnected()) Display::send();}, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL | Scheduler::ACTIVE);
 
 namespace Display{
@@ -39,88 +33,66 @@ namespace Display{
     bool connected = false;
     bool changed = true;
 
-
     void init(){
-        //USART RX pin
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN10);
-        gpio_set_af(GPIO::PORTA, GPIO_AF7, GPIO::PIN10);
-        //USART TX pin
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO::PIN9);
-		gpio_set_af(GPIO::PORTA, GPIO_AF7, GPIO::PIN9);
+        // Enable GPIOA and GPIOC clocks
+        RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOCEN;
+        // Enable USART1 clock
+        RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+        // Enable DMA2 clock
+        RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
 
-        //VSENSE pin
-		gpio_mode_setup(GPIO::PORTC, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO::PIN13);
-        nvic_enable_irq(NVIC_EXTI15_10_IRQ);
-        exti_select_source(EXTI13, GPIO::PORTC);
-        exti_set_trigger(EXTI13, EXTI_TRIGGER_BOTH);
-        exti_enable_request(EXTI13);
-        
-        //Check if the display wasnt aleready connected at startup
-        if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
-            connected = false;
-        }else{
-            connected = true;
-        }
+        // USART RX pin (PA10)
+        GPIOA->MODER = (GPIOA->MODER & ~(GPIO_MODER_MODE10_Msk)) | (GPIO_MODER_MODE10_1);
+        GPIOA->AFR[1] = (GPIOA->AFR[1] & ~(GPIO_AFRH_AFSEL10_Msk)) | (7 << GPIO_AFRH_AFSEL10_Pos);
+        // USART TX pin (PA9)
+        GPIOA->MODER = (GPIOA->MODER & ~(GPIO_MODER_MODE9_Msk)) | (GPIO_MODER_MODE9_1);
+        GPIOA->AFR[1] = (GPIOA->AFR[1] & ~(GPIO_AFRH_AFSEL9_Msk)) | (7 << GPIO_AFRH_AFSEL9_Pos);
 
-		//DMA Receive
-		dma_set_priority(DMA2, DMA_CHANNEL3, DMA_CCR_PL_MEDIUM);
-		dma_set_memory_size(DMA2, DMA_CHANNEL3, DMA_CCR_MSIZE_8BIT);
-		dma_set_peripheral_size(DMA2, DMA_CHANNEL3, DMA_CCR_PSIZE_8BIT);
-		dma_enable_memory_increment_mode(DMA2, DMA_CHANNEL3);
-        dma_enable_circular_mode(DMA2, DMA_CHANNEL3);
-		dma_set_read_from_peripheral(DMA2, DMA_CHANNEL3);
+        // VSENSE pin (PC13)
+        GPIOC->MODER &= ~(GPIO_MODER_MODE13_Msk);
+        EXTI->IMR1 |= EXTI_IMR1_IM13;
+        EXTI->RTSR1 |= EXTI_RTSR1_RT13;
+        EXTI->FTSR1 |= EXTI_FTSR1_FT13;
+        NVIC_EnableIRQ(EXTI15_10_IRQn);
 
-		dma_enable_transfer_complete_interrupt(DMA2, DMA_CHANNEL3);
-		nvic_enable_irq(NVIC_DMA2_CHANNEL3_IRQ);
+        // Check if the display wasn't already connected at startup
+        connected = !(GPIOC->IDR & GPIO_IDR_ID13);
 
-		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL3+8, DMAMUX_CxCR_DMAREQ_ID_UART1_RX);
+        // DMA Receive
+        DMA2_Channel3->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_TCIE;
+        DMA2_Channel3->CNDTR = 9;
+        DMA2_Channel3->CPAR = (uint32_t)&USART1->RDR;
+        DMA2_Channel3->CMAR = (uint32_t)rxBuffer.data();
+        NVIC_EnableIRQ(DMA2_Channel3_IRQn);
 
-		dma_set_peripheral_address(DMA2, DMA_CHANNEL3, (uint32_t)&USART1_RDR);
-		dma_set_memory_address(DMA2, DMA_CHANNEL3, (uint32_t)&rxBuffer[0]);
-		dma_set_number_of_data(DMA2, DMA_CHANNEL3, 9);
+        // DMA Transmit
+        DMA2_Channel4->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_DIR | DMA_CCR_TCIE;
+        DMA2_Channel4->CNDTR = 9;
+        DMA2_Channel4->CPAR = (uint32_t)&USART1->TDR;
+        DMA2_Channel4->CMAR = (uint32_t)txBuffer.data();
+        NVIC_EnableIRQ(DMA2_Channel4_IRQn);
 
-		//DMA Transmit
-		dma_set_priority(DMA2, DMA_CHANNEL4, DMA_CCR_PL_MEDIUM);
-		dma_set_memory_size(DMA2, DMA_CHANNEL4, DMA_CCR_MSIZE_8BIT);
-		dma_set_peripheral_size(DMA2, DMA_CHANNEL4, DMA_CCR_PSIZE_8BIT);
-		dma_enable_memory_increment_mode(DMA2, DMA_CHANNEL4);
-		dma_set_read_from_memory(DMA2, DMA_CHANNEL4);
+        // USART configuration
+        USART1->BRR = 80000000 / 1200; // Assuming 80MHz clock
+        USART1->CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE | USART_CR1_RTOIE;
+        USART1->CR2 = 0;
+        USART1->CR3 = USART_CR3_DMAR | USART_CR3_DMAT;
+        USART1->RTOR = 2000;
+        NVIC_EnableIRQ(USART1_IRQn);
 
-		dma_enable_transfer_complete_interrupt(DMA2, DMA_CHANNEL4);
-
-		dmamux_set_dma_channel_request(DMAMUX1, DMA_CHANNEL4+8, DMAMUX_CxCR_DMAREQ_ID_UART1_TX);
-
-        usart_enable_rx_timeout(USART1);
-        usart_enable_rx_timeout_interrupt(USART1);
-        usart_set_rx_timeout_value(USART1, 2000);
-        nvic_enable_irq(NVIC_USART1_IRQ);
-
-		usart_set_baudrate(USART1, 1200);
-		usart_set_databits(USART1, 8);
-		usart_set_parity(USART1, USART_PARITY_NONE);
-		usart_set_stopbits(USART1, USART_STOPBITS_1);
-		usart_set_flow_control(USART1, USART_FLOWCONTROL_NONE);
-		usart_set_mode(USART1, USART_MODE_TX_RX);
-		usart_enable_rx_dma(USART1);
-
-		dma_enable_channel(DMA2, DMA_CHANNEL3);
-		
-		usart_enable(USART1);
+        DMA2_Channel3->CCR |= DMA_CCR_EN;
     }
 
     void send(array<uint8_t, 9> data){
         if(!connected) return; 
         txBuffer = data;
-        //Send display state over midi if changed
+        // Send display state over MIDI if changed
         sendToMIDI();
-        //Send data ove USART
-        dma_disable_channel(DMA2, DMA_CHANNEL3);
-        dma_set_peripheral_address(DMA2, DMA_CHANNEL4, (uint32_t)&USART1_TDR);
-		dma_set_memory_address(DMA2, DMA_CHANNEL4, (uint32_t)&txBuffer[0]);
-		dma_set_number_of_data(DMA2, DMA_CHANNEL4, 9);
-		usart_enable_tx_dma(USART1);
-		nvic_enable_irq(NVIC_DMA2_CHANNEL4_IRQ);
-		dma_enable_channel(DMA2, DMA_CHANNEL4);
+        // Send data over USART
+        DMA2_Channel4->CCR &= ~DMA_CCR_EN;
+        DMA2_Channel4->CNDTR = 9;
+        DMA2_Channel4->CCR |= DMA_CCR_EN;
+        changed = false;
     }
 
     void send(){
@@ -130,10 +102,10 @@ namespace Display{
     void setSong(uint16_t song, uint8_t visible){
         if(visible){
             if(song > 1999) song = 1999;
-            state.at(3) = (song - ((uint16_t)(song/10)*10)) & 0x0f;
-            state.at(4) = (song - ((uint16_t)(song/100)*100))/10 & 0x0f;
-            state.at(5) = (song - ((uint16_t)(song/1000)*1000))/100 & 0x0f;
-            state.at(6) = (song/1000) & 0x0f;
+            state.at(3) = (song % 10) & 0x0f;
+            state.at(4) = (song / 10 % 10) & 0x0f;
+            state.at(5) = (song / 100 % 10) & 0x0f;
+            state.at(6) = (song / 1000) & 0x0f;
         }else{
             state.at(3) = 0xe0;
             state.at(4) = 0xe0;
@@ -147,8 +119,8 @@ namespace Display{
     void setVerse(uint8_t verse, uint8_t visible){
         if(visible){
             if(verse > 99) verse = 99;
-            state.at(1) = (verse - ((uint8_t)(verse/10)*10)) & 0x0f;
-            state.at(2) = (verse/10) & 0x0f;
+            state.at(1) = (verse % 10) & 0x0f;
+            state.at(2) = (verse / 10) & 0x0f;
         }else{
             state.at(1) = 0xe0;
             state.at(2) = 0xe0;
@@ -172,7 +144,6 @@ namespace Display{
         state.at(8) = led;
         send(state);
     }
-
 
     uint16_t getSong(){
         return (state.at(3) & 0x0f) + (state.at(4) & 0x0f)*10 + (state.at(5) & 0x0f)*100 + (state.at(6) & 0x0f)*1000;
@@ -207,27 +178,27 @@ namespace Display{
         return state.at(index);
     }
 
-    //Send display state to MIDI as sysex
+    // Send display state to MIDI as sysex
     void sendToMIDI(){
-        //Create a MIDI message
+        // Create a MIDI message
         const uint8_t buff[] = {
-            //Header - sysex start + real-time + ID (assigned 1 to display)
-			0x04, 0xF0, 0x7E, 0x01, 
-			0x04, Display::getRawSysex(1), Display::getRawSysex(2), Display::getRawSysex(3),
-			0x04, Display::getRawSysex(4), Display::getRawSysex(5), Display::getRawSysex(6),
-			0x07, Display::getRawSysex(7), Display::getRawSysex(8), 0xF7
-		};
+            // Header - sysex start + real-time + ID (assigned 1 to display)
+            0x04, 0xF0, 0x7E, 0x01, 
+            0x04, Display::getRawSysex(1), Display::getRawSysex(2), Display::getRawSysex(3),
+            0x04, Display::getRawSysex(4), Display::getRawSysex(5), Display::getRawSysex(6),
+            0x07, Display::getRawSysex(7), Display::getRawSysex(8), 0xF7
+        };
 
-        //send the message over
-        usb_midi_tx((void *)buff, sizeof(buff));
+        // Send the message over
+        tud_midi_packet_write(&buff[0]);
     }
 
-    //Returns the raw state bytes formatted for midi sysex message
+    // Returns the raw state bytes formatted for midi sysex message
     uint8_t getRawSysex(int index){
         if(index > state.size() || index < 0) return 0;
-        //Sysex doesnt allow high bits set in data- reformat 0xE0 to 0x0E
+        // Sysex doesn't allow high bits set in data- reformat 0xE0 to 0x0E
         if(state.at(index) > 0x0F && index != 8) return (getRawState(index) >> 4) & 0x0F;
-        //Handle LED byte which needs a format of 0x2X
+        // Handle LED byte which needs a format of 0x2X
         if(index == 8 && (state.at(index) & 0xF0) == 0xE0) return 0x0E;
 
         return state.at(index) & 0x0F;
@@ -248,9 +219,9 @@ namespace Display{
     }
 
     extern "C" void display_setRawSysex(uint8_t data, int index){
-        //Reinterpret invalid data as digit off
+        // Reinterpret invalid data as digit off
         if(data >= 0x0E && index != 8) data = 0xE0;
-        //Handle LED byte with specific format
+        // Handle LED byte with specific format
         if(data > 3 && index == 8) data = 0xE0;
         if(data <= 3 && index == 8) data |= 0x20;
 
@@ -258,50 +229,39 @@ namespace Display{
     }
 
     extern "C" void EXTI15_10_IRQHandler(){
-        exti_reset_request(EXTI13);
-        if(gpio_get(GPIO::PORTC, GPIO::PIN13)){
-            connected = false;
-        }else{
-            connected = true;
-        }
+        EXTI->PR1 = EXTI_PR1_PIF13;
+        connected = !(GPIOC->IDR & GPIO_IDR_ID13);
     }
 
     extern "C" void USART1_IRQHandler(){
-        //if we get an incomplete frame, throw it away
-        if(dma_get_number_of_data(DMA2, DMA_CHANNEL3) != 9){
-            dma_disable_channel(DMA2, DMA_CHANNEL3);
-            dma_set_peripheral_address(DMA2, DMA_CHANNEL3, (uint32_t)&USART1_RDR);
-            dma_set_memory_address(DMA2, DMA_CHANNEL3, (uint32_t)&rxBuffer[0]);
-            dma_set_number_of_data(DMA2, DMA_CHANNEL3, 9);
-            dma_enable_channel(DMA2, DMA_CHANNEL3);
+        // If we get an incomplete frame, throw it away
+        if(DMA2_Channel3->CNDTR != 9){
+            DMA2_Channel3->CCR &= ~DMA_CCR_EN;
+            DMA2_Channel3->CNDTR = 9;
+            DMA2_Channel3->CCR |= DMA_CCR_EN;
         }
 
-        if(dma_get_number_of_data(DMA2, DMA_CHANNEL3) == 5){
-            __asm__("nop");
-        }
-        //Clear the flags
-        USART1_ICR |= USART_ISR_RTOF;
-        nvic_clear_pending_irq(NVIC_USART1_IRQ);    
+        USART1->ICR = USART_ICR_RTOCF;
+        NVIC_ClearPendingIRQ(USART1_IRQn);    
     }
 
-    //Receive complete interrupt
+    // Receive complete interrupt
     extern "C" void DMA2_Channel3_IRQHandler(){
         state = rxBuffer;
-        dma_clear_interrupt_flags(DMA2, DMA_CHANNEL3, DMA_TCIF);
-        nvic_clear_pending_irq(NVIC_DMA2_CHANNEL3_IRQ);
+        DMA2->IFCR = DMA_IFCR_CTCIF3;
+        NVIC_ClearPendingIRQ(DMA2_Channel3_IRQn);
         
-        //Send display state over midi if changed
+        // Send display state over MIDI if changed
         sendToMIDI();
     }
 
-    //Transmit complete interrupt
+    // Transmit complete interrupt
     extern "C" void DMA2_Channel4_IRQHandler(){
-        dma_disable_channel(DMA2, DMA_CHANNEL4);
-        usart_disable_tx_dma(USART1);
-        dma_clear_interrupt_flags(DMA2, DMA_CHANNEL4, DMA_TCIF);
-        nvic_clear_pending_irq(NVIC_DMA2_CHANNEL4_IRQ);
-        dma_enable_channel(DMA2, DMA_CHANNEL3);
+        DMA2_Channel4->CCR &= ~DMA_CCR_EN;
+        USART1->CR3 &= ~USART_CR3_DMAT;
+        DMA2->IFCR = DMA_IFCR_CTCIF4;
+        NVIC_ClearPendingIRQ(DMA2_Channel4_IRQn);
+        DMA2_Channel3->CCR |= DMA_CCR_EN;
         changed = false;
     }
 }
-

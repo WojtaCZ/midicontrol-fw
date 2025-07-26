@@ -1,17 +1,9 @@
 #include "base.hpp"
 #include "menu.hpp"
 
-#include <stm32/exti.h>
-#include <stm32/gpio.h>
-#include <stm32/rcc.h>
-#include <stm32/usart.h>
-#include <stm32/flash.h>
-#include <stm32/timer.h>
-#include <stm32/iwdg.h>
-#include <cm3/nvic.h>
-#include <cm3/systick.h>
-#include <cm3/assert.h>
-#include <cm3/scb.h>
+#include <stm32g431xx.h>
+#include <core_cm4.h>
+#include <cmsis_compiler.h>
 
 Scheduler keypressScheduler(10, &Base::Encoder::process, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
@@ -19,137 +11,119 @@ namespace Base{
 	
 	//Initialization of necessary objects
 	void init(){
-		//Create structure to define clock setup
-		const struct rcc_clock_scale rcc_hse_48mhz_3v3[] = {
-				{ /* 144MHz */
-					.pllm = 6,
-					.plln = 36,
-					.pllp = 2,
-					.pllq = 6,
-					.pllr = 2,
-					.pll_source = RCC_PLLCFGR_PLLSRC_HSE,
-					.hpre = RCC_CFGR_HPRE_NODIV,
-					.ppre1 = RCC_CFGR_PPREx_NODIV,
-					.ppre2 = RCC_CFGR_PPREx_DIV8,
-					.vos_scale = PWR_SCALE1,
-					.boost = true,
-					.flash_config = FLASH_ACR_DCEN | FLASH_ACR_ICEN,
-					.flash_waitstates = 6,
-					.ahb_frequency  = 144000000,
-					.apb1_frequency = 144000000,
-					.apb2_frequency = 18000000,
-				}
-			};
+		// Enable HSE
+		RCC->CR |= RCC_CR_HSEON;
+		while (!(RCC->CR & RCC_CR_HSERDY));
 
-		//Setup the PLL
-		rcc_clock_setup_pll(&rcc_hse_48mhz_3v3[0]);
+		// Enable HSI48
+		RCC->CRRCR |= RCC_CRRCR_HSI48ON;
+		while (!(RCC->CRRCR & RCC_CRRCR_HSI48RDY));
+		
 
-		rcc_wait_for_osc_ready(RCC_HSE);
+		// Enable PWR clock
+		RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN;
+		// Set voltage scaling to scale 1
+		PWR->CR1 = (PWR->CR1 & ~PWR_CR1_VOS_Msk) | (1 << PWR_CR1_VOS_Pos);
+		// Enable boost mode
+		PWR->CR5 |= PWR_CR5_R1MODE;
 
-		//Enable LSE
-		pwr_disable_backup_domain_write_protect();
-		rcc_osc_on(RCC_LSE);
-		rcc_wait_for_osc_ready(RCC_LSE);
-		pwr_enable_backup_domain_write_protect();
+		// Configure PLL
+		RCC->PLLCFGR = RCC_PLLCFGR_PLLSRC_HSE | (6 << RCC_PLLCFGR_PLLM_Pos) | (36 << RCC_PLLCFGR_PLLN_Pos) | (6 << RCC_PLLCFGR_PLLQ_Pos) | (2 << RCC_PLLCFGR_PLLR_Pos) | RCC_PLLCFGR_PLLREN | RCC_PLLCFGR_PLLQEN | RCC_PLLCFGR_PLLPEN;
+		RCC->CR |= RCC_CR_PLLON;
+		while (!(RCC->CR & RCC_CR_PLLRDY));
 
-		//Enable LSI
-		pwr_disable_backup_domain_write_protect();
-		rcc_osc_on(RCC_LSI);
-		rcc_wait_for_osc_ready(RCC_LSI);
-		pwr_enable_backup_domain_write_protect();
+		// Set flash latency
+		FLASH->ACR |= FLASH_ACR_LATENCY_4WS;
 
-		//Enable clock for peripherals
-		rcc_periph_clock_enable(RCC_GPIOA);
-		rcc_periph_clock_enable(RCC_GPIOB);
-		rcc_periph_clock_enable(RCC_GPIOC);
-		rcc_periph_clock_enable(RCC_GPIOD);
-		rcc_periph_clock_enable(RCC_GPIOE);
-		rcc_periph_clock_enable(RCC_USART1);
-		rcc_periph_clock_enable(RCC_USART2);
-		rcc_periph_clock_enable(RCC_USART3);
-		rcc_periph_clock_enable(RCC_USB);
-		rcc_periph_clock_enable(RCC_I2C1);
-		rcc_periph_clock_enable(RCC_TIM1);
-		rcc_periph_clock_enable(RCC_TIM2);
-		rcc_periph_clock_enable(RCC_TIM4);
-		rcc_periph_clock_enable(RCC_TIM7);
-		rcc_periph_clock_enable(RCC_TIM15);
-		rcc_periph_clock_enable(RCC_TIM17);
-		rcc_periph_clock_enable(RCC_RTCAPB);
-		rcc_periph_clock_enable(RCC_SYSCFG);
-		rcc_periph_clock_enable(RCC_DMA1);
-		rcc_periph_clock_enable(RCC_DMA2);
-		//rcc_periph_clock_enable(RCC_PWR);
-		//rcc_periph_clock_enable(RCC_WWDG);
-		//rcc_periph_clock_enable(RCC_CRC);
-		//rcc_periph_clock_enable(RCC_SAI1);
-		rcc_periph_clock_enable(RCC_DMAMUX1);
+		// Select PLL as system clock source
+		RCC->CFGR |= RCC_CFGR_SW_PLL;
+		while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL);
 
-		//Initialize and enable systick timer
-		systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-		systick_set_reload(143999);
-		systick_interrupt_enable();
-		systick_clear();
-		systick_counter_enable();
+		// Enable LSE
+		RCC->BDCR |= RCC_BDCR_LSEON;
+		while (!(RCC->BDCR & RCC_BDCR_LSERDY));
 
-		//Initialize current source GPIO
-		gpio_mode_setup(GPIO::PORTA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO::PIN4);
-		gpio_set_output_options(GPIO::PORTA, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO::PIN4);
+		// Enable LSI
+		RCC->CSR |= RCC_CSR_LSION;
+		while (!(RCC->CSR & RCC_CSR_LSIRDY));
 
-		//Initialize rotary encoder GPIO
-		gpio_mode_setup(GPIO::PORTB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO::PIN0 | GPIO::PIN1 | GPIO::PIN2);
+		// Enable peripheral clocks
+		RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN | RCC_AHB2ENR_GPIODEN | RCC_AHB2ENR_GPIOEEN;
+		RCC->APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_TIM1EN | RCC_APB2ENR_TIM15EN | RCC_APB2ENR_TIM17EN;
+		RCC->APB1ENR1 |= RCC_APB1ENR1_USART2EN | RCC_APB1ENR1_USART3EN | RCC_APB1ENR1_USBEN | RCC_APB1ENR1_I2C1EN | RCC_APB1ENR1_TIM2EN | RCC_APB1ENR1_TIM4EN | RCC_APB1ENR1_TIM7EN | RCC_APB1ENR1_RTCAPBEN;
+		RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMA2EN | RCC_AHB1ENR_DMAMUX1EN;
+
+		// Initialize and enable systick timer
+		SysTick->LOAD = 143999;
+		SysTick->VAL = 0;
+		SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
+
+		// Initialize current source GPIO
+		GPIOA->MODER = (GPIOA->MODER & ~(GPIO_MODER_MODE4_Msk)) | (GPIO_MODER_MODE4_0);
+		GPIOA->OTYPER &= ~GPIO_OTYPER_OT4;
+		GPIOA->OSPEEDR = (GPIOA->OSPEEDR & ~(GPIO_OSPEEDR_OSPEED4_Msk)) | (GPIO_OSPEEDR_OSPEED4_1);
+
+		// Initialize rotary encoder GPIO
+		GPIOB->MODER &= ~(GPIO_MODER_MODE0_Msk | GPIO_MODER_MODE1_Msk | GPIO_MODER_MODE2_Msk);
+		GPIOB->PUPDR = (GPIOB->PUPDR & ~(GPIO_PUPDR_PUPD0_Msk | GPIO_PUPDR_PUPD1_Msk | GPIO_PUPDR_PUPD2_Msk)) | (GPIO_PUPDR_PUPD0_0 | GPIO_PUPDR_PUPD1_0 | GPIO_PUPDR_PUPD2_0);
+		
+		
+
 	}
 
 	void dfuCheck(){
-		//If the encoder isnt pressed
-		if(gpio_get(GPIO::PORTB, GPIO::PIN1)) return;
+		// If the encoder isn't pressed
+		if(GPIOB->IDR & GPIO_IDR_ID1) return;
 
 		int i = 0;
 
 		while(i < 1000)
 		{
 			i++;
-			if(gpio_get(GPIO::PORTB, GPIO::PIN1)) return;
+			if(GPIOB->IDR & GPIO_IDR_ID1) return;
 		}
 		
 		GUI::display(new GUI::Splash("MIDIControl", "DFU MODE", "Program over USB"));
 		GUI::render();
 
 		#define FW_ADDR    0x1FFF0000
-		SCB_VTOR = FW_ADDR & 0xFFFF;
+		SCB->VTOR = FW_ADDR & 0xFFFF;
 		__asm__ volatile("msr msp, %0"::"g"(*(volatile uint32_t *)FW_ADDR));
 		(*(void (**)())(FW_ADDR + 4))();
 	}
 
 	void wdtStart(){
-		iwdg_set_period_ms(2000);
-		iwdg_start();
+		IWDG->KR = 0x5555; // Enable access to IWDG_PR and IWDG_RLR
+		IWDG->PR = 0x06; // Set prescaler to 256
+		IWDG->RLR = 2000; // Set reload value
+		IWDG->KR = 0xAAAA; // Reload the watchdog
+		IWDG->KR = 0xCCCC; // Start the watchdog
 	}
 }
 
 namespace Base::CurrentSource{
 	bool enabled = false;
 
-	//Get actual state of the current source
+	// Get actual state of the current source
 	bool isEnabled(){
-		return !!(gpio_port_read(GPIO::PORTA) & GPIO::PIN4);
+		return !!(GPIOA->ODR & GPIO_ODR_OD4);
 	}
 
-	//Enable the current source
+	// Enable the current source
 	void enable(){
 		enabled = true;
 
-		if(!!(gpio_port_read(GPIO::PORTA) & GPIO::PIN4) != enabled){
-			gpio_set(GPIO::PORTA, GPIO::PIN4);
+		if(!!(GPIOA->ODR & GPIO_ODR_OD4) != enabled){
+			GPIOA->BSRR = GPIO_BSRR_BS4;
 		}
 	}
 
-	//Disable the current source
+	// Disable the current source
 	void disable(){
 		enabled = false;
 
-		if(!!(gpio_port_read(GPIO::PORTA) & GPIO::PIN4) != enabled){
-			gpio_clear(GPIO::PORTA, GPIO::PIN4);
+		if(!!(GPIOA->ODR & GPIO_ODR_OD4) != enabled){
+			GPIOA->BSRR = GPIO_BSRR_BR4;
 		}
 	}
 
@@ -163,42 +137,42 @@ namespace Base::CurrentSource{
 
 namespace Base::Encoder{
 	uint16_t gpioState, gpioStateOld = 0xffff;
-    uint8_t readCode = 0, storedCode = 0;
-    int pos = 0;
-    bool pressed;
+	uint8_t readCode = 0, storedCode = 0;
+	int pos = 0;
+	bool pressed;
 
 	void process(){
 
-		//Read the state of encoder switch gpio
-		gpioState = gpio_get(GPIO::PORTB, GPIO::PIN1);
+		// Read the state of encoder switch gpio
+		gpioState = GPIOB->IDR & GPIO_IDR_ID1;
 
-		//Dont actually generate any event when turned on for the first time
+		// Don't actually generate any event when turned on for the first time
 		if(gpioStateOld == 0xffff){
 			gpioStateOld = gpioState;
 			return;
 		}
 
-		//If the state differs from the previous one
+		// If the state differs from the previous one
 		if(gpioState != gpioStateOld){
-			//Update the old state
+			// Update the old state
 			gpioStateOld = gpioState;
 
-			//Update the status according to the gpio state
+			// Update the status according to the gpio state
 			if(gpioState){
 				pressed = true;
 			}else pressed = false;
 		}
 		
-		//Setup a table of expected states
+		// Setup a table of expected states
 		static int8_t rotEncTable[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 
-		//Read A and B states into code variable
+		// Read A and B states into code variable
 		readCode <<= 2;
-		if (gpio_get(GPIO::PORTB, GPIO::PIN2)) readCode |= 0x02;
-		if (gpio_get(GPIO::PORTB, GPIO::PIN0)) readCode |= 0x01;
+		if (GPIOB->IDR & GPIO_IDR_ID2) readCode |= 0x02;
+		if (GPIOB->IDR & GPIO_IDR_ID0) readCode |= 0x01;
 		readCode &= 0x0f;
 
-		//If the code is valid
+		// If the code is valid
 		if (rotEncTable[readCode]){
 			storedCode <<= 4;
 			storedCode |= readCode;
@@ -206,7 +180,7 @@ namespace Base::Encoder{
 			if ((storedCode & 0xff) == 0x17) pos++;
 		}
 
-		//Handle a shift in position
+		// Handle a shift in position
 		if(pos > 0){
 			GUI::keypress(UserInput::Key::DOWN);
 			pos = 0;
@@ -222,9 +196,3 @@ namespace Base::Encoder{
 
 	}
 }
-
-
-
-
-//Some bootloader magic happening here
-

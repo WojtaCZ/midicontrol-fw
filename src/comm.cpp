@@ -6,41 +6,44 @@
 #include "ble.hpp"
 
 #include <cstdlib>
+#include <tinyusb/src/device/usbd.h>
+#include <tinyusb/src/class/cdc/cdc_device.h>
 
-extern "C" uint32_t usb_cdc_tx(void *buf, int len);
+
+
 Scheduler commTimeoutScheduler(2000, &Communication::commTimeoutCallback, Scheduler::DISPATCH_ON_INCREMENT);
 
 namespace Communication{
-    GUI::Menu menu_songlist({{GUI::Language::EN, "Song list"},{GUI::Language::CS, "Seznam pisni"}},{}, &(GUI::menu_main));
+	GUI::Menu menu_songlist({{GUI::Language::EN, "Song list"},{GUI::Language::CS, "Seznam pisni"}},{}, &(GUI::menu_main));
 
 	//Command definitions
 	namespace MUSIC{
 		Command songlist = Command("music songlist",  [](string data, Command::Type type){
 			if(type == Command::Type::GET){
 				std::string s = "get music songlist\r\n";
-                usb_cdc_tx((void *)s.c_str(), s.length());
+				tud_cdc_write_str(s.c_str());
 			}else if(type == Command::Type::SET) error(Error::unsupported);
 
 		}, [](string data){
-            menu_songlist.items.clear();
-            size_t pos = 0;
-            string token;
-            while ((pos = data.find(";")) != string::npos) {
-                token = data.substr(0, pos);
+			menu_songlist.items.clear();
+			size_t pos = 0;
+			string token;
+			while ((pos = data.find(";")) != string::npos) {
+				token = data.substr(0, pos);
 
-                menu_songlist.items.push_back(new GUI::Item({{GUI::Language::EN, token},{GUI::Language::CS, token}},
-                    [](GUI::Item * itm){
-                        Communication::send(MUSIC::play, Command::Type::SET, itm->getTitle(GUI::Language::CS));
-                        GUI::display(new GUI::Splash("Prehravam",  itm->getTitle(GUI::Language::CS), "Zastavite stiskem", [](GUI::Splash * splash){Communication::send(MUSIC::stop, Command::Type::SET); GUI::display(&GUI::menu_main);}));
-                    }
-                ));
-                data.erase(0, pos + 1);
-            }
+				menu_songlist.items.push_back(new GUI::Item({{GUI::Language::EN, token},{GUI::Language::CS, token}},
+					[](GUI::Item * itm){
+						Communication::send(MUSIC::play, Command::Type::SET, itm->getTitle(GUI::Language::CS));
+						GUI::display(new GUI::Splash("Prehravam",  itm->getTitle(GUI::Language::CS), "Zastavite stiskem", [](GUI::Splash * splash){Communication::send(MUSIC::stop, Command::Type::SET); GUI::display(&GUI::menu_main);}));
+					}
+				));
+				data.erase(0, pos + 1);
+			}
 
-            menu_songlist.items.push_back(&(GUI::itm_back));
-            menu_songlist.setSelectedIndex(0);
-            GUI::display(&menu_songlist);
-        });
+			menu_songlist.items.push_back(&(GUI::itm_back));
+			menu_songlist.setSelectedIndex(0);
+			GUI::display(&menu_songlist);
+		});
 
 
 
@@ -58,7 +61,7 @@ namespace Communication{
 			
 			}else if(type == Command::Type::SET){
 				std::string s = "set music bind play " + data + "\r\n";
-				usb_cdc_tx((void *)s.c_str(), s.length());	
+				tud_cdc_write_str(s.c_str());	
 			}
 
 		});
@@ -79,7 +82,7 @@ namespace Communication{
 			
 			}else if(type == Command::Type::SET){
 				std::string s = "set music stop\r\n";
-				usb_cdc_tx((void *)s.c_str(), s.length());	
+				tud_cdc_write_str(s.c_str());	
 			}
 
 		});
@@ -196,19 +199,19 @@ namespace Communication{
 			if(type == Command::Type::SET){
 				if(data == "on"){
 					Base::CurrentSource::enable();
-                    GUI::chck_power.setChecked(true);
-                    ok();
+					GUI::chck_power.setChecked(true);
+					ok();
 				}else if(data == "off"){
 					Base::CurrentSource::disable();
-                    GUI::chck_power.setChecked(false);
-                    ok();
+					GUI::chck_power.setChecked(false);
+					ok();
 				}
 			}else if(type == Command::Type::GET){
-                if(Base::CurrentSource::isEnabled()){
-                    Communication::send("on");
-                }else{
-                    Communication::send("off");
-                }
+				if(Base::CurrentSource::isEnabled()){
+					Communication::send("on");
+				}else{
+					Communication::send("off");
+				}
 			}
 		});
 	}
@@ -229,22 +232,22 @@ namespace Communication{
 	};
 
 
-    bool awaitResponse = false;
-    string dataBuffer;
+	bool awaitResponse = false;
+	string dataBuffer;
 
-    void commTimeoutCallback(){
+	void commTimeoutCallback(){
 		commTimeoutScheduler.pause();
-        commTimeoutScheduler.reset();
-        awaitResponse = false;
+		commTimeoutScheduler.reset();
+		awaitResponse = false;
 		BLE::clearBuffer();
-    }
+	}
 
 	//Call the receive callback function
 	void Command::recvHandler(string data, Type type){
 		(this->receiveHandler)(data, type);
 	}
 
-    //Call the response callback function
+	//Call the response callback function
 	void Command::respHandler(string data){
 		(this->responseHandler)(data);
 	}
@@ -257,87 +260,87 @@ namespace Communication{
 		this->cmd = command;
 	}
 
-    bool Command::requiresResponse(){
-        return this->awaitResponse;
-    }
+	bool Command::requiresResponse(){
+		return this->awaitResponse;
+	}
 
-    bool Command::gotResponse(){
-        return this->receivedResponse;
-    }
+	bool Command::gotResponse(){
+		return this->receivedResponse;
+	}
 
-    bool Command::gotResponse(bool got){
-        this->receivedResponse = got;
-        return this->receivedResponse;
-    }
+	bool Command::gotResponse(bool got){
+		this->receivedResponse = got;
+		return this->receivedResponse;
+	}
 
 	void decode(string data){
-        if(awaitResponse){
-            for(auto command : commands){
-               if(command.requiresResponse() && !command.gotResponse()){
-                    //If we havent received the whole buffer yet
-                    if(data.find("\r\n") == string::npos){
-                        dataBuffer += data;
-                    }else{
-                        dataBuffer += data;
-                        commTimeoutScheduler.pause();
-                        commTimeoutScheduler.reset();
-                        command.gotResponse(true);
-                        awaitResponse = false;
-                        command.respHandler(dataBuffer);
-                        dataBuffer.clear();
-                    }
-                    return;
-               }
-            }
-        }else{
-            Command::Type type;
-            for(auto command : commands){
-                size_t index = data.find(command.getCommand());
-                if(index != string::npos){
-                    if(index > 3){
-                        if(data.substr(index - 4, 3) == "get"){
-                            type = Command::Type::GET;
-                        }else if((data.substr(index - 4, 3) == "set")){
-                            type = Command::Type::SET;
-                        }else{
-                            type = Command::Type::UNDEFINED;
-                        }
+		if(awaitResponse){
+			for(auto command : commands){
+			   if(command.requiresResponse() && !command.gotResponse()){
+					//If we havent received the whole buffer yet
+					if(data.find("\r\n") == string::npos){
+						dataBuffer += data;
+					}else{
+						dataBuffer += data;
+						commTimeoutScheduler.pause();
+						commTimeoutScheduler.reset();
+						command.gotResponse(true);
+						awaitResponse = false;
+						command.respHandler(dataBuffer);
+						dataBuffer.clear();
+					}
+					return;
+			   }
+			}
+		}else{
+			Command::Type type;
+			for(auto command : commands){
+				size_t index = data.find(command.getCommand());
+				if(index != string::npos){
+					if(index > 3){
+						if(data.substr(index - 4, 3) == "get"){
+							type = Command::Type::GET;
+						}else if((data.substr(index - 4, 3) == "set")){
+							type = Command::Type::SET;
+						}else{
+							type = Command::Type::UNDEFINED;
+						}
 
-                        int pos = data.find("\r\n", index) - (command.getCommand().length()+index+1);
-                        command.recvHandler(data.substr(index + command.getCommand().length()+1, pos), type);
-                    }
-                    return;
-                }
-            }
-        }
+						int pos = data.find("\r\n", index) - (command.getCommand().length()+index+1);
+						command.recvHandler(data.substr(index + command.getCommand().length()+1, pos), type);
+					}
+					return;
+				}
+			}
+		}
 	}
 
 	void send(string data){
 		data += "\r\n";
 		BLE::send(data);
-		usb_cdc_tx((void *)data.c_str(), data.length());
+		tud_cdc_write_str(data.c_str());
 		
 	}
 
-    void send(Command cmd, Command::Type type){
-       send(cmd, type, "");
+	void send(Command cmd, Command::Type type){
+	   send(cmd, type, "");
 	}
 
-    void send(Command cmd, Command::Type type, string data){
-        string typeString;
-        if(type == Command::Type::GET){
-            awaitResponse = cmd.requiresResponse();
-            cmd.gotResponse(false);
-            typeString = "get";
+	void send(Command cmd, Command::Type type, string data){
+		string typeString;
+		if(type == Command::Type::GET){
+			awaitResponse = cmd.requiresResponse();
+			cmd.gotResponse(false);
+			typeString = "get";
 			commTimeoutScheduler.reset();
-        	commTimeoutScheduler.resume();
-        }else if(type == Command::Type::SET){
-            typeString = "set";
-        }
+			commTimeoutScheduler.resume();
+		}else if(type == Command::Type::SET){
+			typeString = "set";
+		}
 
 		string dataStr = typeString + " " + cmd.getCommand() + (data.empty() ? "" : " " + data) + "\r\n";
 		BLE::send(dataStr);
-		usb_cdc_tx((void *)dataStr.c_str(), dataStr.length());
+		tud_cdc_write_str(dataStr.c_str());
 		
 	}
 
@@ -345,7 +348,7 @@ namespace Communication{
 		string data;
 		data = string(1,c) + "\r\n";
 		BLE::send(data);
-		usb_cdc_tx((void *)data.c_str(), data.length());
+		tud_cdc_write_str(data.c_str());
 		
 	}
 

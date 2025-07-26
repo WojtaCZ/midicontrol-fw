@@ -3,13 +3,6 @@
 #include "base.hpp"
 #include "menu.hpp"
 
-#include <libopencm3/stm32/timer.h>
-#include <libopencm3/stm32/dma.h>
-#include <libopencm3/stm32/dmamux.h>
-#include <libopencm3/stm32/i2c.h>
-#include <libopencm3/stm32/rcc.h>
-#include <libopencm3/cm3/nvic.h>
-
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
@@ -88,7 +81,7 @@ namespace Oled{
         0xaf
     };
 
-     void init(){
+    void init(){
         //PA15 is SCL
         //PB7 is SDA
 
@@ -112,7 +105,6 @@ namespace Oled{
         //Set PB7 to be AF4 (SDA)
         GPIOB->AFR[0] |= (4 << GPIO_AFRL_AFSEL7_Pos);
 
-        
         //Set up DMA priority to be high
         DMA1_Channel3->CCR |= (0b10 << DMA_CCR_PL_Pos);
         //Set direction to read from memory
@@ -122,7 +114,7 @@ namespace Oled{
         //Set DMA memory address
         DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&initBuffer[0]);
         //Set DMA peripheral address
-        DMA1_Channel3->CPAR = reinterpret_cast<uint32_t>(I2C1->TXDR);
+        DMA1_Channel3->CPAR = reinterpret_cast<uint32_t>(&I2C1->TXDR);
         //Set number of data to be the size of the initialization buffer
         DMA1_Channel3->CNDTR = initBuffer.size();
         
@@ -142,7 +134,7 @@ namespace Oled{
 
         //Set slave address (for 7bit address, the address needs to be shifted by 1)
         I2C1->CR2 |= (OLED_ADD << (I2C_CR2_SADD_Pos + 1));
-        //Set up number of bytes to be transfered (the init frame size)
+        //Set up number of bytes to be transferred (the init frame size)
         I2C1->CR2 |= (initBuffer.size() << I2C_CR2_NBYTES_Pos);
         //Enable autoend mode
         I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
@@ -221,7 +213,7 @@ namespace Oled{
             DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&pageBuffer[0]);
             //Set number of data to be the size of the initialization buffer
             DMA1_Channel3->CNDTR = pageBuffer.size();
-            //Set up number of bytes to be transfered (the init frame size)
+            //Set up number of bytes to be transferred (the init frame size)
             I2C1->CR2 |= (pageBuffer.size() << I2C_CR2_NBYTES_Pos);
             //Enable autoend mode
             I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
@@ -232,7 +224,6 @@ namespace Oled{
             //Generate start
             I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
         }
-
     }
 
     extern "C" void DMA1_Channel3_IRQHandler(void){
@@ -243,37 +234,36 @@ namespace Oled{
         //Clear the pending IRQ
         NVIC_ClearPendingIRQ(DMA1_Channel3_IRQn);
 
-
         //Check if the init sequence has been done
         if(isInitialized()){
             if(dmaStatus < 15){
                 if(dmaStatus % 2){
                     pageBuffer.at(1)++;
                     dmaIndex += 131;
-                    dma_set_memory_address(DMA1, DMA_CHANNEL3, reinterpret_cast<uint32_t> (&pageBuffer[0]));
-                    dma_set_number_of_data(DMA1, DMA_CHANNEL3, 4);
-                    i2c_set_bytes_to_transfer(I2C1, 4);
-                    dma_enable_channel(DMA1, DMA_CHANNEL3);
+                    DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&pageBuffer[0]);
+                    DMA1_Channel3->CNDTR = 4;
+                    I2C1->CR2 |= (4 << I2C_CR2_NBYTES_Pos);
+                    DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
                 }else{
-                    dma_set_memory_address(DMA1, DMA_CHANNEL3, reinterpret_cast<uint32_t> (&screenBuffer[dmaIndex]));
-                    dma_set_number_of_data(DMA1, DMA_CHANNEL3, 131);
-                    i2c_set_bytes_to_transfer(I2C1, 131);
-                    dma_enable_channel(DMA1, DMA_CHANNEL3);
+                    DMA1_Channel3->CMAR = reinterpret_cast<uint32_t>(&screenBuffer[dmaIndex]);
+                    DMA1_Channel3->CNDTR = 131;
+                    I2C1->CR2 |= (131 << I2C_CR2_NBYTES_Pos);
+                    DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
                 }
                 dmaStatus++;
-                i2c_enable_autoend(I2C1);
-                i2c_send_start(I2C1);
+                I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
+                I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
             }else{
-                dma_disable_channel(DMA1, DMA_CHANNEL3);
+                DMA1_Channel3->CCR &= ~(0b1 << DMA_CCR_EN_Pos);
             }
         }else{
-            dma_disable_channel(DMA1, DMA_CHANNEL3);
-            i2c_disable_txdma(I2C1);
+            DMA1_Channel3->CCR &= ~(0b1 << DMA_CCR_EN_Pos);
+            I2C1->CR1 &= ~(0b1 << I2C_CR1_TXDMAEN_Pos);
             setInitialized(true);
         }
 
-        dma_clear_interrupt_flags(DMA1, DMA_CHANNEL3, DMA_TCIF);
-        nvic_clear_pending_irq(NVIC_DMA1_CHANNEL3_IRQ);
+        DMA1->IFCR |= (0b1 << DMA_IFCR_CTCIF3_Pos);
+        NVIC_ClearPendingIRQ(DMA1_Channel3_IRQn);
     }
 
     //Callback for the sleep scheduler
@@ -298,10 +288,8 @@ namespace Oled{
         }
     }
 
-
     //Draw a pixel in the screenbuffer
     void drawPixel(pair<uint16_t, uint16_t> coord, Color color) {
-
         coord.first += OLED_XOFFSET;
         coord.second += OLED_YOFFSET;
         
@@ -312,7 +300,7 @@ namespace Oled{
 
         // Check if pixel should be inverted
         if(isInverted()) {
-        color = !color;
+            color = !color;
         }
 
         // Draw in the right color
@@ -349,7 +337,6 @@ namespace Oled{
 
         // The current space is now taken
         coordinates.first += font.FontWidth;
-
     }
 
     void writeSymbol(Icon icon, FontDef font, Color color) {
@@ -368,5 +355,4 @@ namespace Oled{
     void setCursor(pair<uint16_t, uint16_t> coord) {
         coordinates = coord;
     }
-
 }
