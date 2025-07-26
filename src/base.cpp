@@ -28,7 +28,13 @@ namespace Base{
 		PWR->CR5 |= PWR_CR5_R1MODE;
 
 		// Configure PLL
-		RCC->PLLCFGR = RCC_PLLCFGR_PLLSRC_HSE | (6 << RCC_PLLCFGR_PLLM_Pos) | (36 << RCC_PLLCFGR_PLLN_Pos) | (6 << RCC_PLLCFGR_PLLQ_Pos) | (2 << RCC_PLLCFGR_PLLR_Pos) | RCC_PLLCFGR_PLLREN | RCC_PLLCFGR_PLLQEN | RCC_PLLCFGR_PLLPEN;
+		RCC->PLLCFGR =       RCC_PLLCFGR_PLLSRC_HSE | 
+						(5 << RCC_PLLCFGR_PLLM_Pos) | // divide by 6
+						(36 << RCC_PLLCFGR_PLLN_Pos) | 
+						(0 << RCC_PLLCFGR_PLLPDIV_Pos) | 
+						(2 << RCC_PLLCFGR_PLLQ_Pos) | // divide by 6
+						(0 << RCC_PLLCFGR_PLLR_Pos) | 
+						RCC_PLLCFGR_PLLREN | RCC_PLLCFGR_PLLQEN | RCC_PLLCFGR_PLLPEN;
 		RCC->CR |= RCC_CR_PLLON;
 		while (!(RCC->CR & RCC_CR_PLLRDY));
 
@@ -40,8 +46,10 @@ namespace Base{
 		while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL);
 
 		// Enable LSE
+		PWR->CR1 |= PWR_CR1_DBP; // Enable access to backup domain
 		RCC->BDCR |= RCC_BDCR_LSEON;
 		while (!(RCC->BDCR & RCC_BDCR_LSERDY));
+		PWR->CR1 &= ~PWR_CR1_DBP; // Disable access to backup domain
 
 		// Enable LSI
 		RCC->CSR |= RCC_CSR_LSION;

@@ -31,20 +31,21 @@ extern "C" void SystemInit(void) {
 
 	//Initialize io and other stuff related to the base unit
 	Base::init();
+
 	//Initialize the OLED
 	Oled::init();
 	//Check if we want to enable DFU
-	Base::dfuCheck();
+	//Base::dfuCheck();
 	//Start the watchdog
 	//Base::wdtStart();
 	//Initialize MIDI
-	MIDI::init();
+	//MIDI::init();
 	//Initialize LED indicators
-	LED::init();
+	//LED::init();
 	//Initialize bluetooth
-	BLE::init();
+	//BLE::init();
 	//Initialize LED display
-	Display::init();
+	//Display::init();
 
 	NVIC_EnableIRQ(USB_LP_IRQn);
 	NVIC_EnableIRQ(USB_HP_IRQn);
@@ -65,13 +66,13 @@ extern "C" void SystemInit(void) {
 }
 
 extern "C" void SysTick_Handler(void){
-	oledSleepScheduler.increment();
+	//oledSleepScheduler.increment();
 	keypressScheduler.increment();
 	guiRenderScheduler.increment();
 	menuScrollScheduler.increment();
 	startupSplashScheduler.increment();
-	commTimeoutScheduler.increment();
-	dispChangeScheduler.increment();
+	//commTimeoutScheduler.increment();
+	//dispChangeScheduler.increment();
 }
 
 

@@ -86,9 +86,15 @@ namespace Oled{
         //PB7 is SDA
 
         //Set up PA15 mode as alternate function
+        GPIOA->MODER &= ~(0b11 << GPIO_MODER_MODE15_Pos);
         GPIOA->MODER |= (0b10 << GPIO_MODER_MODE15_Pos);
         //Set up PB7 mode as alternate function
+        GPIOB->MODER &= ~(0b11 << GPIO_MODER_MODE7_Pos);
         GPIOB->MODER |= (0b10 << GPIO_MODER_MODE7_Pos);
+        //Set PA15 as open-drain
+        GPIOA->OTYPER |= (0b1 << GPIO_OTYPER_OT15_Pos);
+        //Set PB7 as open-drain
+        GPIOB->OTYPER |= (0b1 << GPIO_OTYPER_OT7_Pos);
 
         //Enable pullup on PA15
         GPIOA->PUPDR |= (0b01 << GPIO_PUPDR_PUPD15_Pos);
@@ -117,20 +123,13 @@ namespace Oled{
         DMA1_Channel3->CPAR = reinterpret_cast<uint32_t>(&I2C1->TXDR);
         //Set number of data to be the size of the initialization buffer
         DMA1_Channel3->CNDTR = initBuffer.size();
+        //Enable transfer complete interrupt
+        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_TCIE_Pos);
         
         //Set up the DMA MUX request ID to be I2C1 TX
         DMAMUX1_Channel3->CCR |= (17 << DMAMUX_CxCR_DMAREQ_ID_Pos);
         
-        //Set up prescaler to 5
-        I2C1->TIMINGR |= (5 << I2C_TIMINGR_PRESC_Pos);
-        //Set SCL low period to be 14 cycles
-        I2C1->TIMINGR |= (14 << I2C_TIMINGR_SCLL_Pos);
-        //Set SCL high period to be 3 cycles
-        I2C1->TIMINGR |= (5 << I2C_TIMINGR_SCLH_Pos);
-        //Set setup time 
-        I2C1->TIMINGR |= (1 << I2C_TIMINGR_SCLDEL_Pos);
-        //Set hold time
-        I2C1->TIMINGR |= (1 << I2C_TIMINGR_SDADEL_Pos);
+        I2C1->TIMINGR = 0x0070215B;
 
         //Set slave address (for 7bit address, the address needs to be shifted by 1)
         I2C1->CR2 |= (OLED_ADD << (I2C_CR2_SADD_Pos + 1));
@@ -138,17 +137,19 @@ namespace Oled{
         I2C1->CR2 |= (initBuffer.size() << I2C_CR2_NBYTES_Pos);
         //Enable autoend mode
         I2C1->CR2 |= (0b1 << I2C_CR2_AUTOEND_Pos);
-        //Enable transmit DMA
-        I2C1->CR1 |= (0b1 << I2C_CR1_TXDMAEN_Pos);
+
         //Enable the peripheral
         I2C1->CR1 |= (0b1 << I2C_CR1_PE_Pos);
+        // Enable I2C1 clock stretching
+        I2C1->CR1 &= ~(0b1 << I2C_CR1_NOSTRETCH_Pos);
 
         //Enable the DMA channel
-        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
-        //Enable transfer complete interrupt
-        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_TCIE_Pos);
-        NVIC_EnableIRQ(DMA1_Channel3_IRQn);
 
+        NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+        DMA1_Channel3->CCR |= (0b1 << DMA_CCR_EN_Pos);
+
+        //Enable transmit DMA
+        I2C1->CR1 |= (0b1 << I2C_CR1_TXDMAEN_Pos);
         //Generate start
         I2C1->CR2 |= (0b1 << I2C_CR2_START_Pos);
     }
