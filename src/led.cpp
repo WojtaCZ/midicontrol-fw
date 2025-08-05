@@ -1,225 +1,225 @@
 #include "led.hpp"
 #include "base.hpp"
-
+#include <cstring>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
 #include  <stm32g431xx.h>
 
+#include "stmcpp/register.hpp"
+#include "stmcpp/gpio.hpp"
+
 namespace LED{
 
-	Peripheral usb(LedID::usb);
-	Peripheral Display(LedID::display);
-	Peripheral Current(LedID::current);
-	Peripheral MIDIA(LedID::midia);
-	Peripheral MIDIB(LedID::midib);
-	Peripheral Bluetooth(LedID::bluetooth);
+	constexpr uint16_t timerPeriod = (144e6 / 800000);	// 144MHz clock, 800kHz LED strip
+	constexpr uint16_t resetSlots = 800; 		// Reset slots for terminating the transmission and also setting the refresh rate
+	constexpr uint16_t zeroPeriod = (timerPeriod / 3);		// 1/3 of the period for a zero bit
+	constexpr uint16_t onePeriod = (timerPeriod * 2 / 3);	// 2/3 of the period for a one bit
 
-	uint8_t ledFrontBuffer[LED_FRONT_BUFFER_SIZE];
-	uint8_t ledBackBuffer[LED_BACK_BUFFER_SIZE];
 
-	uint32_t led_pending_flags[LED_BACK_NUMBER];
-	uint32_t led_statuses[LED_BACK_NUMBER];
+
+	Pixel usb(LED::Color(0, 0, 0, 0));
+	Pixel display(LED::Color(0, 0, 0, 0));
+	Pixel current(LED::Color(0, 0, 0, 0));
+	Pixel midia(LED::Color(0, 0, 0, 0));
+	Pixel midib(LED::Color(0, 0, 0, 0));
+	Pixel bluetooth(LED::Color(0, 0, 0, 0));
+
+	std::array rearPixels = {usb, display, current, midia, midib, bluetooth};
+	LED::Strip<6> rearStrip(rearPixels);
+
+	
+	std::array fronPixels = {Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0))};
+	LED::Strip<4> frontStrip(fronPixels);
+
+	uint8_t rearBuffer[2*resetSlots + rearPixels.size() * 24]; // Reset slots and 3 bytes per pixel
+	uint8_t frontBuffer[2*resetSlots + fronPixels.size() * 24]; // Reset slots and 3 bytes per pixel
 
 	void init(){
+		// Rear LEDs
+		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 5> ledStripRear (stmcpp::gpio::mode::af10, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
+		// Front LEDs
+		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 14> ledStripFront (stmcpp::gpio::mode::af1, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
 
-		// GPIO setup
-		RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN; // Enable GPIOB clock
+		stmcpp::reg::set(std::ref(TIM17->CR1), TIM_CR1_CEN); // Enable counter
+        stmcpp::reg::write(std::ref(DMA2_Channel1->CCR), 
+            (0b1 << DMA_CCR_DIR_Pos) | // Memory to peripheral direction
+            (0b1 << DMA_CCR_MINC_Pos) | // Memory increment mode
+            (0b1 << DMA_CCR_CIRC_Pos) |  // Circular DMA
+			(0b01 << DMA_CCR_PSIZE_Pos) | // 16bit peripheral
+			DMA_CCR_TCIE
+        );
 
-		GPIOB->MODER = (GPIOB->MODER & ~(GPIO_MODER_MODE14_Msk | GPIO_MODER_MODE5_Msk)) | (GPIO_MODER_MODE14_1 | GPIO_MODER_MODE5_1); // Alternate function mode
-		GPIOB->OTYPER &= ~(GPIO_OTYPER_OT14 | GPIO_OTYPER_OT5); // Push-pull
-		GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEED14 | GPIO_OSPEEDR_OSPEED5); // High speed
-		GPIOB->AFR[1] = (GPIOB->AFR[1] & ~(GPIO_AFRH_AFSEL14_Msk)) | (1 << GPIO_AFRH_AFSEL14_Pos); // AF1 for TIM17_CH1
-		GPIOB->AFR[0] = (GPIOB->AFR[0] & ~(GPIO_AFRL_AFSEL5_Msk)) | (10 << GPIO_AFRL_AFSEL5_Pos); // AF10 for TIM15_CH1
+        stmcpp::reg::write(std::ref(DMA2_Channel1->CMAR), reinterpret_cast<uint32_t>(&rearBuffer[0]));
+        stmcpp::reg::write(std::ref(DMA2_Channel1->CPAR), reinterpret_cast<uint32_t>(&TIM17->CCR1));
+        stmcpp::reg::write(std::ref(DMA2_Channel1->CNDTR), sizeof(rearBuffer));
 
-		// DMA setup for back LED
-		RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN; // Enable DMA2 clock
-		RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN; // Enable DMAMUX1 clock
+        // Set up DMAMUX routing (DMAMUX channels map to 6-11 to DMA2 1-6, thats why the offset in numbering)
+        stmcpp::reg::write(std::ref(DMAMUX1_Channel6->CCR), (84 << DMAMUX_CxCR_DMAREQ_ID_Pos));
 
-		DMA2_Channel1->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_DIR; // Low priority, memory increment, circular mode, read from memory
-		DMAMUX1_Channel0->CCR = 0x47; // TIM17_CH1 request
-
-		DMA2_Channel1->CPAR = (uint32_t)&TIM17->CCR1;
-		DMA2_Channel1->CMAR = (uint32_t)ledBackBuffer;
-		DMA2_Channel1->CNDTR = LED_BACK_BUFFER_SIZE;
 
 		// Timer setup for back LED
-		RCC->APB2ENR |= RCC_APB2ENR_TIM17EN; // Enable TIM17 clock
+		RCC->APB2ENR |= RCC_APB2ENR_TIM17EN; // Enable  TIM17 clock
 
-		TIM17->CR1 = TIM_CR1_ARPE; // Auto-reload preload enable
-		TIM17->DIER = TIM_DIER_UDE; // DMA request on update event
-		TIM17->EGR = TIM_EGR_UG; // Generate an update event
-		TIM17->CCMR1 = TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1; // PWM mode 1
-		TIM17->CCER = TIM_CCER_CC1E; // Enable output
-		TIM17->BDTR = TIM_BDTR_MOE; // Main output enable
-		TIM17->ARR = LED_TIMER_PERIOD - 1;
-
-		TIM17->CR1 |= TIM_CR1_CEN; // Enable counter
-		DMA2_Channel1->CCR |= DMA_CCR_EN; // Enable DMA channel
+		stmcpp::reg::write(std::ref(TIM17->CR1), TIM_CR1_ARPE | TIM_CR1_URS); // Auto-reload preload and update generation enable
+		stmcpp::reg::write(std::ref(TIM17->CR2), TIM_CR2_CCDS); // Capture/compare DMA selection
+		stmcpp::reg::write(std::ref(TIM17->DIER), TIM_DIER_CC1DE); // DMA request on update event
+		stmcpp::reg::write(std::ref(TIM17->EGR), TIM_EGR_CC1G); // DMA request on update event
+		stmcpp::reg::write(std::ref(TIM17->CCMR1), 0b110, TIM_CCMR1_OC1M_Pos); // Set PWM mode 1
+		stmcpp::reg::write(std::ref(TIM17->CCER), TIM_CCER_CC1E); // Enable output
+		stmcpp::reg::write(std::ref(TIM17->BDTR), TIM_BDTR_MOE); // Main output enable
+		stmcpp::reg::write(std::ref(TIM17->ARR), timerPeriod - 1); // Set auto-reload value
 
 		// DMA setup for front LED
-		DMA2_Channel2->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_DIR; // Low priority, memory increment, circular mode, read from memory
-		DMAMUX1_Channel1->CCR = 0x46; // TIM15_CH1 request
+		stmcpp::reg::write(std::ref(DMA2_Channel2->CCR),
+			(0b1 << DMA_CCR_DIR_Pos) | // Memory to peripheral direction
+			(0b1 << DMA_CCR_MINC_Pos) | // Memory increment mode
+			(0b1 << DMA_CCR_CIRC_Pos) | // Circular DMA
+			(0b01 << DMA_CCR_PSIZE_Pos) | // 16bit peripheral
+			DMA_CCR_TCIE
+		);
 
-		DMA2_Channel2->CPAR = (uint32_t)&TIM15->CCR1;
-		DMA2_Channel2->CMAR = (uint32_t)ledFrontBuffer;
-		DMA2_Channel2->CNDTR = LED_FRONT_BUFFER_SIZE;
+		stmcpp::reg::write(std::ref(DMA2_Channel2->CMAR), reinterpret_cast<uint32_t>(&frontBuffer[0]));
+		stmcpp::reg::write(std::ref(DMA2_Channel2->CPAR), reinterpret_cast<uint32_t>(&TIM15->CCR1));
+		stmcpp::reg::write(std::ref(DMA2_Channel2->CNDTR), sizeof(frontBuffer));
+
+		// Set up DMAMUX routing for TIM15_CH1
+		stmcpp::reg::write(std::ref(DMAMUX1_Channel7->CCR), (78 << DMAMUX_CxCR_DMAREQ_ID_Pos));
 
 		// Timer setup for front LED
 		RCC->APB2ENR |= RCC_APB2ENR_TIM15EN; // Enable TIM15 clock
 
-		TIM15->CR1 = TIM_CR1_ARPE; // Auto-reload preload enable
-		TIM15->DIER = TIM_DIER_UDE; // DMA request on update event
-		TIM15->EGR = TIM_EGR_UG; // Generate an update event
-		TIM15->CCMR1 = TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1; // PWM mode 1
-		TIM15->CCER = TIM_CCER_CC1E; // Enable output
-		TIM15->BDTR = TIM_BDTR_MOE; // Main output enable
-		TIM15->ARR = LED_TIMER_PERIOD - 1;
+		stmcpp::reg::write(std::ref(TIM15->CR1), TIM_CR1_ARPE | TIM_CR1_URS); // Auto-reload preload and update generation enable
+		stmcpp::reg::write(std::ref(TIM15->CR2), TIM_CR2_CCDS); // Capture/compare DMA selection
+		stmcpp::reg::write(std::ref(TIM15->DIER), TIM_DIER_CC1DE); // DMA request on update event
+		stmcpp::reg::write(std::ref(TIM15->EGR), TIM_EGR_CC1G); // DMA request on update event
+		stmcpp::reg::write(std::ref(TIM15->CCMR1), 0b110, TIM_CCMR1_OC1M_Pos); // Set PWM mode 1
+		stmcpp::reg::write(std::ref(TIM15->CCER), TIM_CCER_CC1E); // Enable output
+		stmcpp::reg::write(std::ref(TIM15->BDTR), TIM_BDTR_MOE); // Main output enable
+		stmcpp::reg::write(std::ref(TIM15->ARR), timerPeriod - 1); // Set auto-reload value
 
-		TIM15->CR1 |= TIM_CR1_CEN; // Enable counter
-		DMA2_Channel2->CCR |= DMA_CCR_EN; // Enable DMA channel
+		NVIC_EnableIRQ(DMA2_Channel1_IRQn); // Enable DMA2 Channel 1 IRQ
+		NVIC_EnableIRQ(DMA2_Channel2_IRQn); // Enable DMA2 Channel 2 IRQ
+
+		stmcpp::reg::set(std::ref(TIM15->CR1), TIM_CR1_CEN); // Enable counter
+		stmcpp::reg::set(std::ref(TIM17->CR1), TIM_CR1_CEN); // Enable counter
+
+		stmcpp::reg::set(std::ref(DMA2_Channel2->CCR), DMA_CCR_EN); // Enable DMA channel
+		stmcpp::reg::set(std::ref(DMA2_Channel1->CCR), DMA_CCR_EN); // Enable DMA channel
 	}
 
-	//Nastaveni barvy LED podle statusu
-	void dev_set_status(uint8_t perif, uint8_t status){
-		uint32_t color;
-
-		switch(status){
-			case LED_STATUS_ERR:
-				color = LED_CLR_ERROR;
-			break;
-
-			case LED_STATUS_OK:
-				color = LED_CLR_OK;
-			break;
-
-			case LED_STATUS_DATA:
-				color = LED_CLR_DATA;
-			break;
-
-			case LED_STATUS_LOAD:
-				color = LED_CLR_LOAD;
-			break;
-
-			default:
-				color = 0;
-
-		}
-
-		//Pokude je typu OK, ERR nebo LOAD - nastavi se na pevne sviceni
-		if(status == LED_STATUS_OK || status == LED_STATUS_ERR || status == LED_STATUS_LOAD){
-			led_statuses[perif] = color;
-			set_color((perif >> 7) & 0x01, perif & 0x7f, ((led_pending_flags[perif]>>16) & 0xff), ((led_pending_flags[perif]>>8) & 0xff), (led_pending_flags[perif] & 0xff));
-		}else if(status == LED_STATUS_DATA){
-			//Pokud jde o data, udela se jen probliknuti
-			led_pending_flags[perif] = color;
-		}
+	void colorToTiming(Color & color, uint8_t * timingBuffer){ 
+		uint32_t colorRaw = color.raw();
+		uint8_t r = (colorRaw >> 16) & 0xFF; // Extract red
+		uint8_t g = (colorRaw >> 8) & 0xFF;  // Extract green
+		uint8_t b = colorRaw & 0xFF;         // Extract blue
+		
+		// Fill in the 24 byte timing buffer with RGB
+		uint8_t i;
+		for (i = 0; i < 8; i++) 
+			timingBuffer[i] = ((r << i) & 0x80) ? onePeriod : zeroPeriod;
+		for (i = 0; i < 8; i++) 
+			timingBuffer[8 + i] = ((g << i) & 0x80) ? onePeriod : zeroPeriod;
+		for (i = 0; i < 8; i++) 
+			timingBuffer[16 + i] = ((b << i) & 0x80) ? onePeriod : zeroPeriod;
 	}
 
+	extern "C" void DMA2_Channel1_IRQHandler(void) {
+		if (stmcpp::reg::read(std::ref(DMA2->ISR), DMA_ISR_TCIF1)) {
+			stmcpp::reg::clear(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF1); // Clear transfer complete flag
 
-	//Nastaveni barvy LED podle statusu
-	void dev_set_color(uint8_t perif, uint32_t color){
+			// Update the rear strip buffer
+			std::array rearPixels = rearStrip.getPixels();
 
-		led_statuses[perif] = color;
-		set_color((perif >> 7) & 0x01, perif & 0x7f, ((led_pending_flags[perif]>>16) & 0xff), ((led_pending_flags[perif]>>8) & 0xff), (led_pending_flags[perif] & 0xff));
-	}
-
-
-	//Rutina pro nastaveni barvy vsech LED najednou
-	void dev_set_color_all(uint8_t strip, uint32_t color){
-
-		//Rozdeli se na dva "pasky" podle nazvu
-		for(uint16_t i = 0; i < PERIF_COUNT; i++){
-			if(((i & 0x80)>>7) == strip) led_statuses[i] = color;
-		}
-
-		//Nastavi se barva
-		set_strip_color(strip, ((color>>16) & 0xff), ((color>>8) & 0xff), (color & 0xff));
-
-	}
-
-
-	//Rutina pro nastaveni barvy vsech LED najednou
-	void dev_set_status_all(uint8_t strip, uint8_t status){
-		uint32_t color;
-
-		switch(status){
-			case LED_STATUS_ERR:
-				color = LED_CLR_ERROR;
-			break;
-
-			case LED_STATUS_OK:
-				color = LED_CLR_OK;
-			break;
-
-			case LED_STATUS_DATA:
-				color = LED_CLR_DATA;
-			break;
-
-			case LED_STATUS_LOAD:
-				color = LED_CLR_LOAD;
-			break;
-
-			default:
-				color = 0;
-
-		}
-
-		//Rozdeli se na dva "pasky" podle nazvu
-		for(uint16_t i = 0; i < PERIF_COUNT; i++){
-			if(((i & 0x80)>>7) == strip) led_statuses[i] = color;
-		}
-
-		//Nastavi se barva
-		set_strip_color(strip, ((color>>16) & 0xff), ((color>>8) & 0xff), (color & 0xff));
-
-	}
-
-
-
-	//Rutina pro "probliknuti" kdyz jsou na LED nastavena DATA
-	void dev_process_pending_status(){
-		//Projde vsechny LED
-		for(uint16_t i = 0; i < PERIF_COUNT; i++){
-			if((i & 0x7f) < LED_BACK_NUMBER){
-				if(led_pending_flags[i] != 0){
-					//Pokud data nebyla nastavena, nastavi barvu a vycisti flag
-					set_color((i >> 7) & 0x01,i & 0x7f, ((led_pending_flags[i]>>16) & 0xff), ((led_pending_flags[i]>>8) & 0xff), (led_pending_flags[i] & 0xff));
-					led_pending_flags[i] = 0;
-				}else{
-					//Nastavi zpet puvodni barvu led
-					set_color((i >> 7) & 0x01,i & 0x7f, ((led_statuses[i]>>16) & 0xff), ((led_statuses[i]>>8) & 0xff), (led_statuses[i] & 0xff));
+			uint8_t pixelIndex = 0;
+			for(Pixel p : rearPixels) {
+				if (p.isOn()) {
+					colorToTiming(p.getColor(), &rearBuffer[resetSlots + pixelIndex * 24]);
+				} else {
+					memset(&rearBuffer[resetSlots + pixelIndex * 24], zeroPeriod, 24);
 				}
+				
+				pixelIndex++;
 			}
 		}
-
 	}
 
-	
+	extern "C" void DMA2_Channel2_IRQHandler(void) {
+		if (stmcpp::reg::read(std::ref(DMA2->ISR), DMA_ISR_TCIF2)) {
+			stmcpp::reg::clear(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF2); // Clear transfer complete flag
 
-	void set_color(uint8_t strip, uint32_t LEDnumber, uint8_t RED, uint8_t GREEN, uint8_t BLUE) {
-		
+			// Update the rear strip buffer
+			std::array frontPixels = frontStrip.getPixels();
 
+			// For each pixel, update the buffer
+			uint8_t pixelIndex = 0;
+			for(Pixel p : frontPixels) {
+				if (p.isOn()) {
+					colorToTiming(p.getColor(), &frontBuffer[resetSlots + pixelIndex * 24]);
+				} else {
+					memset(&frontBuffer[resetSlots + pixelIndex * 24], zeroPeriod, 24);
+				}
+				pixelIndex++;
+			}
+		}
 	}
 
-	void set_strip_color(uint8_t strip, uint8_t RED, uint8_t GREEN, uint8_t BLUE){
-		uint32_t index;
 
-		for (index = 0; index < ((strip == LED_STRIP_FRONT) ? LED_FRONT_NUMBER : LED_BACK_NUMBER); index++)
-			set_color(strip, index, RED, GREEN, BLUE);
+	void Color::rgb2hsv(uint8_t r, uint8_t g, uint8_t b, double& h, double& s, double& v) {
+		double rf = r / 255.0, gf = g / 255.0, bf = b / 255.0;
+		double max = std::max(std::max(rf, gf), bf);
+		double min = std::min(std::min(rf, gf), bf);
+		v = max;
+
+		double delta = max - min;
+		if (delta < 1e-5) {
+			h = s = 0.0;
+			return;
+		}
+		s = (max > 0.0) ? (delta / max) : 0.0;
+
+		if (rf == max)
+			h = (gf - bf) / delta;
+		else if (gf == max)
+			h = 2.0 + (bf - rf) / delta;
+		else
+			h = 4.0 + (rf - gf) / delta;
+
+		h *= 60.0;
+		if (h < 0.0) h += 360.0;
 	}
-	
-	void Peripheral::setColor(Color color){
-		uint8_t tempBuffer[24];
-		uint32_t i;
 
-		for (i = 0; i < 8; i++) // GREEN data
-			tempBuffer[i] = ((color.getG() << i) & 0x80) ? LED_1 : LED_0;
-		for (i = 0; i < 8; i++) // RED
-			tempBuffer[8 + i] = ((color.getR() << i) & 0x80) ? LED_1 : LED_0;
-		for (i = 0; i < 8; i++) // BLUE
-			tempBuffer[16 + i] = ((color.getB() << i) & 0x80) ? LED_1 : LED_0;
+	void Color::hsv2rgb(double h, double s, double v, uint8_t& r, uint8_t& g, uint8_t& b) {
+		if (s <= 0.0) {
+			r = g = b = static_cast<uint8_t>(v * 255.0);
+			return;
+		}
+		h = std::fmod(h, 360.0);
+		if (h < 0.0) h += 360.0;
+		h /= 60.0;
+		int i = static_cast<int>(h);
+		double f = h - i;
+		double p = v * (1.0 - s);
+		double q = v * (1.0 - s * f);
+		double t = v * (1.0 - s * (1.0 - f));
 
-		for (i = 0; i < 24; i++)
-			ledBackBuffer[LED_RESET_SLOTS_BEGIN + (int)this->led * 24 + i] = tempBuffer[i];
+		double rf, gf, bf;
+		switch (i) {
+			case 0: rf = v; gf = t; bf = p; break;
+			case 1: rf = q; gf = v; bf = p; break;
+			case 2: rf = p; gf = v; bf = t; break;
+			case 3: rf = p; gf = q; bf = v; break;
+			case 4: rf = t; gf = p; bf = v; break;
+			default: rf = v; gf = p; bf = q; break;
+		}
+		r = static_cast<uint8_t>(rf * 255.0);
+		g = static_cast<uint8_t>(gf * 255.0);
+		b = static_cast<uint8_t>(bf * 255.0);
+	}
+
+	void Color::shiftHue(int16_t degrees) {
+		double h = 0, s = 0, v = 0;
+		rgb2hsv(r_, g_, b_, h, s, v);
+		h = std::fmod(h + degrees + 360.0, 360.0);
+		hsv2rgb(h, s, v, r_, g_, b_);
 	}
 }

@@ -16,6 +16,8 @@
 
 #include <tusb.h>
 
+#include "stmcpp/register.hpp"
+
 extern Scheduler oledSleepScheduler;
 extern Scheduler keypressScheduler;
 extern Scheduler keepaliveScheduler;
@@ -24,11 +26,35 @@ extern Scheduler menuScrollScheduler;
 extern Scheduler commTimeoutScheduler;
 extern Scheduler dispChangeScheduler;
 
+Scheduler ledScheduler(100, [](){ LED::frontStrip.getPixels().at(0).toggle(); }, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL);
+
 Scheduler startupSplashScheduler(2000, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
 
 extern "C" void SystemInit(void) {
 
+	// Enable the FPU if needed
+	#if (__FPU_PRESENT == 1) && (__FPU_USED == 1)
+		stmcpp::reg::set(std::ref(SCB->CPACR), (3UL << 20U) | (3UL << 22U));
+    #endif
+
+
+}
+
+extern "C" void SysTick_Handler(void){
+	//oledSleepScheduler.increment();
+	keypressScheduler.increment();
+	guiRenderScheduler.increment();
+	menuScrollScheduler.increment();
+	startupSplashScheduler.increment();
+	//commTimeoutScheduler.increment();
+	dispChangeScheduler.increment();
+	ledScheduler.increment();
+}
+
+
+extern "C" int main(void)
+{
 	//Initialize io and other stuff related to the base unit
 	Base::init();
 
@@ -41,7 +67,11 @@ extern "C" void SystemInit(void) {
 	//Initialize MIDI
 	//MIDI::init();
 	//Initialize LED indicators
-	//LED::init();
+	LED::init();
+
+	LED::frontStrip.setColor(LED::Color(0, 0, 255, 0.1)); // Set front strip to blue
+	ledScheduler.resume(); // Start the LED scheduler
+
 	//Initialize bluetooth
 	//BLE::init();
 	//Initialize LED display
@@ -59,28 +89,17 @@ extern "C" void SystemInit(void) {
 	//RCC->CCIPR &= ~(RCC_CCIPR_CLK48SEL_Msk << RCC_CCIPR_CLK48SEL_Pos);
 	//RCC->CCIPR |= (clksel << RCC_CCIPR_CLK48SEL_SHIFT);
 
-	tusb_init();
+	
 
+	tusb_init();
 	oledSleepScheduler.pause();
 
-}
-
-extern "C" void SysTick_Handler(void){
-	//oledSleepScheduler.increment();
-	keypressScheduler.increment();
-	guiRenderScheduler.increment();
-	menuScrollScheduler.increment();
-	startupSplashScheduler.increment();
-	//commTimeoutScheduler.increment();
-	dispChangeScheduler.increment();
-}
 
 
-extern "C" int main(void)
-{
 	while (1) {
 
 		tud_task();	
+		//LED::update();
 		// Reset the Independent Watchdog Timer (IWDG)
 		//IWDG->KR = 0xAAAA;
 

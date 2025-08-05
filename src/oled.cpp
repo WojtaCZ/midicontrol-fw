@@ -7,14 +7,13 @@
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
 
-//#include "stmcpp/gpio.hpp"
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
 
 //Scheduler used to time oled sleep
 Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
-array<uint8_t, OLED_SCREENBUF_SIZE> screenBuffer;
+uint8_t screenBuffer[OLED_SCREENBUF_SIZE];
 
 namespace Oled{
     //Coordinates on the oled
@@ -26,13 +25,13 @@ namespace Oled{
     //Screen buffer storing image data
     
     //Buffers used for initialization
-    array<uint8_t, 4> pageBuffer;
+    uint8_t pageBuffer[4];
 
     //DMA flags
     uint8_t dmaStatus;
     uint16_t dmaIndex;
 
-    const array<uint8_t, 29> initBuffer = {
+    const uint8_t initBuffer[] = {
         //CMD type
         OLED_MEM_CMD, 
         //Display Off
@@ -105,7 +104,7 @@ namespace Oled{
         // Set up the DMA memory and peripheral
         stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&initBuffer[0]));
         stmcpp::reg::write(std::ref(DMA1_Channel3->CPAR), reinterpret_cast<uint32_t>(&I2C1->TXDR));
-        stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), initBuffer.size());
+        stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), sizeof(initBuffer));
 
         // Set up DMAMUX routing (DMAMUX channels start from 0, DMA from 1, thats why the offset in numbering)
         stmcpp::reg::write(std::ref(DMAMUX1_Channel2->CCR), (17 << DMAMUX_CxCR_DMAREQ_ID_Pos));
@@ -115,7 +114,7 @@ namespace Oled{
         stmcpp::reg::write(std::ref(I2C1->CR2), 
             (0b1 << I2C_CR2_AUTOEND_Pos) | // Autoend mode
             (OLED_ADD << (I2C_CR2_SADD_Pos + 1)) | // Device address
-            (initBuffer.size() << I2C_CR2_NBYTES_Pos) // Buffer size
+            (sizeof(initBuffer) << I2C_CR2_NBYTES_Pos) // Buffer size
         );
 
         // Set up I2C timing to be 1MHz (super speed)
@@ -171,19 +170,19 @@ namespace Oled{
     void update(){
         if(isInitialized() && !isSleeping()){
             //Prepare the buffer to contain frame data
-            pageBuffer.at(0) = OLED_MEM_CMD;
-            pageBuffer.at(1) = 0xB0;
-            pageBuffer.at(2) = 0x00;
-            pageBuffer.at(3) = 0x10;
+            pageBuffer[0] = OLED_MEM_CMD;
+            pageBuffer[1] = 0xB0;
+            pageBuffer[2] = 0x00;
+            pageBuffer[3] = 0x10;
 
-            screenBuffer.at(0)         = OLED_MEM_DAT;
-            screenBuffer.at(131)       = OLED_MEM_DAT;
-            screenBuffer.at(262)       = OLED_MEM_DAT;
-            screenBuffer.at(393)       = OLED_MEM_DAT;
-            screenBuffer.at(524)       = OLED_MEM_DAT;
-            screenBuffer.at(655)       = OLED_MEM_DAT;
-            screenBuffer.at(786)       = OLED_MEM_DAT;
-            screenBuffer.at(917)       = OLED_MEM_DAT;
+            screenBuffer[0]        = OLED_MEM_DAT;
+            screenBuffer[131]       = OLED_MEM_DAT;
+            screenBuffer[262]       = OLED_MEM_DAT;
+            screenBuffer[393]       = OLED_MEM_DAT;
+            screenBuffer[524]       = OLED_MEM_DAT;
+            screenBuffer[655]       = OLED_MEM_DAT;
+            screenBuffer[786]       = OLED_MEM_DAT;
+            screenBuffer[917]       = OLED_MEM_DAT;
 
             dmaStatus = 0;
             dmaIndex = 0;
@@ -191,8 +190,8 @@ namespace Oled{
 
             // Reinitialize the DMA and SPI buffer to use the image buffer instead
             stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&pageBuffer[0]));
-            stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), pageBuffer.size());
-            stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, pageBuffer.size(), I2C_CR2_NBYTES_Pos);
+            stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), sizeof(pageBuffer));
+            stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, sizeof(pageBuffer), I2C_CR2_NBYTES_Pos);
 
             // Reenable DMA
             stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
@@ -211,7 +210,7 @@ namespace Oled{
         if(isInitialized()){
             if(dmaStatus < 15){
                 if(dmaStatus % 2){
-                    pageBuffer.at(1)++;
+                    pageBuffer[1]++;
                     dmaIndex += 131;
 
                     // Reinitialize the DMA and SPI buffer to use the image buffer instead
@@ -266,9 +265,9 @@ namespace Oled{
 
     //Fill the whole screen with the given color
     void fill(Color color) {
-        for(uint32_t i = 0; i < screenBuffer.size(); i++) {
+        for(uint32_t i = 0; i < sizeof(screenBuffer); i++) {
             if(i % 131){
-                screenBuffer.at(i) = (color == Color::BLACK) ? 0x00 : 0xFF;
+                screenBuffer[i] = (color == Color::BLACK) ? 0x00 : 0xFF;
             }else continue;
         }
     }
@@ -290,9 +289,9 @@ namespace Oled{
 
         // Draw in the right color
         if(color == Color::WHITE) {
-            screenBuffer.at(1 + (coord.second/8) + coord.first + (coord.second / 8) * OLED_WIDTH) |= 1 << (coord.second % 8);
+            screenBuffer[1 + (coord.second/8) + coord.first + (coord.second / 8) * OLED_WIDTH] |= 1 << (coord.second % 8);
         } else {
-            screenBuffer.at(1 + (coord.second/8)+ coord.first + (coord.second / 8) * OLED_WIDTH) &= ~(1 << (coord.second % 8));
+            screenBuffer[1 + (coord.second/8)+ coord.first + (coord.second / 8) * OLED_WIDTH] &= ~(1 << (coord.second % 8));
         }
     }
 
