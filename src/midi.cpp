@@ -11,152 +11,166 @@
 #include <array>
 #include <vector>
 
+#include "stmcpp/register.hpp"
+#include "stmcpp/gpio.hpp"
+
 using namespace std;
 
 
 
-namespace MIDI {
-	array<uint8_t, 100> fifo;
-	int fifoIndex = 0;
-	bool gotMessage = 0;
-	vector<uint8_t> fifoData;
+namespace midi {
+
+	uint8_t packet[4];
+	uint8_t sysexBuffer[256];
+	bool receptionOngoing = false;
+	uint8_t receivedIdx = 0;
 
 	void init(void) {
-		// Enable GPIOB clock
-		RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
 
-		// Set PB10 and PB11 to alternate function mode
-		GPIOB->MODER &= ~(GPIO_MODER_MODER10 | GPIO_MODER_MODER11);
-		GPIOB->MODER |= (GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1);
+		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 10> usart_tx (stmcpp::gpio::mode::af7, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
+		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 11> usart_rx (stmcpp::gpio::mode::af7);
 
-		// Set alternate function to USART3 (AF7)
-		GPIOB->AFR[1] &= ~((0xF << (4 * (10 - 8))) | (0xF << (4 * (11 - 8))));
-		GPIOB->AFR[1] |= ((7 << (4 * (10 - 8))) | (7 << (4 * (11 - 8))));
+		// Set up USART3
+		stmcpp::reg::write(std::ref(USART3->BRR), 144000000 / 31250); 
+		stmcpp::reg::write(std::ref(USART3->CR1), 
+			USART_CR1_TE 		| // Transmitter enable
+			USART_CR1_RE 		| // Receiver enable
+			USART_CR1_RXNEIE 	  // RXNE interrupt enable
+		);
 
-		// Enable DMA1 clock
-		RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
-
-		// Enable USART3 clock
-		RCC->APB1ENR1 |= RCC_APB1ENR1_USART3EN;
-
-		// Initialize RX DMA (Channel 4)
-		DMA1_Channel4->CCR = DMA_CCR_PL_1 | DMA_CCR_MINC | DMA_CCR_TCIE | DMA_CCR_DIR;
-		DMA1_Channel4->CNDTR = 1;
-		DMA1_Channel4->CPAR = reinterpret_cast<uint32_t>(&USART3->RDR);
-		DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&fifo[0]);
-		DMA1_Channel4->CCR |= DMA_CCR_EN;
-
-		// Enable DMA1 Channel4 interrupt
-		NVIC_EnableIRQ(DMA1_Channel4_IRQn);
-
-		// Initialize TX DMA (Channel 5)
-		DMA1_Channel5->CCR = DMA_CCR_PL_1 | DMA_CCR_MINC | DMA_CCR_TCIE;
-		DMA1_Channel5->CNDTR = 1;
-		DMA1_Channel5->CPAR = reinterpret_cast<uint32_t>(&USART3->TDR);
-
-		// Enable DMA1 Channel5 interrupt
-		NVIC_EnableIRQ(DMA1_Channel5_IRQn);
-
-		// Configure USART3
-		USART3->BRR = 42000000 / 31250; // Assuming APB1 clock is 42 MHz
-		USART3->CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
-
-		// Enable USART3 DMA requests
-		USART3->CR3 |= USART_CR3_DMAT | USART_CR3_DMAR;
+		stmcpp::reg::write(std::ref(USART3->CR3), 
+			USART_CR3_DMAR  // DMA enable for reception
+		);
+	
+		// Enable USART3 IRQ
+		NVIC_EnableIRQ(USART3_IRQn);
 
 		// Enable USART3
-		USART3->CR1 |= USART_CR1_UE;
+		stmcpp::reg::set(std::ref(USART3->CR1), USART_CR1_UE); 
+
 	}
 
-	void send(vector<uint8_t> data) {
-		fifoData = data;
-		// Send the payload over MIDI
-		DMA1_Channel5->CMAR = reinterpret_cast<uint32_t>(&fifoData[0]);
-		DMA1_Channel5->CNDTR = data.size();
-		DMA1_Channel5->CCR |= DMA_CCR_EN;
-	}
+	uint8_t messageSize(uint8_t messageType) {
+		switch(messageType){
+			case MIDI_CIN_SYSEX_END_1BYTE:
+			case MIDI_CIN_1BYTE_DATA:
+				return 1;
 
-	// Transmit handler for MIDI
-	extern "C" void DMA1_Channel5_IRQHandler(void) {
-		if (DMA1->ISR & DMA_ISR_TCIF5) {
-			DMA1->IFCR |= DMA_IFCR_CTCIF5;
-			DMA1_Channel5->CCR &= ~DMA_CCR_EN;
+			case MIDI_CIN_SYSEX_END_2BYTE:
+			case MIDI_CIN_PROGRAM_CHANGE:
+			case MIDI_CIN_CHANNEL_PRESSURE:
+			case MIDI_CIN_SYSCOM_2BYTE:
+				return 2;
+
+			case MIDI_CIN_SYSEX_START:
+			case MIDI_CIN_SYSEX_END_3BYTE:
+			case MIDI_CIN_NOTE_ON:
+			case MIDI_CIN_NOTE_OFF:
+			case MIDI_CIN_POLY_KEYPRESS:
+			case MIDI_CIN_PITCH_BEND_CHANGE:	
+			case MIDI_CIN_CONTROL_CHANGE:
+			case MIDI_CIN_SYSCOM_3BYTE:
+				return 3;
+
+			case MIDI_CIN_MISC:
+			case MIDI_CIN_CABLE_EVENT:
+			default:
+				return 0;
 		}
 	}
 
-	// Receive handler for MIDI
-	extern "C" void DMA1_Channel4_IRQHandler(void) {
-		if (DMA1->ISR & DMA_ISR_TCIF4) {
-			DMA1->IFCR |= DMA_IFCR_CTCIF4;
-			DMA1_Channel4->CCR &= ~DMA_CCR_EN;
+	midi_code_index_number_t statusToCIN (uint8_t status) {
+		// Channel Voice Messages
+		if ((status & 0xF0) == 0x80) return MIDI_CIN_NOTE_OFF;
+		if ((status & 0xF0) == 0x90) return MIDI_CIN_NOTE_ON;
+		if ((status & 0xF0) == 0xA0) return MIDI_CIN_POLY_KEYPRESS;
+		if ((status & 0xF0) == 0xB0) return MIDI_CIN_CONTROL_CHANGE;
+		if ((status & 0xF0) == 0xC0) return MIDI_CIN_PROGRAM_CHANGE;
+		if ((status & 0xF0) == 0xD0) return MIDI_CIN_CHANNEL_PRESSURE;
+		if ((status & 0xF0) == 0xE0) return MIDI_CIN_PITCH_BEND_CHANGE;
 
-			// Read the message type
-			uint8_t msgType = MIDI::fifo.at(0);
+		// System Common Messages
+		switch (status) {
+			case 0xF0: return MIDI_CIN_SYSEX_START;      // SysEx Start
+			case 0xF1: return MIDI_CIN_SYSCOM_2BYTE;    // MTC Quarter Frame
+			case 0xF2: return MIDI_CIN_SYSCOM_3BYTE;    // Song Position Pointer
+			case 0xF3: return MIDI_CIN_SYSCOM_2BYTE;    // Song Select
+			case 0xF6: return MIDI_CIN_1BYTE_DATA;      // Tune Request
+			case 0xF7: return MIDI_CIN_SYSEX_END_1BYTE; // SysEx End (if no data)
+			case 0xF8:                        // Timing Clock
+			case 0xFA:                        // Start
+			case 0xFB:                        // Continue
+			case 0xFC:                        // Stop
+			case 0xFE:                        // Active Sensing
+			case 0xFF: return MIDI_CIN_1BYTE_DATA;     // System Reset / undefined 1-byte
+			default: return MIDI_CIN_MISC;              // Other undefined bytes
+		}
+	}
 
-			// If the message type is valid
-			if ((msgType & 0xF0) >= 0x80 && !MIDI::gotMessage) {
-				MIDI::gotMessage = true;
+	void send(uint8_t (&packet)[4]) {
+		uint8_t size = messageSize(packet[0]);
+		for (uint8_t i = 1; i <= size; ++i) {
+			// Wait until transmit data register is empty
+			while (!(USART3->ISR & USART_ISR_TXE)) {}
+			stmcpp::reg::write(std::ref(USART3->TDR), packet[i]);
+		}
 
-				// Treat messages with 2 bytes
-				if ((msgType >= 0x80 && msgType <= 0xBF) || (msgType & 0xF0) == 0xE0 || msgType == 0xF2 || msgType == 0xF0) {
-					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex]);
-					DMA1_Channel4->CNDTR = 2;
-					MIDI::fifoIndex += 2;
-				} else if ((msgType & 0xF0) == 0xC0 || (msgType & 0xF0) == 0xD0 || msgType == 0xF3 || msgType == 0xF1) {
-					// Treat messages with one byte
-					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
-					DMA1_Channel4->CNDTR = 1;
-				} else {
-					MIDI::fifoIndex = 0;
-					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
-					DMA1_Channel4->CNDTR = 1;
+		// Wait for transmission complete
+		while (!(USART3->ISR & USART_ISR_TC)) {}
+	}
+
+
+
+	// Receive handler for midi
+	extern "C" void USART3_IRQHandler(void) {
+		if (USART3->ISR & USART_ISR_RXNE) {
+			// Read the received byte (this also clears the RXNE flag)
+			uint8_t data = stmcpp::reg::read(std::ref(USART3->RDR));
+
+			// If we get channel voice message
+			if (data != 0xF0 && data != 0xF7) {
+				uint8_t cin = statusToCIN(data);
+				uint8_t size = messageSize(cin);
+
+				packet[0] = cin;
+				packet[1] = data; // Store the first byte (status byte)
+
+				receptionOngoing = true;
+				receivedIdx = 2; 
+
+
+			}else if (data == 0xF0) { // If we get a Sysex start byte
+				uint8_t cin = statusToCIN(data);
+				packet[0] = cin;
+				packet[1] = data;
+				receptionOngoing = true;
+			}else if (data == 0xF7 && receptionOngoing) { // If we get a Sysex end byte
+				packet[receivedIdx++] = data; // Store the end byte
+				if (receivedIdx >= messageSize(packet[0])) {
+					// If we have received enough bytes, send the packet
+					tud_midi_packet_write(packet);
+					receptionOngoing = false; // End reception
 				}
-			} else if (MIDI::gotMessage) {
-				// If the message type was sysex and we got sysex end
-				if (msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex - 1) == 0xF7) {
-					MIDI::fifoIndex = 0;
-					MIDI::fifo.at(MIDI::fifoIndex) = 0;
-					MIDI::gotMessage = false;
-					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
-					DMA1_Channel4->CNDTR = 1;
-				} else if (msgType == 0xF0 && MIDI::fifo.at(MIDI::fifoIndex - 1) != 0xF7) {
-					// If the message type was sysex and we got data
-					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
-					DMA1_Channel4->CNDTR = 1;
-				} else {
-					// Other messages
-					// Create a buffer to send over usb
-					array<uint8_t, 4> buffer = {(uint8_t)((uint8_t)(MIDI::fifo.at(0) >> 4) & 0x0F), MIDI::fifo.at(0), MIDI::fifo.at(1), MIDI::fifo.at(2)};
-
-					tud_midi_packet_write(&buffer[0]);
-
-					// Begin a new receive
-					MIDI::fifoIndex = 0;
-					MIDI::gotMessage = false;
-					MIDI::fifo.at(MIDI::fifoIndex) = 0;
-					DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
-					DMA1_Channel4->CNDTR = 1;
-				}
-			} else {
-				// If an invalid midi message was received, continue receiving
-				MIDI::gotMessage = false;
-				MIDI::fifoIndex = 0;
-				MIDI::fifo.at(MIDI::fifoIndex) = 0;
-				DMA1_Channel4->CMAR = reinterpret_cast<uint32_t>(&MIDI::fifo[MIDI::fifoIndex++]);
-				DMA1_Channel4->CNDTR = 1;
+			}else if (receptionOngoing & packet[1] != 0xF0) {
+				packet[receivedIdx++] = data; // Store the received byte in the packet
+			}else if (receptionOngoing && packet[1] == 0xF0) {
+				packet[receivedIdx++] = data;
 			}
 
-			// Re-enable the DMA
-			DMA1_Channel4->CCR |= DMA_CCR_EN;
+			if(receptionOngoing && receivedIdx >= messageSize(packet[0])) {
+				// If we have received enough bytes, send the packet
+				tud_midi_packet_write(packet);
+
+				if(packet[1] != 0xF0) {
+					receptionOngoing = false;
+				} else {
+					receivedIdx = 2;
+				}
+			}
+
+			
+			
 		}
 	}
 }
 
-// Wrapper for usb.h to call
-extern "C" void midi_send(char *data, int len) {
-	// Create vector from provided data
-	vector<uint8_t> payload;
-	for (int i = 0; i < len; i++) payload.push_back((uint8_t)data[i]);
-	// Call the send function
-	MIDI::send(payload);
-}

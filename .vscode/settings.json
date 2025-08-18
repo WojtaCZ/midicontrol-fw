@@ -73,7 +73,16 @@
 		"ble.hpp": "c",
 		"csetjmp": "cpp",
 		"charconv": "cpp",
-		"text_encoding": "cpp"
+		"text_encoding": "cpp",
+		"bitset": "cpp",
+		"ranges": "cpp",
+		"span": "cpp",
+		"__hash_table": "cpp",
+		"__split_buffer": "cpp",
+		"__tree": "cpp",
+		"queue": "cpp",
+		"stack": "cpp",
+		"forward_list": "cpp"
 	},
 	"C_Cpp.errorSquiggles": "Enabled",
 	"cortex-debug.variableUseNaturalFormat": true,

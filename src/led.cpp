@@ -11,7 +11,7 @@
 namespace LED{
 
 	constexpr uint16_t timerPeriod = (144e6 / 800000);	// 144MHz clock, 800kHz LED strip
-	constexpr uint16_t resetSlots = 800; 		// Reset slots for terminating the transmission and also setting the refresh rate
+	constexpr uint16_t resetSlots = 200; 		// Reset slots for terminating the transmission and also setting the refresh rate
 	constexpr uint16_t zeroPeriod = (timerPeriod / 3);		// 1/3 of the period for a zero bit
 	constexpr uint16_t onePeriod = (timerPeriod * 2 / 3);	// 2/3 of the period for a one bit
 
@@ -20,8 +20,8 @@ namespace LED{
 	Pixel usb(LED::Color(0, 0, 0, 0));
 	Pixel display(LED::Color(0, 0, 0, 0));
 	Pixel current(LED::Color(0, 0, 0, 0));
-	Pixel midia(LED::Color(0, 0, 0, 0));
-	Pixel midib(LED::Color(0, 0, 0, 0));
+	Pixel midia(LED::Color(255, 0, 0, 0.1));
+	Pixel midib(LED::Color(0, 255, 0, 0.1));
 	Pixel bluetooth(LED::Color(0, 0, 0, 0));
 
 	std::array rearPixels = {usb, display, current, midia, midib, bluetooth};
@@ -35,10 +35,11 @@ namespace LED{
 	uint8_t frontBuffer[2*resetSlots + fronPixels.size() * 24]; // Reset slots and 3 bytes per pixel
 
 	void init(){
+
 		// Rear LEDs
-		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 5> ledStripRear (stmcpp::gpio::mode::af10, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
+		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 5> ledStripRear (stmcpp::gpio::mode::af10, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
 		// Front LEDs
-		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 14> ledStripFront (stmcpp::gpio::mode::af1, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
+		stmcpp::gpio::pin<stmcpp::gpio::port::portb, 14> ledStripFront (stmcpp::gpio::mode::af1, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
 
 		stmcpp::reg::set(std::ref(TIM17->CR1), TIM_CR1_CEN); // Enable counter
         stmcpp::reg::write(std::ref(DMA2_Channel1->CCR), 
@@ -103,6 +104,39 @@ namespace LED{
 		stmcpp::reg::set(std::ref(TIM15->CR1), TIM_CR1_CEN); // Enable counter
 		stmcpp::reg::set(std::ref(TIM17->CR1), TIM_CR1_CEN); // Enable counter
 
+		update();
+
+	}
+
+	void update() {
+		// Update the rear strip buffer
+		std::array rearPixels = rearStrip.getPixels();
+
+		uint8_t pixelIndex = 0;
+		for(Pixel p : rearPixels) {
+			if (p.isOn()) {
+				colorToTiming(p.getColor(), &rearBuffer[resetSlots + pixelIndex * 24]);
+			} else {
+				memset(&rearBuffer[resetSlots + pixelIndex * 24], zeroPeriod, 24);
+			}
+			
+			pixelIndex++;
+		}
+
+		// Update the rear strip buffer
+		std::array frontPixels = frontStrip.getPixels();
+
+		// For each pixel, update the buffer
+		pixelIndex = 0;
+		for(Pixel p : frontPixels) {
+			if (p.isOn()) {
+				colorToTiming(p.getColor(), &frontBuffer[resetSlots + pixelIndex * 24]);
+			} else {
+				memset(&frontBuffer[resetSlots + pixelIndex * 24], zeroPeriod, 24);
+			}
+			pixelIndex++;
+		}
+
 		stmcpp::reg::set(std::ref(DMA2_Channel2->CCR), DMA_CCR_EN); // Enable DMA channel
 		stmcpp::reg::set(std::ref(DMA2_Channel1->CCR), DMA_CCR_EN); // Enable DMA channel
 	}
@@ -125,41 +159,15 @@ namespace LED{
 
 	extern "C" void DMA2_Channel1_IRQHandler(void) {
 		if (stmcpp::reg::read(std::ref(DMA2->ISR), DMA_ISR_TCIF1)) {
-			stmcpp::reg::clear(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF1); // Clear transfer complete flag
-
-			// Update the rear strip buffer
-			std::array rearPixels = rearStrip.getPixels();
-
-			uint8_t pixelIndex = 0;
-			for(Pixel p : rearPixels) {
-				if (p.isOn()) {
-					colorToTiming(p.getColor(), &rearBuffer[resetSlots + pixelIndex * 24]);
-				} else {
-					memset(&rearBuffer[resetSlots + pixelIndex * 24], zeroPeriod, 24);
-				}
-				
-				pixelIndex++;
-			}
+			stmcpp::reg::set(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF1); // Clear transfer complete flag
+			stmcpp::reg::clear(std::ref(DMA2_Channel1->CCR), DMA_CCR_EN); // Enable DMA channel
 		}
 	}
 
 	extern "C" void DMA2_Channel2_IRQHandler(void) {
 		if (stmcpp::reg::read(std::ref(DMA2->ISR), DMA_ISR_TCIF2)) {
-			stmcpp::reg::clear(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF2); // Clear transfer complete flag
-
-			// Update the rear strip buffer
-			std::array frontPixels = frontStrip.getPixels();
-
-			// For each pixel, update the buffer
-			uint8_t pixelIndex = 0;
-			for(Pixel p : frontPixels) {
-				if (p.isOn()) {
-					colorToTiming(p.getColor(), &frontBuffer[resetSlots + pixelIndex * 24]);
-				} else {
-					memset(&frontBuffer[resetSlots + pixelIndex * 24], zeroPeriod, 24);
-				}
-				pixelIndex++;
-			}
+			stmcpp::reg::set(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF2); // Clear transfer complete flag
+			stmcpp::reg::clear(std::ref(DMA2_Channel2->CCR), DMA_CCR_EN); // Enable DMA channel
 		}
 	}
 

@@ -7,6 +7,9 @@
 
 namespace LED{
 
+    void init(void);
+    void update();
+
 
     class Color{
         private:
@@ -33,13 +36,13 @@ namespace LED{
         public:
             Pixel(Color color, bool turnedOn = true) : color_(color), turnedOn_(turnedOn) {}
             Color & getColor(){ return color_; };
-            void setColor(Color color){ color_ = color; };
-            void setIntensity(float intensity) { color_.setIntensity(intensity); };
-            void shiftHue(int16_t degrees) { if(color_.raw() != 0) color_.shiftHue(degrees); };
+            void setColor(Color color){ color_ = color; update(); };
+            void setIntensity(float intensity) { color_.setIntensity(intensity);  update();  };
+            void shiftHue(int16_t degrees) { if(color_.raw() != 0) color_.shiftHue(degrees); update(); };
             bool isOn() const { return turnedOn_; };
-            void toggle() { turnedOn_ = !turnedOn_; };
-            void on() { turnedOn_ = true; };
-            void off() { turnedOn_ = false; };
+            void toggle() { turnedOn_ = !turnedOn_; update(); };
+            void on() { turnedOn_ = true; update(); };
+            void off() { turnedOn_ = false; update(); };
     };
 
     template<size_t N>
@@ -55,10 +58,7 @@ namespace LED{
             void shiftHue(int16_t degrees) { for (Pixel &p : pixels_) { p.shiftHue(degrees); } };
     };
 
-
-    void init(void);
     void colorToTiming(Color & color, uint8_t * timingBuffer);
-
     extern Pixel usb, display, current, midia, midib, bluetooth;
 	extern Strip<6> rearStrip;
     extern Strip<4> frontStrip;

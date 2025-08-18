@@ -6,9 +6,9 @@
 
 using namespace std;
 
-namespace MIDI{
+namespace midi{
     void init(void);
-    void send(vector<byte> data);
+    void send(uint8_t (&packet)[4]); 
 }
 
 //Wrapper for usb.h to call

@@ -7,6 +7,7 @@
 #include "led.hpp"
 #include "ble.hpp"
 #include "display.hpp"
+#include "usb.hpp"
 
 #include <utility>
 
@@ -15,7 +16,8 @@
 #include <cmsis_compiler.h>
 
 #include <tusb.h>
-
+#include <tinyusb/src/class/midi/midi_device.h>
+#include <tinyusb/src/class/midi/midi.h>
 #include "stmcpp/register.hpp"
 
 extern Scheduler oledSleepScheduler;
@@ -26,7 +28,11 @@ extern Scheduler menuScrollScheduler;
 extern Scheduler commTimeoutScheduler;
 extern Scheduler dispChangeScheduler;
 
-Scheduler ledScheduler(100, [](){ LED::frontStrip.getPixels().at(0).toggle(); }, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL);
+Scheduler ledScheduler(100, [](){ 
+	uint8_t p[4] = {8, 0x80, 0x00, 0x00};
+	midi::send(p); // Send a keepalive message
+
+}, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL);
 
 Scheduler startupSplashScheduler(2000, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
@@ -49,13 +55,13 @@ extern "C" void SysTick_Handler(void){
 	startupSplashScheduler.increment();
 	//commTimeoutScheduler.increment();
 	dispChangeScheduler.increment();
-	ledScheduler.increment();
+    ledScheduler.increment();
 }
 
 
 extern "C" int main(void)
 {
-	//Initialize io and other stuff related to the base unit
+	//Initialize io and other stuff related to the base unitusart_tx
 	Base::init();
 
 	//Initialize the OLED
@@ -64,13 +70,14 @@ extern "C" int main(void)
 	//Base::dfuCheck();
 	//Start the watchdog
 	//Base::wdtStart();
-	//Initialize MIDI
-	//MIDI::init();
-	//Initialize LED indicators
-	LED::init();
+	//Initialize MIDIlow
+	midi::init();
 
-	LED::frontStrip.setColor(LED::Color(0, 0, 255, 0.1)); // Set front strip to blue
-	ledScheduler.resume(); // Start the LED scheduler
+	LED::init();
+	//Initialize LED indicator
+
+	//LED::frontStrip.setColor(LED::Color(0, 0, 255, 0.1)); // Set front strip to blue
+	//ledScheduler.resume(); // Start the LED scheduler
 
 	//Initialize bluetooth
 	//BLE::init();
@@ -86,19 +93,33 @@ extern "C" int main(void)
 	CRS->CFGR |= CRS_CR_AUTOTRIMEN;
 	CRS->CFGR |= CRS_CR_CEN;
 
+	usb::init();
+
+
+
 	//RCC->CCIPR &= ~(RCC_CCIPR_CLK48SEL_Msk << RCC_CCIPR_CLK48SEL_Pos);
 	//RCC->CCIPR |= (clksel << RCC_CCIPR_CLK48SEL_SHIFT);
 
 	
 
-	tusb_init();
+
 	oledSleepScheduler.pause();
 
 
+	uint8_t packet[4];
 
 	while (1) {
 
 		tud_task();	
+
+		if(tud_midi_available()) {
+			// Read MIDI messages
+			tud_midi_packet_read(&packet[0]);
+			midi::send(packet);
+		}
+
+
+
 		//LED::update();
 		// Reset the Independent Watchdog Timer (IWDG)
 		//IWDG->KR = 0xAAAA;
@@ -146,59 +167,3 @@ extern "C" void UsageFault_Handler(void) {
 	__asm__("bkpt");
 	
 }
-
-extern "C" void USB_HP_IRQHandler(void) {
-	tud_int_handler(0);
-}
-
-extern "C" void USB_LP_IRQHandler(void) {
-	tud_int_handler(0);
-}
-
-extern "C" void USBWakeUp_IRQHandler(void) {
-	tud_int_handler(0);
-}
-
-// USB PD
-extern "C" void UCPD1_IRQHandler(void) {
-	tuc_int_handler(0);
-}
-
-
-  void tud_mount_cb(void) {
-  }
-  
-  // Invoked when device is unmounted
-  void tud_umount_cb(void) {
-  }
-  
-  // Invoked when usb bus is suspended
-  // remote_wakeup_en : if host allow us  to perform remote wakeup
-  // Within 7ms, device must draw an average of current less than 2.5 mA from bus
-  void tud_suspend_cb(bool remote_wakeup_en) {
-	(void) remote_wakeup_en;
-  }
-  
-  // Invoked when usb bus is resumed
-  void tud_resume_cb(void) {
-  }
-  
-  
-  // Invoked when cdc when line state changed e.g connected/disconnected
-  void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
-	(void) itf;
-	(void) rts;
-  
-	// TODO set some indicator
-	if (dtr) {
-	  // Terminal connected
-	} else {
-	  // Terminal disconnected
-	}
-  }
-  
-  // Invoked when CDC interface received data from host
-  void tud_cdc_rx_cb(uint8_t itf) {
-	(void) itf;
-  }
-  
