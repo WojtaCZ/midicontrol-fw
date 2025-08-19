@@ -16,14 +16,11 @@
 
 using namespace std;
 
-
-
 namespace midi {
 
 	uint8_t packet[4];
-	uint8_t sysexBuffer[256];
-	bool receptionOngoing = false;
-	uint8_t receivedIdx = 0;
+	static bool receptionOngoing = false;
+	static uint8_t receivedIdx = 0;
 
 	void init(void) {
 
@@ -119,7 +116,15 @@ namespace midi {
 		while (!(USART3->ISR & USART_ISR_TC)) {}
 	}
 
+	bool isStatusByte(uint8_t byte) {
+		// Check if the byte is a valid MIDI status byte
+		return byte >= 0x80;
+	}
 
+	bool isSysEx(uint8_t byte) {
+		// Check if the byte is a SysEx start or end byte
+		return (byte == 0xF0 || byte == 0xF7);
+	}
 
 	// Receive handler for midi
 	extern "C" void USART3_IRQHandler(void) {
@@ -128,7 +133,7 @@ namespace midi {
 			uint8_t data = stmcpp::reg::read(std::ref(USART3->RDR));
 
 			// If we get channel voice message
-			if (data != 0xF0 && data != 0xF7) {
+			if (isStatusByte(data) && !isSysEx(data)) {
 				uint8_t cin = statusToCIN(data);
 				uint8_t size = messageSize(cin);
 
@@ -138,38 +143,56 @@ namespace midi {
 				receptionOngoing = true;
 				receivedIdx = 2; 
 
-
 			}else if (data == 0xF0) { // If we get a Sysex start byte
 				uint8_t cin = statusToCIN(data);
 				packet[0] = cin;
 				packet[1] = data;
 				receptionOngoing = true;
+				receivedIdx = 2; // Reset the index for received bytes
+
 			}else if (data == 0xF7 && receptionOngoing) { // If we get a Sysex end byte
 				packet[receivedIdx++] = data; // Store the end byte
-				if (receivedIdx >= messageSize(packet[0])) {
-					// If we have received enough bytes, send the packet
-					tud_midi_packet_write(packet);
-					receptionOngoing = false; // End reception
+				switch (receivedIdx){
+					case 2:
+						packet[0] = MIDI_CIN_SYSEX_END_1BYTE; // 1 byte SysEx end
+						break;
+					case 3:
+						packet[0] = MIDI_CIN_SYSEX_END_2BYTE; // 2 byte SysEx end
+						break;
+					case 4:
+					default:
+						packet[0] = MIDI_CIN_SYSEX_END_3BYTE; // 3 byte SysEx end
+						break;
 				}
-			}else if (receptionOngoing & packet[1] != 0xF0) {
+
+				tud_midi_packet_write(packet);
+				receptionOngoing = false; // End reception
+				receivedIdx = 0;
+
+			}else if (receptionOngoing) {
 				packet[receivedIdx++] = data; // Store the received byte in the packet
-			}else if (receptionOngoing && packet[1] == 0xF0) {
-				packet[receivedIdx++] = data;
 			}
 
-			if(receptionOngoing && receivedIdx >= messageSize(packet[0])) {
+			if(receptionOngoing && receivedIdx > messageSize(packet[0])) {
 				// If we have received enough bytes, send the packet
 				tud_midi_packet_write(packet);
 
-				if(packet[1] != 0xF0) {
+				if(packet[0] != MIDI_CIN_SYSEX_START) {
 					receptionOngoing = false;
+					receivedIdx = 0;
 				} else {
-					receivedIdx = 2;
+					receivedIdx = 1;
 				}
 			}
+			
+		}
 
-			
-			
+		if (USART3->ISR & USART_ISR_ORE) {
+			// Overrun error occurred, clear the ORE flag
+			USART3->ICR |= USART_ICR_ORECF;
+			// Handle the error (e.g., log it, reset reception state, etc.)
+			receptionOngoing = false;
+			receivedIdx = 0;
 		}
 	}
 }

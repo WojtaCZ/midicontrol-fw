@@ -38,7 +38,7 @@ for i, name in enumerate(ports):
 
 target = None
 for i, name in enumerate(ports):
-    if "MIDIControl" in name:
+    if "MIDI Interface" in name:
         target = i
         print("Zvolený port podle VID/PID:", name)
         break
@@ -68,7 +68,7 @@ messages = {
 }
 
 for name, msg in messages.items():
-    print(f"Odesílám {name}: {msg}")
+    print(f"Odesílám {name}: {' '.join([hex(i) for i in msg])}")
     midi_out.send_message(msg)
     time.sleep(0.2)
 
