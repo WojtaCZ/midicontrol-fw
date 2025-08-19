@@ -134,7 +134,7 @@ namespace BLE{
 				memset(bleFifo, 0, bleFifoIndex);
 				bleFifoIndex = 0;
 			} else if (bleFifo[bleFifoIndex-1] == 0x0A) {
-				comm_decode((char *)bleFifo, bleFifoIndex);
+				//comm_decode((char *)bleFifo, bleFifoIndex);
 				memset(bleFifo, 0, bleFifoIndex);
 				bleFifoIndex = 0;
 			}

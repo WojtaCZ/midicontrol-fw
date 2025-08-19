@@ -37,12 +37,12 @@ namespace GUI{
 	//Menu item definitions
 	Item itm_play({{Language::EN, "Play"},{Language::CS, "Prehraj"}}, 
 		[](Item * itm){	
-			Communication::send(Communication::MUSIC::songlist, Communication::Command::Type::GET);
+			//Communication::send(Communication::MUSIC::songlist, Communication::Command::Type::GET);
 		}
 	);
 
 	Item itm_record({{Language::EN, "Record"},{Language::CS, "Nahraj"}}, [](Item * itm){
-		Communication::send("set music record");
+		//Communication::send("set music record");
 	 });
 
 	Item itm_settings({{Language::EN, "Settings"},{Language::CS, "Nastaveni"}}, &menu_settings);
@@ -62,30 +62,30 @@ namespace GUI{
 	Item itm_firmware({{Language::EN, "Firmware"},{Language::CS, "Firmware"}}, [](Item * itm){ display(&paragraph_firmwareInfo); });
 	Item itm_display({{Language::EN, "Display"},{Language::CS, "Display"}}, [](Item * itm){ 
 		string led;
-		switch(Display::getLed()){
+		switch(display::getLed()){
 			
-			case Display::LED::RED:
+			case display::ledColor::RED:
 				led = "RED";
 			break;
-			case Display::LED::GREEN:
+			case display::ledColor::GREEN:
 				led = "GREEN";
 			break;
-			case Display::LED::BLUE:
+			case display::ledColor::BLUE:
 				led = "BLUE";
 			break;
-			case Display::LED::YELLOW:
+			case display::ledColor::YELLOW:
 				led = "YELLOW";
 			break;
-			case Display::LED::OFF:
+			case display::ledColor::OFF:
 				led = "OFF";
 			break;
 		}
 
 		display(new Paragraph({
-				"Connected: " + string((Display::getConnected() == true) ? "true" : "false"),
-				"Song: " + to_string(Display::getSong()),
-				"Verse: " + to_string(Display::getVerse()),
-				"Letter: " + string(1, Display::getLetter()),
+				"Connected: " + string((display::getConnected() == true) ? "true" : "false"),
+				"Song: " + to_string(display::getSong()),
+				"Verse: " + to_string(display::getVerse()),
+				"Letter: " + string(1, display::getLetter()),
 				"LED: " + led
 				}, [](Paragraph * paragraph){ displayActiveMenu(); })
 		);

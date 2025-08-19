@@ -72,7 +72,7 @@ namespace Communication{
 			}else if(type == Command::Type::SET){
 				GUI::display(new GUI::Splash("Nahravam",  data, "Zastavite stiskem", [](GUI::Splash * splash){Communication::send(MUSIC::stop, Command::Type::SET); GUI::display(&GUI::menu_main);}));
 				//Send over state of the display when recording is started
-				Display::sendToMIDI();
+				display::sendToMIDI();
 			}
 
 		});
@@ -92,21 +92,21 @@ namespace Communication{
 	namespace DISPLAY{
 		Command status = Command("display status", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
-				send(Display::getConnected() ? "connected" : "disconnected");
+				send(display::getConnected() ? "connected" : "disconnected");
 			}else if(type == Command::Type::SET){
 				error(Error::unsupported);
 			}else error(Error::unknown);
 		});
 		Command song = Command("display song", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
-				send(to_string(Display::getSong()));
+				send(to_string(display::getSong()));
 			}else if(type == Command::Type::SET){
 				if(data == "none"){
-					Display::setSong(0, false);
+					display::setSong(0, false);
 					ok();
 				}else{
 					if(!data.empty() && data.find_first_not_of("0123456789") == std::string::npos){
-						Display::setSong(stoi(data), true);
+						display::setSong(stoi(data), true);
 						ok();
 					}else{
 						error(Error::wrong_input);
@@ -116,14 +116,14 @@ namespace Communication{
 		});
 		Command verse = Command("display verse", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
-				send(to_string(Display::getVerse()));
+				send(to_string(display::getVerse()));
 			}else if(type == Command::Type::SET){
 				if(data == "none"){
-					Display::setVerse(0, false);
+					display::setVerse(0, false);
 					ok();
 				}else{
 					if(!data.empty() && data.find_first_not_of("0123456789") == std::string::npos){
-						Display::setVerse(stoi(data), true);
+						display::setVerse(stoi(data), true);
 						ok();
 					}else{
 						error(Error::wrong_input);
@@ -133,14 +133,14 @@ namespace Communication{
 		});
 		Command letter = Command("display letter", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
-				send(Display::getLetter());
+				send(display::getLetter());
 			}else if(type == Command::Type::SET){
 				if(data == "none"){
-					Display::setLetter('A', false);
+					display::setLetter('A', false);
 					ok();
 				}else{
 					if(!data.empty() && data.find_first_not_of("ABCD") == std::string::npos){
-						Display::setLetter(data.at(0), true);
+						display::setLetter(data.at(0), true);
 						ok();
 					}else{
 						error(Error::wrong_input);
@@ -151,20 +151,20 @@ namespace Communication{
 
 		Command led = Command("display led", [](string data, Command::Type type){
 			if(type == Command::Type::GET){
-				switch(Display::getLed()){
-					case Display::LED::RED:
+				switch(display::getLed()){
+					case display::ledColor::RED:
 						send("red");
 					break;
 
-					case Display::LED::GREEN:
+					case display::ledColor::GREEN:
 						send("green");
 					break;
 
-					case Display::LED::BLUE:
+					case display::ledColor::BLUE:
 						send("blue");
 					break;
 
-					case Display::LED::YELLOW:
+					case display::ledColor::YELLOW:
 						send("yellow");
 					break;
 
@@ -174,19 +174,19 @@ namespace Communication{
 				}
 			}else if(type == Command::Type::SET){
 				if(data == "red"){
-					Display::setLed(Display::LED::RED);
+					display::setLed(display::ledColor::RED);
 					ok();
 				}else if(data == "green"){
-					Display::setLed(Display::LED::GREEN);
+					display::setLed(display::ledColor::GREEN);
 					ok();
 				}else if(data == "blue"){
-					Display::setLed(Display::LED::BLUE);
+					display::setLed(display::ledColor::BLUE);
 					ok();
 				}else if(data == "yellow"){
-					Display::setLed(Display::LED::YELLOW);
+					display::setLed(display::ledColor::YELLOW);
 					ok();
 				}else if(data == "off"){
-					Display::setLed(Display::LED::OFF);
+					display::setLed(display::ledColor::OFF);
 					ok();
 				}else error(Error::wrong_input);
 			}else error(Error::unknown);

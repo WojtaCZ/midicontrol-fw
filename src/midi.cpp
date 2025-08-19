@@ -194,6 +194,10 @@ namespace midi {
 			receptionOngoing = false;
 			receivedIdx = 0;
 		}
+
+		NVIC_ClearPendingIRQ(USART3_IRQn);
 	}
+
+	
 }
 

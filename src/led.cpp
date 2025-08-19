@@ -162,6 +162,8 @@ namespace LED{
 			stmcpp::reg::set(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF1); // Clear transfer complete flag
 			stmcpp::reg::clear(std::ref(DMA2_Channel1->CCR), DMA_CCR_EN); // Enable DMA channel
 		}
+
+		NVIC_ClearPendingIRQ(DMA2_Channel1_IRQn);
 	}
 
 	extern "C" void DMA2_Channel2_IRQHandler(void) {
@@ -169,6 +171,8 @@ namespace LED{
 			stmcpp::reg::set(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF2); // Clear transfer complete flag
 			stmcpp::reg::clear(std::ref(DMA2_Channel2->CCR), DMA_CCR_EN); // Enable DMA channel
 		}
+
+		NVIC_ClearPendingIRQ(DMA2_Channel2_IRQn);
 	}
 
 

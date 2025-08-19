@@ -82,7 +82,8 @@
 		"__tree": "cpp",
 		"queue": "cpp",
 		"stack": "cpp",
-		"forward_list": "cpp"
+		"forward_list": "cpp",
+		"locale": "cpp"
 	},
 	"C_Cpp.errorSquiggles": "Enabled",
 	"cortex-debug.variableUseNaturalFormat": true,

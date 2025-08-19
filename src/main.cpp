@@ -28,9 +28,8 @@ extern Scheduler menuScrollScheduler;
 extern Scheduler commTimeoutScheduler;
 extern Scheduler dispChangeScheduler;
 
-Scheduler ledScheduler(100, [](){ 
-	uint8_t p[4] = {8, 0x80, 0x00, 0x00};
-	midi::send(p); // Send a keepalive message
+Scheduler ledScheduler(500, [](){ 
+	display::sendState();
 
 }, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL);
 
@@ -54,7 +53,7 @@ extern "C" void SysTick_Handler(void){
 	menuScrollScheduler.increment();
 	startupSplashScheduler.increment();
 	//commTimeoutScheduler.increment();
-	dispChangeScheduler.increment();
+	//dispChangeScheduler.increment();
     ledScheduler.increment();
 }
 
@@ -77,7 +76,7 @@ extern "C" int main(void)
 	//Initialize LED indicator
 
 	//LED::frontStrip.setColor(LED::Color(0, 0, 255, 0.1)); // Set front strip to blue
-	//ledScheduler.resume(); // Start the LED scheduler
+	ledScheduler.resume(); // Start the LED scheduler
 
 	//Initialize bluetooth
 	//BLE::init();
