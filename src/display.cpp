@@ -87,32 +87,32 @@ namespace display {
         stmcpp::reg::write(std::ref(DMAMUX1_Channel9->CCR), (25 << DMAMUX_CxCR_DMAREQ_ID_Pos));
 
         // Set up USART1
-		stmcpp::reg::write(std::ref(USART3->BRR), 144000000 / 1200); 
-		stmcpp::reg::write(std::ref(USART3->CR1), 
+		stmcpp::reg::write(std::ref(USART1->BRR), 16000000 / 1200); 
+		stmcpp::reg::write(std::ref(USART1->CR1), 
 			USART_CR1_TE 		| // Transmitter enable
 			USART_CR1_RE 		| // Receiver enable
 			USART_CR1_RTOIE 	  // Receiver timeout enable
 		);
 
-		stmcpp::reg::write(std::ref(USART3->CR3), 
+		stmcpp::reg::write(std::ref(USART1->CR3), 
 			USART_CR3_DMAR | // DMA enable for reception
             USART_CR3_DMAT   // DMA enable for transmission
 		);
 
-        stmcpp::reg::write(std::ref(USART3->RTOR), 100); // Set receiver timeout to 100 bits
+        stmcpp::reg::write(std::ref(USART1->RTOR), 100); // Set receiver timeout to 100 bits
 
 		// Enable USART1 IRQ
         NVIC_EnableIRQ(USART1_IRQn);
 
-        // Enable USART3
-        stmcpp::reg::set(std::ref(USART3->CR1), USART_CR1_UE); 
+        // Enable USART1
+        stmcpp::reg::set(std::ref(USART1->CR1), USART_CR1_UE); 
 
         // Enable the RX DMA
         stmcpp::reg::set(std::ref(DMA2_Channel3->CCR), DMA_CCR_EN); 
     }
 
     void sendState(){
-        //if(!connected) return; 
+        if(!connected) return; 
 
         memcpy(txBuffer, currentState, sizeof(txBuffer));
         // Send display state over MIDI if changed
@@ -123,6 +123,7 @@ namespace display {
 
         // Reconfigure the TX DMA
         stmcpp::reg::clear(std::ref(DMA2_Channel4->CCR), DMA_CCR_EN); 
+        stmcpp::reg::write(std::ref(DMA2_Channel4->CMAR), reinterpret_cast<uint32_t>(&txBuffer[0]));
         stmcpp::reg::write(std::ref(DMA2_Channel4->CNDTR), sizeof(txBuffer));
         stmcpp::reg::set(std::ref(DMA2_Channel4->CCR), DMA_CCR_EN); 
 

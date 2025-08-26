@@ -11,6 +11,11 @@ namespace Base{
 	
 	//Initialization of necessary objects
 	void init(){
+
+		// Enable HSI
+		RCC->CR |= RCC_CR_HSION;
+		while (!(RCC->CR & RCC_CR_HSIRDY));
+
 		// Enable HSE
 		RCC->CR |= RCC_CR_HSEON;
 		while (!(RCC->CR & RCC_CR_HSERDY));
@@ -54,6 +59,8 @@ namespace Base{
 		// Enable LSI
 		RCC->CSR |= RCC_CSR_LSION;
 		while (!(RCC->CSR & RCC_CSR_LSIRDY));
+
+		RCC->CCIPR |= (0b10 << RCC_CCIPR_USART1SEL_Pos); // Select HSI16 for USART1
 
 		// Enable peripheral clocks
 		RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN | RCC_AHB2ENR_GPIODEN | RCC_AHB2ENR_GPIOEEN;

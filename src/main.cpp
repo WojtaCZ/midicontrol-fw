@@ -81,7 +81,7 @@ extern "C" int main(void)
 	//Initialize bluetooth
 	//BLE::init();
 	//Initialize LED display
-	//Display::init();
+	display::init();
 
 	NVIC_EnableIRQ(USB_LP_IRQn);
 	NVIC_EnableIRQ(USB_HP_IRQn);
