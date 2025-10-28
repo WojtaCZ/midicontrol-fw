@@ -5,7 +5,7 @@
 #include "menu.hpp"
 #include "midi.hpp"
 #include "led.hpp"
-#include "ble.hpp"
+#include "bluetooth.hpp"
 #include "display.hpp"
 #include "usb.hpp"
 
@@ -79,7 +79,7 @@ extern "C" int main(void)
 	ledScheduler.resume(); // Start the LED scheduler
 
 	//Initialize bluetooth
-	//BLE::init();
+	Bluetooth::init();
 	//Initialize LED display
 	display::init();
 

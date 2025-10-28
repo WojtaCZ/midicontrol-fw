@@ -1,6 +1,5 @@
 #include "menu.hpp"
 #include "scheduler.hpp"
-#include "ble.hpp"
 #include "comm.hpp"
 #include "git.hpp"
 #include "display.hpp"
@@ -344,12 +343,12 @@ namespace GUI{
 		Oled::fill(Oled::Color::BLACK);
 
 		//Display connection icon
-		if(BLE::isConnected()){
+		/*if(BLE::isConnected()){
 			Oled::setCursor({113,0});
 			Oled::writeSymbol(48, Icon_7x10, Oled::Color::WHITE);
 			Oled::setCursor({120,0});
 			Oled::writeSymbol(49, Icon_7x10, Oled::Color::WHITE);
-		}
+		}*/
 		//If the menu has a title in selected language, display it
 		if(activeMenu->hasTitle(LANG)){
 			Oled::setCursor({0,0});

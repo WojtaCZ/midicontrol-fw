@@ -27,7 +27,7 @@ set(SOURCES
 	${SOURCE_BASE}/display.cpp
 	${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/scheduler.cpp
-	${SOURCE_BASE}/ble.cpp
+	${SOURCE_BASE}/bluetooth.cpp
 	#${SOURCE_BASE}/comm.cpp
 	${SOURCE_BASE}/led.cpp
 	${SOURCE_BASE}/midi.cpp
@@ -135,7 +135,7 @@ add_custom_command(
 	TARGET ${PROJECT_NAME}.elf
 	COMMAND ${CMAKE_OBJCOPY} -Oihex $<TARGET_FILE:${PROJECT_NAME}.elf> ${HEX_FILE}
 	COMMAND ${CMAKE_OBJCOPY} -Obinary $<TARGET_FILE:${PROJECT_NAME}.elf> ${BIN_FILE}
-	COMMENT "Building ${HEX_FILE} \nBuilding ${BIN_FILE}")
+)
 
 	
 #include(${CMAKE_SOURCE_DIR}/cmake/git.cmake)

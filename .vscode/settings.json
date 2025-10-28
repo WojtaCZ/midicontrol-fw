@@ -83,7 +83,13 @@
 		"queue": "cpp",
 		"stack": "cpp",
 		"forward_list": "cpp",
-		"locale": "cpp"
+		"locale": "cpp",
+		"__bit_reference": "cpp",
+		"__node_handle": "cpp",
+		"__verbose_abort": "cpp",
+		"execution": "cpp",
+		"ios": "cpp",
+		"print": "cpp"
 	},
 	"C_Cpp.errorSquiggles": "Enabled",
 	"cortex-debug.variableUseNaturalFormat": true,
