@@ -69,9 +69,9 @@ namespace Base{
 		RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMA2EN | RCC_AHB1ENR_DMAMUX1EN;
 
 		// Initialize and enable systick timer
-		SysTick->LOAD = 143999;
+		/*SysTick->LOAD = 143999;
 		SysTick->VAL = 0;
-		SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
+		SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;*/
 
 		// Initialize current source GPIO
 		GPIOA->MODER = (GPIOA->MODER & ~(GPIO_MODER_MODE4_Msk)) | (GPIO_MODER_MODE4_0);

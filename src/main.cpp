@@ -19,6 +19,10 @@
 #include <tinyusb/src/class/midi/midi_device.h>
 #include <tinyusb/src/class/midi/midi.h>
 #include "stmcpp/register.hpp"
+#include "stmcpp/units.hpp"
+#include "stmcpp/systick.hpp"
+
+using namespace stmcpp::units;
 
 extern Scheduler oledSleepScheduler;
 extern Scheduler keypressScheduler;
@@ -47,6 +51,7 @@ extern "C" void SystemInit(void) {
 }
 
 extern "C" void SysTick_Handler(void){
+	stmcpp::systick::increment();
 	//oledSleepScheduler.increment();
 	keypressScheduler.increment();
 	guiRenderScheduler.increment();
@@ -60,6 +65,8 @@ extern "C" void SysTick_Handler(void){
 
 extern "C" int main(void)
 {
+	stmcpp::systick::enable(144_MHz, 1_ms);
+
 	//Initialize io and other stuff related to the base unitusart_tx
 	Base::init();
 
@@ -117,6 +124,121 @@ extern "C" int main(void)
 			midi::send(packet);
 		}
 
+		if(Bluetooth::isCommandAvailable()){
+			std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
+			Bluetooth::Command::Type type = command->getType();
+			
+			// --- WARNING: Increased buffer size ---
+			// 64 bytes is too small for commands with addresses, UUIDs, or hex strings.
+			// 256 bytes is a safer choice.
+			char packet[64]; 
+
+			// Use a switch for better readability
+			// Use snprintf(packet, sizeof(packet), ...) for buffer safety
+			switch (type) {
+				// --- Simple Commands ---
+				case Bluetooth::Command::Type::ADV_TIMEOUT:     snprintf(packet, sizeof(packet), "Got ble: ADV_TIMEOUT\r\n"); break;
+				case Bluetooth::Command::Type::BONDED:          snprintf(packet, sizeof(packet), "Got ble: BONDED\r\n"); break;
+				case Bluetooth::Command::Type::DISCONNECT:      snprintf(packet, sizeof(packet), "Got ble: DISCONNECT\r\n"); break;
+				case Bluetooth::Command::Type::ERR_CONNPARAM:   snprintf(packet, sizeof(packet), "Got ble: ERR_CONNPARAM\r\n"); break;
+				case Bluetooth::Command::Type::ERR_MEMORY:      snprintf(packet, sizeof(packet), "Got ble: ERR_MEMORY\r\n"); break;
+				case Bluetooth::Command::Type::ERR_READ:        snprintf(packet, sizeof(packet), "Got ble: ERR_READ\r\n"); break;
+				case Bluetooth::Command::Type::ERR_RMT_CMD:     snprintf(packet, sizeof(packet), "Got ble: ERR_RMT_CMD\r\n"); break;
+				case Bluetooth::Command::Type::ERR_SEC:         snprintf(packet, sizeof(packet), "Got ble: ERR_SEC\r\n"); break;
+				case Bluetooth::Command::Type::KEY_REQ:         snprintf(packet, sizeof(packet), "Got ble: KEY_REQ\r\n"); break;
+				case Bluetooth::Command::Type::PIO1H:           snprintf(packet, sizeof(packet), "Got ble: PIO1H\r\n"); break;
+				case Bluetooth::Command::Type::PIO1L:           snprintf(packet, sizeof(packet), "Got ble: PIO1L\r\n"); break;
+				case Bluetooth::Command::Type::PIO2H:           snprintf(packet, sizeof(packet), "Got ble: PIO2H\r\n"); break;
+				case Bluetooth::Command::Type::PIO2L:           snprintf(packet, sizeof(packet), "Got ble: PIO2L\r\n"); break;
+				case Bluetooth::Command::Type::PIO3H:           snprintf(packet, sizeof(packet), "Got ble: PIO3H\r\n"); break;
+				case Bluetooth::Command::Type::PIO3L:           snprintf(packet, sizeof(packet), "Got ble: PIO3L\r\n"); break;
+				case Bluetooth::Command::Type::RE_DISCV:        snprintf(packet, sizeof(packet), "Got ble: RE_DISCV\r\n"); break;
+				case Bluetooth::Command::Type::REBOOT:          snprintf(packet, sizeof(packet), "Got ble: REBOOT\r\n"); break;
+				case Bluetooth::Command::Type::RMT_CMD_OFF:     snprintf(packet, sizeof(packet), "Got ble: RMT_CMD_OFF\r\n"); break;
+				case Bluetooth::Command::Type::RMT_CMD_ON:      snprintf(packet, sizeof(packet), "Got ble: RMT_CMD_ON\r\n"); break;
+				case Bluetooth::Command::Type::SECURED:         snprintf(packet, sizeof(packet), "Got ble: SECURED\r\n"); break;
+				case Bluetooth::Command::Type::STREAM_OPEN:     snprintf(packet, sizeof(packet), "Got ble: STREAM_OPEN\r\n"); break;
+				case Bluetooth::Command::Type::TMR1:            snprintf(packet, sizeof(packet), "Got ble: TMR1\r\n"); break;
+				case Bluetooth::Command::Type::TMR2:            snprintf(packet, sizeof(packet), "Got ble: TMR2\r\n"); break;
+				case Bluetooth::Command::Type::TMR3:            snprintf(packet, sizeof(packet), "Got ble: TMR3\r\n"); break;
+
+				// --- Parameterized Commands ---
+				case Bluetooth::Command::Type::CONN_PARAM: {
+					auto* cmd = static_cast<Bluetooth::ConnParamCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: CONN_PARAM int=%d, lat=%d, to=%d\r\n", 
+							cmd->getInterval(), cmd->getLatency(), cmd->getTimeout());
+					break;
+				}
+				case Bluetooth::Command::Type::CONNECT: {
+					auto* cmd = static_cast<Bluetooth::ConnectCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: CONNECT conn=%d, addr=%s\r\n", 
+							cmd->getConnected(), cmd->getAddr().c_str());
+					break;
+				}
+				case Bluetooth::Command::Type::KEY: {
+					auto* cmd = static_cast<Bluetooth::KeyCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: KEY key=%d\r\n", cmd->getKey());
+					break;
+				}
+				case Bluetooth::Command::Type::INDI: {
+					auto* cmd = static_cast<Bluetooth::IndiCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: INDI hdl=%d, hex=%s\r\n", 
+							cmd->getHandle(), cmd->getHex().c_str());
+					break;
+				}
+				case Bluetooth::Command::Type::NOTI: {
+					auto* cmd = static_cast<Bluetooth::NotiCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: NOTI hdl=%d, hex=%s\r\n", 
+							cmd->getHandle(), cmd->getHex().c_str());
+					break;
+				}
+				case Bluetooth::Command::Type::RV: {
+					auto* cmd = static_cast<Bluetooth::RvCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: RV hdl=%d, hex=%s\r\n", 
+							cmd->getHandle(), cmd->getHex().c_str());
+					break;
+				}
+				case Bluetooth::Command::Type::S_RUN: {
+					auto* cmd = static_cast<Bluetooth::SRunCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: S_RUN cmd=%s\r\n", cmd->getCmd().c_str());
+					break;
+				}
+				case Bluetooth::Command::Type::WC: {
+					auto* cmd = static_cast<Bluetooth::WcCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: WC hdl=%d, hex=%s\r\n", 
+							cmd->getHandle(), cmd->getHex().c_str());
+					break;
+				}
+				case Bluetooth::Command::Type::WV: {
+					auto* cmd = static_cast<Bluetooth::WvCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: WV hdl=%d, hex=%s\r\n", 
+							cmd->getHandle(), cmd->getHex().c_str());
+					break;
+				}
+				case Bluetooth::Command::Type::ADV_CONNECTABLE: {
+					auto* cmd = static_cast<Bluetooth::AdvConnectableCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: ADV_CONN addr=%s, conn=%d, name=%s, uuids=%s, rssi=%d\r\n",
+							cmd->getAddr().c_str(), cmd->getConnected(), cmd->getName().c_str(), 
+							cmd->getUuids().c_str(), cmd->getRssi());
+					break;
+				}
+				case Bluetooth::Command::Type::ADV_NON_CONNECTABLE: {
+					auto* cmd = static_cast<Bluetooth::AdvNonConnectableCommand*>(command.get());
+					snprintf(packet, sizeof(packet), "Got ble: ADV_NON_CONN addr=%s, conn=%d, rssi=%d, hex=%s\r\n",
+							cmd->getAddr().c_str(), cmd->getConnected(), cmd->getRssi(), cmd->getHex().c_str());
+					break;
+				}
+				
+				// --- Fallback ---
+				case Bluetooth::Command::Type::UNKNOWN:
+				default:
+					snprintf(packet, sizeof(packet), "Got ble: UNKNOWN (%02X)\r\n", static_cast<uint8_t>(type));
+					break;
+			}
+
+			tud_cdc_write_str(packet);
+		}
+
 
 
 		//LED::update();
@@ -125,6 +247,16 @@ extern "C" int main(void)
 
 	}
 
+}
+
+void stmcpp::error::globalFaultHandler(std::uint32_t hash, std::uint32_t code) {
+	//There has been an error caused by the handler, try to figure out what happened
+	switch (hash) {
+	
+		default:
+			__ASM volatile("bkpt");
+			break;
+	}
 }
 
 

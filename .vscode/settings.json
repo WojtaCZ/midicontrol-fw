@@ -89,7 +89,8 @@
 		"__verbose_abort": "cpp",
 		"execution": "cpp",
 		"ios": "cpp",
-		"print": "cpp"
+		"print": "cpp",
+		"format": "cpp"
 	},
 	"C_Cpp.errorSquiggles": "Enabled",
 	"cortex-debug.variableUseNaturalFormat": true,

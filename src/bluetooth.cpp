@@ -5,6 +5,7 @@
 #include <string.h>
 #include <string>
 
+
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cstdint>
@@ -14,6 +15,8 @@
 
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
+#include "stmcpp/units.hpp"
+#include "stmcpp/systick.hpp"
 
 
 /*
@@ -24,6 +27,7 @@ PA0 - MODE
 PA1 - RST
 */
 using namespace std;
+using namespace stmcpp::units;
 
 extern "C" void comm_decode(char * data, int len);
 
@@ -33,10 +37,12 @@ namespace Bluetooth{
 	static constexpr int BUFF_SIZE = 256;
 
 	Mode _mode = Mode::DATA;
-	StatusMessage _lastStatus = StatusMessage::REBOOT;
 
-	char rxBuffer[BUFF_SIZE], txBuffer[BUFF_SIZE];
-	uint8_t rxIndex = 0;
+	bool _receivingCommand = false;
+	char _rxCommandBuffer[BUFF_SIZE], _rxDataBuffer[BUFF_SIZE], _txBuffer[BUFF_SIZE];
+	uint8_t _rxCommandIndex = 0, _rxDataIndex = 0;
+
+	std::deque<std::string> _commandTextQueue;
 
 
 	uint8_t setAuthentication(Authentication auth) {
@@ -51,7 +57,7 @@ namespace Bluetooth{
 	}
 
 	Mode setMode(Mode mode) {
-		if(mode == mode) return mode;
+		if(mode == _mode) return mode;
 
 		if (mode == Mode::COMMAND) {
 			_send_string("$$$");
@@ -81,119 +87,109 @@ namespace Bluetooth{
 
 	}
 
+	std::unique_ptr<Command> _build_command_from_string(const std::string& cmdText) {
+		// Use .c_str() to allow strcmp, strncmp, and sscanf to work
+		const char* rxCmd = cmdText.c_str(); 
 
+		// --- Simple (non-parameterized) commands ---
+		if      (!strcmp(rxCmd, "ADV_TIMEOUT"))      return make_unique<Command>(Command::Type::ADV_TIMEOUT);
+		else if (!strcmp(rxCmd, "BONDED"))           return make_unique<Command>(Command::Type::BONDED);
+		else if (!strcmp(rxCmd, "DISCONNECT"))       return make_unique<Command>(Command::Type::DISCONNECT);
+		else if (!strcmp(rxCmd, "ERR_CONNPARAM"))    return make_unique<Command>(Command::Type::ERR_CONNPARAM);
+		else if (!strcmp(rxCmd, "ERR_MEMORY"))       return make_unique<Command>(Command::Type::ERR_MEMORY);
+		else if (!strcmp(rxCmd, "ERR_READ"))         return make_unique<Command>(Command::Type::ERR_READ);
+		else if (!strcmp(rxCmd, "ERR_RMT_CMD"))      return make_unique<Command>(Command::Type::ERR_RMT_CMD);
+		else if (!strcmp(rxCmd, "ERR_SEC"))          return make_unique<Command>(Command::Type::ERR_SEC);
+		else if (!strcmp(rxCmd, "KEY_REQ"))          return make_unique<Command>(Command::Type::KEY_REQ);
+		else if (!strcmp(rxCmd, "PIO1H"))            return make_unique<Command>(Command::Type::PIO1H);
+		else if (!strcmp(rxCmd, "PIO1L"))            return make_unique<Command>(Command::Type::PIO1L);
+		else if (!strcmp(rxCmd, "PIO2H"))            return make_unique<Command>(Command::Type::PIO2H);
+		else if (!strcmp(rxCmd, "PIO2L"))            return make_unique<Command>(Command::Type::PIO2L);
+		else if (!strcmp(rxCmd, "PIO3H"))            return make_unique<Command>(Command::Type::PIO3H);
+		else if (!strcmp(rxCmd, "PIO3L"))            return make_unique<Command>(Command::Type::PIO3L);
+		else if (!strcmp(rxCmd, "RE_DISCV"))         return make_unique<Command>(Command::Type::RE_DISCV);
+		else if (!strcmp(rxCmd, "REBOOT"))           return make_unique<Command>(Command::Type::REBOOT);
+		else if (!strcmp(rxCmd, "RMT_CMD_OFF"))      return make_unique<Command>(Command::Type::RMT_CMD_OFF);
+		else if (!strcmp(rxCmd, "RMT_CMD_ON"))       return make_unique<Command>(Command::Type::RMT_CMD_ON);
+		else if (!strcmp(rxCmd, "SECURED"))          return make_unique<Command>(Command::Type::SECURED);
+		else if (!strcmp(rxCmd, "STREAM_OPEN"))      return make_unique<Command>(Command::Type::STREAM_OPEN);
+		else if (!strcmp(rxCmd, "TMR1"))             return make_unique<Command>(Command::Type::TMR1);
+		else if (!strcmp(rxCmd, "TMR2"))             return make_unique<Command>(Command::Type::TMR2);
+		else if (!strcmp(rxCmd, "TMR3"))             return make_unique<Command>(Command::Type::TMR3);
 
-	inline void _receive_handler() {
-		if(!strcmp(rxBuffer, "CMD>")){
-			_mode = Mode::COMMAND;
-			_clear_rx_buffer();
+		// --- Parameterized messages ---
+		else if (strncmp(rxCmd, "CONN_PARAM,", 10) == 0) {
+			int interval, latency, timeout;
+			if (sscanf(rxCmd, "CONN_PARAM,%d,%d,%d", &interval, &latency, &timeout) == 3)
+				return make_unique<ConnParamCommand>(interval, latency, timeout);
+		}
+		else if (strncmp(rxCmd, "CONNECT", 7) == 0) {
+			int connected; char addr[32];
+			if (sscanf(rxCmd, "CONNECT,%d,%31[^%%]", &connected, addr) == 2)
+				return make_unique<ConnectCommand>(connected, addr);
+		}
+		else if (strncmp(rxCmd, "KEY:", 4) == 0) {
+			int key;
+			if (sscanf(rxCmd, "KEY:%d", &key) == 1)
+				return make_unique<KeyCommand>(key);
+		}
+		else if (strncmp(rxCmd, "INDI,", 4) == 0) {
+			int hdl; char hex[128];
+			if (sscanf(rxCmd, "INDI,%d,%127[^%%]", &hdl, hex) == 2)
+				return make_unique<IndiCommand>(hdl, hex);
+		}
+		else if (strncmp(rxCmd, "NOTI,", 5) == 0) {
+			int hdl; char hex[128];
+			if (sscanf(rxCmd, "NOTI,%d,%127[^%%]", &hdl, hex) == 2)
+				return make_unique<NotiCommand>(hdl, hex);
+		}
+		else if (strncmp(rxCmd, "RV,", 3) == 0) {
+			int hdl; char hex[128];
+			if (sscanf(rxCmd, "RV,%d,%127[^%%]", &hdl, hex) == 2)
+				return make_unique<RvCommand>(hdl, hex);
+		}
+		else if (strncmp(rxCmd, "S_RUN:", 6) == 0) {
+			char cmd[64];
+			if (sscanf(rxCmd, "S_RUN:%63[^%%]", cmd) == 1)
+				return make_unique<SRunCommand>(cmd);
+		}
+		else if (strncmp(rxCmd, "WC,", 3) == 0) {
+			int hdl; char hex[128];
+			if (sscanf(rxCmd, "WC,%d,%127[^%%]", &hdl, hex) == 2)
+				return make_unique<WcCommand>(hdl, hex);
+		}
+		else if (strncmp(rxCmd, "WV,", 3) == 0) {
+			int hdl; char hex[128];
+			if (sscanf(rxCmd, "WV,%d,%127[^%%]", &hdl, hex) == 2)
+				return make_unique<WvCommand>(hdl, hex);
 		}
 
-		if(!strcmp(rxBuffer, "END")){
-			_mode = Mode::DATA;
-			_clear_rx_buffer();
+		// --- Advertisement messages ---
+		else {
+			char addr[32], name[32], uuids[64], hex[128];
+			int connected, rssi;
+
+			if (sscanf(rxCmd, "%31[^,],%d,%31[^,],%63[^,],%d", addr, &connected, name, uuids, &rssi) == 5) {
+				return make_unique<AdvConnectableCommand>(addr, connected, name, uuids, rssi);
+			}
+			else if (strstr(rxCmd, ",Brcst,") != nullptr) {
+				if (sscanf(rxCmd, "%31[^,],%d,%d,Brcst,%127[^%]", addr, &connected, &rssi, hex) == 4)
+					return make_unique<AdvNonConnectableCommand>(addr, connected, rssi, hex);
+			}
 		}
 
-		if(rxBuffer[0] == '%' && rxIndex != 0 && rxBuffer[rxIndex] == '%'){
-			if      (strcmp(rxBuffer, "%ADV_TIMEOUT%") == 0)      _lastStatus = StatusMessage::ADV_TIMEOUT;
-			else if (strcmp(rxBuffer, "%BONDED%") == 0)           _lastStatus = StatusMessage::BONDED;
-			else if (strcmp(rxBuffer, "%DISCONNECT%") == 0)       _lastStatus = StatusMessage::DISCONNECT;
-			else if (strcmp(rxBuffer, "%ERR_CONNPARAM%") == 0)    _lastStatus = StatusMessage::ERR_CONNPARAM;
-			else if (strcmp(rxBuffer, "%ERR_MEMORY%") == 0)       _lastStatus = StatusMessage::ERR_MEMORY;
-			else if (strcmp(rxBuffer, "%ERR_READ%") == 0)         _lastStatus = StatusMessage::ERR_READ;
-			else if (strcmp(rxBuffer, "%ERR_RMT_CMD%") == 0)      _lastStatus = StatusMessage::ERR_RMT_CMD;
-			else if (strcmp(rxBuffer, "%ERR_SEC%") == 0)          _lastStatus = StatusMessage::ERR_SEC;
-			else if (strcmp(rxBuffer, "%KEY_REQ%") == 0)          _lastStatus = StatusMessage::KEY_REQ;
-			else if (strcmp(rxBuffer, "%PIO1H%") == 0)            _lastStatus = StatusMessage::PIO1H;
-			else if (strcmp(rxBuffer, "%PIO1L%") == 0)            _lastStatus = StatusMessage::PIO1L;
-			else if (strcmp(rxBuffer, "%PIO2H%") == 0)            _lastStatus = StatusMessage::PIO2H;
-			else if (strcmp(rxBuffer, "%PIO2L%") == 0)            _lastStatus = StatusMessage::PIO2L;
-			else if (strcmp(rxBuffer, "%PIO3H%") == 0)            _lastStatus = StatusMessage::PIO3H;
-			else if (strcmp(rxBuffer, "%PIO3L%") == 0)            _lastStatus = StatusMessage::PIO3L;
-			else if (strcmp(rxBuffer, "%RE_DISCV%") == 0)         _lastStatus = StatusMessage::RE_DISCV;
-			else if (strcmp(rxBuffer, "%REBOOT%") == 0)           _lastStatus = StatusMessage::REBOOT;
-			else if (strcmp(rxBuffer, "%RMT_CMD_OFF%") == 0)      _lastStatus = StatusMessage::RMT_CMD_OFF;
-			else if (strcmp(rxBuffer, "%RMT_CMD_ON%") == 0)       _lastStatus = StatusMessage::RMT_CMD_ON;
-			else if (strcmp(rxBuffer, "%SECURED%") == 0)          _lastStatus = StatusMessage::SECURED;
-			else if (strcmp(rxBuffer, "%STREAM_OPEN%") == 0)      _lastStatus = StatusMessage::STREAM_OPEN;
-			else if (strcmp(rxBuffer, "%TMR1%") == 0)             _lastStatus = StatusMessage::TMR1;
-			else if (strcmp(rxBuffer, "%TMR2%") == 0)             _lastStatus = StatusMessage::TMR2;
-			else if (strcmp(rxBuffer, "%TMR3%") == 0)             _lastStatus = StatusMessage::TMR3;
-
-			// --- Parameterized messages ---
-			else if (strncmp(rxBuffer, "%CONN_PARAM,", 12) == 0) {
-				_lastStatus = StatusMessage::CONN_PARAM;
-				int interval, latency, timeout;
-				sscanf(rxBuffer, "%%CONN_PARAM,%d,%d,%d%%", &interval, &latency, &timeout);
-			}
-			else if (strncmp(rxBuffer, "%CONNECT", 8) == 0) {
-				_lastStatus = StatusMessage::CONNECT;
-				//sscanf(rxBuffer, "%%CONNECT,%d,%31[^%%]%%", &msg.connected, msg.addr);
-			}
-			else if (strncmp(rxBuffer, "%KEY:", 5) == 0) {
-				_lastStatus = StatusMessage::KEY;
-				int key;
-				sscanf(rxBuffer, "%%KEY:%d%%", &key);
-			}
-			else if (strncmp(rxBuffer, "%INDI,", 6) == 0) {
-				_lastStatus = StatusMessage::INDI;
-				//sscanf(rxBuffer, "%%INDI,%d,%127[^%%]%%", &msg.hdl, msg.hex);
-			}
-			else if (strncmp(rxBuffer, "%NOTI,", 6) == 0) {
-				_lastStatus = StatusMessage::NOTI;
-				//sscanf(rxBuffer, "%%NOTI,%d,%127[^%%]%%", &msg.hdl, msg.hex);
-			}
-			else if (strncmp(rxBuffer, "%RV,", 4) == 0) {
-				_lastStatus = StatusMessage::RV;
-				//sscanf(rxBuffer, "%%RV,%d,%127[^%%]%%", &msg.hdl, msg.hex);
-			}
-			else if (strncmp(rxBuffer, "%S_RUN:", 7) == 0) {
-				_lastStatus = StatusMessage::S_RUN;
-				//sscanf(rxBuffer, "%%S_RUN:%63[^%%]%%", msg.cmd);
-			}
-			else if (strncmp(rxBuffer, "%WC,", 4) == 0) {
-				_lastStatus = StatusMessage::WC;
-				//sscanf(rxBuffer, "%%WC,%d,%127[^%%]%%", &msg.hdl, msg.hex);
-			}
-			else if (strncmp(rxBuffer, "%WV,", 4) == 0) {
-				_lastStatus = StatusMessage::WV;
-				//sscanf(rxBuffer, "%%WV,%d,%127[^%%]%%", &msg.hdl, msg.hex);
-			}
-
-			// --- Advertisement messages ---
-			else if (rxBuffer[0] == '%' && strstr(rxBuffer, ",UUIDs,") != NULL) {
-				_lastStatus = StatusMessage::ADV_CONNECTABLE;
-				char addr[32], name[32], uuids[64];
-				int connected, rssi;
-				sscanf(rxBuffer, "%%%31[^,],%d,%31[^,],%63[^,],%d%%", addr, &connected, name, uuids, &rssi);
-			}
-			else if (rxBuffer[0] == '%' && strstr(rxBuffer, ",Brcst,") != NULL) {
-				_lastStatus = StatusMessage::ADV_NON_CONNECTABLE;
-				char addr[32], hex[127];
-				int connected, rssi;
-				sscanf(rxBuffer, "%%%31[^,],%d,%d,Brcst,%127[^%%]%%", addr, &connected, &rssi, hex);
-			}
-			_clear_rx_buffer();
-		}
-
-
-
+		// If no match was found, return an 'UNKNOWN' command
+		return make_unique<Command>(Command::Type::UNKNOWN);
 	}
 
-	inline void _clear_rx_buffer() {
-		memset(rxBuffer, 0, BUFF_SIZE);
- 		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&txBuffer[0]));
-        stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), 1);
-		rxIndex = 0;
-	}
 
 	uint8_t _send_string(std::string data) {
 		if(data.length() > BUFF_SIZE) return 1;
 		if(DMA1_Channel2->CCR & DMA_CCR_EN) return 1;
 
-		memcpy(txBuffer, data.c_str(), data.length());
+		memcpy(_txBuffer, data.c_str(), data.length());
 
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&txBuffer[0]));
+		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_txBuffer[0]));
 		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), data.length());
 		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
 
@@ -203,8 +199,8 @@ namespace Bluetooth{
 	uint8_t _send_char(char c) {
 		if(DMA1_Channel2->CCR & DMA_CCR_EN) return 1;
 
-		txBuffer[0] = c;
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&txBuffer[0]));
+		_txBuffer[0] = c;
+		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_txBuffer[0]));
 		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), 1);
 		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
 
@@ -226,22 +222,6 @@ namespace Bluetooth{
 		// Reset the RN487x
 		rst_n.clear();
 
-		// Set up RX dma
-        stmcpp::reg::write(std::ref(DMA1_Channel1->CCR), 
-            (0b1 << DMA_CCR_MINC_Pos) | // Memory increment mode
-            (0b1 << DMA_CCR_TCIE_Pos)   // Transfer complete interrupt enable
-            
-        );
-
-        // Set up the DMA memory and peripheral
-        stmcpp::reg::write(std::ref(DMA1_Channel1->CMAR), reinterpret_cast<uint32_t>(&rxBuffer[0]));
-        stmcpp::reg::write(std::ref(DMA1_Channel1->CPAR), reinterpret_cast<uint32_t>(&USART2->RDR));
-        stmcpp::reg::write(std::ref(DMA1_Channel1->CNDTR), 1);
-        NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-
-        // Set up DMAMUX routing (DMAMUX channels map to 6-11 to DMA2 1-6, thats why the offset in numbering)
-        stmcpp::reg::write(std::ref(DMAMUX1_Channel0->CCR), (26 << DMAMUX_CxCR_DMAREQ_ID_Pos));
-
 		// Set up TX dma
         stmcpp::reg::write(std::ref(DMA1_Channel2->CCR), 
             (0b1 << DMA_CCR_MINC_Pos) | // Memory increment mode
@@ -251,7 +231,7 @@ namespace Bluetooth{
         );
 
         // Set up the DMA memory and peripheral
-        stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&txBuffer[0]));
+        stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_txBuffer[0]));
         stmcpp::reg::write(std::ref(DMA1_Channel2->CPAR), reinterpret_cast<uint32_t>(&USART2->TDR));
         stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), 1);
         NVIC_EnableIRQ(DMA1_Channel2_IRQn);
@@ -263,27 +243,43 @@ namespace Bluetooth{
 		stmcpp::reg::write(std::ref(USART2->BRR), 144000000 / 115200); // Assuming 144MHz clock, set baud rate to 115200
 		stmcpp::reg::write(std::ref(USART2->CR1), 
 			(0b1 << USART_CR1_TE_Pos) | // Transmitter enable
-			(0b1 << USART_CR1_RE_Pos)   // Receiver enable
+			(0b1 << USART_CR1_RE_Pos) | // Receiver enable
+			(0b1 << USART_CR1_RXNEIE_Pos)  // RX not empty interrupt enable
 		);
 
 		stmcpp::reg::write(std::ref(USART2->CR3), 
-			(0b1 << USART_CR3_DMAR_Pos) | // DMA receiver enable
 			(0b1 << USART_CR3_DMAT_Pos)    // DMA transmitter enable
 		);
+
+		NVIC_EnableIRQ(USART2_IRQn);
 
 		// Enable USART2
 		stmcpp::reg::set(std::ref(USART2->CR1), USART_CR1_UE);
 
-		// Enable RX DMA
-		stmcpp::reg::set(std::ref(DMA1_Channel1->CCR), DMA_CCR_EN);
+		stmcpp::systick::waitBlocking(100_ms);
 
 		// Bring RN487x out of reset
 		rst_n.set();
-
-
        
 		return 0;
 	}
+
+	bool isCommandAvailable() {
+        return !_commandTextQueue.empty();
+    }
+
+    std::unique_ptr<Command> getCommand() {
+        if (_commandTextQueue.empty()) {
+            return nullptr; // No command string available
+        }
+        
+        // Move the command string from the queue to a local variable
+        std::string cmdText = std::move(_commandTextQueue.front());
+        _commandTextQueue.pop_front();
+        
+        // Parse the string and return the resulting command object
+        return _build_command_from_string(cmdText);
+    }
 
 
 
@@ -295,13 +291,27 @@ namespace Bluetooth{
         }
 	}
 
-	extern "C" void DMA1_Channel1_IRQHandler(){
-		if(stmcpp::reg::read(std::ref(DMA1->ISR)) & DMA_ISR_TCIF1){
-			stmcpp::reg::clear(std::ref(DMA1_Channel1->CCR), DMA_CCR_EN);
-			_receive_handler();
-			rxIndex++;
-			stmcpp::reg::set(std::ref(DMA1_Channel1->CCR), DMA_CCR_EN);
-            stmcpp::reg::set(std::ref(DMA1->IFCR), DMA_IFCR_CTCIF1); 
+	extern "C" void USART2_IRQHandler() {
+		if(stmcpp::reg::read(std::ref(USART2->ISR)) & USART_ISR_RXNE){
+			char c = static_cast<char>(USART2->RDR);
+
+			if (c == '%' && !_receivingCommand){
+				// Start reception of a command
+				_receivingCommand = true;
+				_rxCommandIndex = 0;
+			}else if (_receivingCommand && c != '%'){
+				// Fill the command buffer with the command
+				_rxCommandBuffer[_rxCommandIndex++] = c;
+				
+			}else if (_receivingCommand && c == '%'){
+				_rxCommandBuffer[_rxCommandIndex++] = '\0';
+				_receivingCommand = false;
+				_commandTextQueue.push_back(string(_rxCommandBuffer));
+				// Process command
+				//_parse_command();
+				_rxCommandIndex = 0;
+			}
+
         }
 	}
 }
