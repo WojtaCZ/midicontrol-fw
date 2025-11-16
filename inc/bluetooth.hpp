@@ -6,6 +6,10 @@
 #include <stdint.h>
 #include <deque>
 #include <memory>	
+#include "stmcpp/units.hpp"
+#include "stmcpp/register.hpp"
+#include "stmcpp/gpio.hpp"
+#include "stmcpp/systick.hpp"
 
 namespace Bluetooth{
 
@@ -15,19 +19,10 @@ namespace Bluetooth{
         CONNECTABLE_AND_BEACON = 2
     };
 
-    enum class Authentication: uint8_t {
-        AUTOMATIC_WITH_BODING = 0,
-        YES_NO = 1,
-        AUTOMATIC = 2,
-        ENTER_PASSKEY = 3,
-        DISPLAY_PASSKEY = 4,
-        ENTER_PASSKEY_ON_BOTH = 5
-    };
-
     enum class CommandResponse : uint8_t {
         OK = 0,
         ERROR = 1,
-        TIMEOUT = 2
+        NONE = 2
     };
 
     enum class Mode : uint8_t {
@@ -222,6 +217,9 @@ namespace Bluetooth{
     std::unique_ptr<Command> getCommand();
     uint8_t _send_string(std::string data);
     void _clear_rx_buffer(void);
+
+    CommandResponse sendCommand(std::string command);
+    CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse, stmcpp::units::duration timeout);
 
 }
 

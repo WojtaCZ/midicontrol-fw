@@ -18,9 +18,9 @@
 #include <tusb.h>
 #include <tinyusb/src/class/midi/midi_device.h>
 #include <tinyusb/src/class/midi/midi.h>
-#include "stmcpp/register.hpp"
-#include "stmcpp/units.hpp"
-#include "stmcpp/systick.hpp"
+//#include "stmcpp/register.hpp"
+//#include "stmcpp/units.hpp"
+//#include "stmcpp/systick.hpp"
 
 using namespace stmcpp::units;
 
@@ -31,6 +31,7 @@ extern Scheduler guiRenderScheduler;
 extern Scheduler menuScrollScheduler;
 extern Scheduler commTimeoutScheduler;
 extern Scheduler dispChangeScheduler;
+extern void signalError();
 
 Scheduler ledScheduler(500, [](){ 
 	display::sendState();
@@ -86,7 +87,9 @@ extern "C" int main(void)
 	ledScheduler.resume(); // Start the LED scheduler
 
 	//Initialize bluetooth
-	Bluetooth::init();
+	if(Bluetooth::init()){
+		signalError();
+	}
 	//Initialize LED display
 	display::init();
 
@@ -247,6 +250,17 @@ extern "C" int main(void)
 
 	}
 
+}
+
+void signalError() {
+	while (1) {
+		LED::frontStrip.setColor(LED::Color(255, 0, 0, 0.5)); // Set front strip to red
+		LED::update();
+		stmcpp::systick::waitBlocking(500_ms);
+		LED::frontStrip.setColor(LED::Color(0, 0, 0, 0.0)); // Turn off front strip
+		LED::update();
+		stmcpp::systick::waitBlocking(500_ms);
+	}
 }
 
 void stmcpp::error::globalFaultHandler(std::uint32_t hash, std::uint32_t code) {

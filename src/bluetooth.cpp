@@ -13,10 +13,7 @@
 #include <tinyusb/src/device/usbd.h>
 #include <tinyusb/src/class/midi/midi_device.h>
 
-#include "stmcpp/register.hpp"
-#include "stmcpp/gpio.hpp"
-#include "stmcpp/units.hpp"
-#include "stmcpp/systick.hpp"
+
 
 
 /*
@@ -33,58 +30,81 @@ extern "C" void comm_decode(char * data, int len);
 
 namespace Bluetooth{
 
-	static constexpr int DEFAUILT_TIMEOUT = 1000;
+	static constexpr stmcpp::units::duration DEFAULT_TIMEOUT = 1000_ms;
 	static constexpr int BUFF_SIZE = 256;
+
+	static constexpr char STATUS_DELIMITER = '%';
+	static constexpr char MESSAGE_DELIMITER = '\r';
+	static constexpr string OK_STRING = "AOK";
+	static constexpr string ERROR_STRING = "ERR";
+	static constexpr string CMD_STRING = "CMD>";
+
 
 	Mode _mode = Mode::DATA;
 
-	bool _receivingCommand = false;
-	char _rxCommandBuffer[BUFF_SIZE], _rxDataBuffer[BUFF_SIZE], _txBuffer[BUFF_SIZE];
-	uint8_t _rxCommandIndex = 0, _rxDataIndex = 0;
+	bool _processingCommand = false;
+	CommandResponse _commandResponse = CommandResponse::NONE;
+
+
+	bool _receivingStatus = false;
+	char _rxStatusBuffer[BUFF_SIZE], _rxDataBuffer[BUFF_SIZE], _txBuffer[BUFF_SIZE];
+	uint8_t _rxStatusIndex = 0, _rxDataIndex = 0;
 
 	std::deque<std::string> _commandTextQueue;
 
-
-	uint8_t setAuthentication(Authentication auth) {
-		//return static_cast<uint8_t>(sendCommand("SA," + std::to_string(static_cast<uint8_t>(auth))));
-		return 0;
-	}
 	
-	CommandResponse sendCommand(string command, bool awaitResponse = true, int timeout = DEFAUILT_TIMEOUT) {
+	CommandResponse sendCommand(std::string command) {
 		string response;
-		return CommandResponse::OK;
-		//return sendCommand(command, response, awaitResponse, timeout);
+		return sendCommand(command, response, false, DEFAULT_TIMEOUT);
 	}
 
 	Mode setMode(Mode mode) {
 		if(mode == _mode) return mode;
 
+		duration timestamp = stmcpp::systick::getDuration();
+
 		if (mode == Mode::COMMAND) {
 			_send_string("$$$");
-			while(_mode != Mode::COMMAND);
+			while(_mode != Mode::COMMAND && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT));
+			if(_mode != Mode::COMMAND) {
+				return _mode; // Failed to switch to COMMAND mode
+			}
 		} else {
 			_send_string("---\r");
-			while(_mode != Mode::DATA);
 		}
 		return mode;
 	}
 
 
-	CommandResponse sendCommand(string command, string & response, bool awaitResponse = true, int timeout = DEFAUILT_TIMEOUT) {
-		if (_mode != Mode::COMMAND) {
-			_mode = setMode(Mode::COMMAND);
+	CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse = true, stmcpp::units::duration timeout = DEFAULT_TIMEOUT) {
+		if (setMode(Mode::COMMAND) != Mode::COMMAND) {
+			return CommandResponse::NONE;
 		}
+
+		_processingCommand = true;
+		_commandResponse = CommandResponse::NONE;
 
 		_send_string(command + "\r");
 
-		if (awaitResponse) {
-			// Wait for response (this is a placeholder, actual implementation may vary)
-			// In a real implementation, you would wait and parse the response from the BLE module
-			// Here we just assume success for demonstration purposes
-			return CommandResponse::OK;
-		}
-		return CommandResponse::OK;
+		
+		duration timestamp = stmcpp::systick::getDuration();
+		while(_commandResponse == CommandResponse::NONE && stmcpp::systick::getDuration() < (timestamp + timeout)) {;}
 
+		if(_commandResponse != CommandResponse::OK) {
+			_processingCommand = false;
+			return _commandResponse;
+		} else if (awaitResponse) {
+			
+			size_t len = strnlen(_rxDataBuffer, BUFF_SIZE);
+			response.assign(_rxDataBuffer, len);
+			// clear internal state for next command
+			_rxDataIndex = 0;
+			_processingCommand = false;
+			return _commandResponse;
+		}
+		
+		_processingCommand = false;
+		return _commandResponse;
 	}
 
 	std::unique_ptr<Command> _build_command_from_string(const std::string& cmdText) {
@@ -260,8 +280,16 @@ namespace Bluetooth{
 
 		// Bring RN487x out of reset
 		rst_n.set();
-       
-		return 0;
+
+		duration timestamp = stmcpp::systick::getDuration();
+		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT)){;}
+
+		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
+		Bluetooth::Command::Type type = command->getType();
+
+		if(type == Bluetooth::Command::Type::REBOOT){
+			return 0; // Successful init after reboot
+		}else return 1;
 	}
 
 	bool isCommandAvailable() {
@@ -294,22 +322,50 @@ namespace Bluetooth{
 	extern "C" void USART2_IRQHandler() {
 		if(stmcpp::reg::read(std::ref(USART2->ISR)) & USART_ISR_RXNE){
 			char c = static_cast<char>(USART2->RDR);
-
-			if (c == '%' && !_receivingCommand){
+			if (!_receivingStatus && c == STATUS_DELIMITER){
 				// Start reception of a command
-				_receivingCommand = true;
-				_rxCommandIndex = 0;
-			}else if (_receivingCommand && c != '%'){
+				_receivingStatus = true;
+				_rxStatusIndex = 0;
+			}else if (_receivingStatus && c != STATUS_DELIMITER){
 				// Fill the command buffer with the command
-				_rxCommandBuffer[_rxCommandIndex++] = c;
-				
-			}else if (_receivingCommand && c == '%'){
-				_rxCommandBuffer[_rxCommandIndex++] = '\0';
-				_receivingCommand = false;
-				_commandTextQueue.push_back(string(_rxCommandBuffer));
-				// Process command
-				//_parse_command();
-				_rxCommandIndex = 0;
+				_rxStatusBuffer[_rxStatusIndex++] = c;
+			}else if (_receivingStatus && c == STATUS_DELIMITER){
+				_rxStatusBuffer[_rxStatusIndex++] = '\0';
+				_receivingStatus = false;
+				// Push the command into command queue
+				_commandTextQueue.push_back(string(_rxStatusBuffer));
+				_rxStatusIndex = 0;
+			}else if (!_receivingStatus && c != STATUS_DELIMITER){
+				_rxDataBuffer[_rxDataIndex++] = c;
+
+				if(!strcmp(_rxDataBuffer + (_rxDataIndex - OK_STRING.length()), OK_STRING.c_str())){
+
+					if(_processingCommand){
+						_commandResponse = CommandResponse::OK;
+					}
+
+					_rxDataIndex = 0;
+
+				}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - ERROR_STRING.length()), ERROR_STRING.c_str())){
+					if(_processingCommand){
+						_commandResponse = CommandResponse::ERROR;
+					}
+
+					_rxDataIndex = 0;		
+
+				}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - CMD_STRING.length()), CMD_STRING.c_str())){
+					_mode = Mode::COMMAND;
+
+					if(_processingCommand){
+						_commandResponse = CommandResponse::OK;
+					} else _commandResponse = CommandResponse::NONE;
+
+					_rxDataIndex = 0;
+				}else if(c == MESSAGE_DELIMITER){
+					// End of data message
+					_rxDataBuffer[_rxDataIndex++] = '\0'; 
+					__asm__("bkpt"); // Placeholder for data message handling
+				}
 			}
 
         }
