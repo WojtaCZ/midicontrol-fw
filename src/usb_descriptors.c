@@ -25,6 +25,7 @@
 
  #include "tusb.h"
  #include <stm32g431xx.h>
+ #include <stdio.h>
  
  #define USB_PID   0x4000 
  #define USB_VID   0xCafe

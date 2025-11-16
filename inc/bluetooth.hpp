@@ -13,6 +13,18 @@
 
 namespace Bluetooth{
 
+    using namespace stmcpp::units;
+
+    static constexpr stmcpp::units::duration DEFAULT_TIMEOUT = 1000_ms;
+	static constexpr int BUFF_SIZE = 256;
+
+	static constexpr char STATUS_DELIMITER = '%';
+	static constexpr char MESSAGE_DELIMITER = '\r';
+	static constexpr std::string OK_STRING = " AOK";
+	static constexpr std::string ERROR_STRING = " ERR";
+	static constexpr std::string CMD_STRING = "CMD>";
+
+
     enum class AdvertisementType : uint8_t {
         CONNECTABLE = 0,
         BEACON = 1,
@@ -217,9 +229,10 @@ namespace Bluetooth{
     std::unique_ptr<Command> getCommand();
     uint8_t _send_string(std::string data);
     void _clear_rx_buffer(void);
+    Mode setMode(Mode mode);
 
     CommandResponse sendCommand(std::string command);
-    CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse, stmcpp::units::duration timeout);
+    CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse = true, stmcpp::units::duration timeout = DEFAULT_TIMEOUT);
 
 }
 

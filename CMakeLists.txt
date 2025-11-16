@@ -35,6 +35,7 @@ set(SOURCES
 	${SOURCE_BASE}/oled_fonts.cpp
 	${SOURCE_BASE}/usb.cpp
 	${SOURCE_BASE}/usb_descriptors.c
+	${SOURCE_BASE}/debug.cpp
 
 
 

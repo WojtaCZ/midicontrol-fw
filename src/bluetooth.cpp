@@ -1,5 +1,6 @@
 #include "bluetooth.hpp"
 #include "menu.hpp"
+#include "debug.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -29,16 +30,6 @@ using namespace stmcpp::units;
 extern "C" void comm_decode(char * data, int len);
 
 namespace Bluetooth{
-
-	static constexpr stmcpp::units::duration DEFAULT_TIMEOUT = 1000_ms;
-	static constexpr int BUFF_SIZE = 256;
-
-	static constexpr char STATUS_DELIMITER = '%';
-	static constexpr char MESSAGE_DELIMITER = '\r';
-	static constexpr string OK_STRING = "AOK";
-	static constexpr string ERROR_STRING = "ERR";
-	static constexpr string CMD_STRING = "CMD>";
-
 
 	Mode _mode = Mode::DATA;
 
@@ -76,7 +67,7 @@ namespace Bluetooth{
 	}
 
 
-	CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse = true, stmcpp::units::duration timeout = DEFAULT_TIMEOUT) {
+	CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse, stmcpp::units::duration timeout) {
 		if (setMode(Mode::COMMAND) != Mode::COMMAND) {
 			return CommandResponse::NONE;
 		}
@@ -345,14 +336,14 @@ namespace Bluetooth{
 					}
 
 					_rxDataIndex = 0;
-
+					_rxDataBuffer[_rxDataIndex] = '\0'; 
 				}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - ERROR_STRING.length()), ERROR_STRING.c_str())){
 					if(_processingCommand){
 						_commandResponse = CommandResponse::ERROR;
 					}
 
 					_rxDataIndex = 0;		
-
+					_rxDataBuffer[_rxDataIndex] = '\0'; 
 				}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - CMD_STRING.length()), CMD_STRING.c_str())){
 					_mode = Mode::COMMAND;
 
@@ -361,10 +352,10 @@ namespace Bluetooth{
 					} else _commandResponse = CommandResponse::NONE;
 
 					_rxDataIndex = 0;
+					_rxDataBuffer[_rxDataIndex] = '\0'; 
 				}else if(c == MESSAGE_DELIMITER){
 					// End of data message
 					_rxDataBuffer[_rxDataIndex++] = '\0'; 
-					__asm__("bkpt"); // Placeholder for data message handling
 				}
 			}
 

@@ -8,6 +8,7 @@
 #include "bluetooth.hpp"
 #include "display.hpp"
 #include "usb.hpp"
+#include "debug.hpp"
 
 #include <utility>
 
@@ -68,8 +69,11 @@ extern "C" int main(void)
 {
 	stmcpp::systick::enable(144_MHz, 1_ms);
 
-	//Initialize io and other stuff related to the base unitusart_tx
+	Debug::setLevel(Debug::Level::INFO);
+
+	//Initialize io and other stuff related to the base 
 	Base::init();
+	
 
 	//Initialize the OLED
 	Oled::init();
@@ -103,6 +107,24 @@ extern "C" int main(void)
 	CRS->CFGR |= CRS_CR_CEN;
 
 	usb::init();
+
+	if(Bluetooth::setMode(Bluetooth::Mode::COMMAND) != Bluetooth::Mode::COMMAND){
+		signalError();
+	}else {
+		if(Bluetooth::sendCommand("SGA,0") != Bluetooth::CommandResponse::OK){
+			signalError();
+		}
+
+		std::string response;
+
+		if(Bluetooth::sendCommand("GK", response) != Bluetooth::CommandResponse::OK){
+			signalError();
+		}
+
+		__asm__("bkpt"); // Debug breakpoint
+	}
+
+
 
 
 
