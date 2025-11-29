@@ -111,13 +111,10 @@ extern "C" int main(void)
 	if(Bluetooth::setMode(Bluetooth::Mode::COMMAND) != Bluetooth::Mode::COMMAND){
 		signalError();
 	}else {
-		if(Bluetooth::sendCommand("SGA,0") != Bluetooth::CommandResponse::OK){
-			signalError();
-		}
 
 		std::string response;
 
-		if(Bluetooth::sendCommand("GK", response) != Bluetooth::CommandResponse::OK){
+		if(Bluetooth::sendCommand("JD", response) != Bluetooth::CommandResponse::OK){
 			signalError();
 		}
 

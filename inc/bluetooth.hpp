@@ -20,9 +20,9 @@ namespace Bluetooth{
 
 	static constexpr char STATUS_DELIMITER = '%';
 	static constexpr char MESSAGE_DELIMITER = '\r';
-	static constexpr std::string OK_STRING = " AOK";
-	static constexpr std::string ERROR_STRING = " ERR";
-	static constexpr std::string CMD_STRING = "CMD>";
+	static constexpr std::string OK_STRING = "AOK";
+	static constexpr std::string ERROR_STRING = "ERR";
+	static constexpr std::string CMD_STRING = "CMD> ";
 
 
     enum class AdvertisementType : uint8_t {

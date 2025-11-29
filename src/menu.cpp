@@ -112,13 +112,15 @@ namespace GUI{
 		}, &menu_main
 	);
 
-	Splash splash_welcome(Base::DEVICE_NAME, Base::DEVICE_TYPE, GIT::REVISION + " (" + GIT::DIRTY + ")", [](Splash * splash){ displayActiveMenu(); });
+	Splash splash_welcome(Base::DEVICE_NAME, Base::DEVICE_TYPE, git::revision + " (" + git::branch + ")", [](Splash * splash){ displayActiveMenu(); });
 	
-	Paragraph paragraph_firmwareInfo({
-		"Build: " + GIT::REVISION,
-	 	"Dirty: " + string((GIT::DIRTY == "dirty") ? "true" : "false"),
-		"Date: " + GIT::DATE, "Time: " + GIT::TIME,
-		"Branch: " + GIT::BRANCH},
+	Paragraph paragraph_firmwareInfo(
+		{
+			"Build: " + git::revision,
+			"Branch: " + git::branch,
+			"Date: " + git::build_date, 
+			"Time: " + git::build_time
+		},
 		[](Paragraph * paragraph){ displayActiveMenu();}
 	);
 

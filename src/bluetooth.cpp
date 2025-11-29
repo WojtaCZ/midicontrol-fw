@@ -35,6 +35,7 @@ namespace Bluetooth{
 
 	bool _processingCommand = false;
 	CommandResponse _commandResponse = CommandResponse::NONE;
+	char _commandResponseString[BUFF_SIZE];
 
 
 	bool _receivingStatus = false;
@@ -86,8 +87,8 @@ namespace Bluetooth{
 			return _commandResponse;
 		} else if (awaitResponse) {
 			
-			size_t len = strnlen(_rxDataBuffer, BUFF_SIZE);
-			response.assign(_rxDataBuffer, len);
+			size_t len = strnlen(_commandResponseString, BUFF_SIZE);
+			response.assign(_commandResponseString, len);
 			// clear internal state for next command
 			_rxDataIndex = 0;
 			_processingCommand = false;
@@ -355,7 +356,10 @@ namespace Bluetooth{
 					_rxDataBuffer[_rxDataIndex] = '\0'; 
 				}else if(c == MESSAGE_DELIMITER){
 					// End of data message
-					_rxDataBuffer[_rxDataIndex++] = '\0'; 
+					strcpy(_commandResponseString, _rxDataBuffer);
+					_commandResponseString[_rxDataIndex] = '\0';
+					_rxDataIndex = 0;
+					_rxDataBuffer[_rxDataIndex] = '\0'; 
 				}
 			}
 

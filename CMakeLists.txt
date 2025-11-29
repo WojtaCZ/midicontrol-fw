@@ -140,4 +140,4 @@ add_custom_command(
 )
 
 	
-#include(${CMAKE_SOURCE_DIR}/cmake/git.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/git.cmake)
