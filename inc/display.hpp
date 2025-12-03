@@ -18,16 +18,16 @@ namespace display{
 
     void init();
     void sendState();
-    void setSong(uint16_t song, uint8_t visible);
-    void setVerse(uint8_t verse, uint8_t visible);
-    void setLetter(char letter, uint8_t visible);
+    void setSong(uint16_t song, bool visible);
+    void setVerse(uint8_t verse, bool visible);
+    void setLetter(char letter, bool visible);
     void setLed(ledColor led);
 
     uint16_t getSong();
     uint8_t getVerse();
     char getLetter();
     ledColor getLed();
-    bool getConnected();
+    bool isConnected();
     bool wasChanged();
     //uint8_t (&data)[9] getRawState();
     uint8_t getRawState(int index);

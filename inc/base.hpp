@@ -5,7 +5,7 @@
 #include <string>
 #include <stm32g431xx.h>
 
-namespace Base{
+namespace base{
 	
     using namespace std;
 
@@ -17,12 +17,13 @@ namespace Base{
 	void dfuCheck();
 	void wdtStart();
 
-    namespace CurrentSource{
+    namespace current{
 		
         bool isEnabled();
         void enable();
         void disable();
         void toggle(void);
+        void set(bool value);
     };
 
     namespace Encoder{

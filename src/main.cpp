@@ -49,6 +49,10 @@ extern "C" void SystemInit(void) {
 		stmcpp::reg::set(std::ref(SCB->CPACR), (3UL << 20U) | (3UL << 22U));
     #endif
 
+	//Initialize io and other stuff related to the base 
+	base::init();
+	
+
 
 }
 
@@ -71,16 +75,12 @@ extern "C" int main(void)
 
 	Debug::setLevel(Debug::Level::INFO);
 
-	//Initialize io and other stuff related to the base 
-	Base::init();
-	
-
 	//Initialize the OLED
 	Oled::init();
 	//Check if we want to enable DFU
-	//Base::dfuCheck();
+	//base::dfuCheck();
 	//Start the watchdog
-	//Base::wdtStart();
+	//base::wdtStart();
 	//Initialize MIDIlow
 	midi::init();
 
@@ -107,20 +107,6 @@ extern "C" int main(void)
 	CRS->CFGR |= CRS_CR_CEN;
 
 	usb::init();
-
-	if(Bluetooth::setMode(Bluetooth::Mode::COMMAND) != Bluetooth::Mode::COMMAND){
-		signalError();
-	}else {
-
-		std::string response;
-
-		if(Bluetooth::sendCommand("JD", response) != Bluetooth::CommandResponse::OK){
-			signalError();
-		}
-
-		__asm__("bkpt"); // Debug breakpoint
-	}
-
 
 
 

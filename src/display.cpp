@@ -28,7 +28,6 @@ Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most
 
 //Scheduler dispChangeScheduler(300, [](){ if(Display::wasChanged() && Display::getConnected()) Display::send();}, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL | Scheduler::ACTIVE);
 
-
 namespace display {
 
     //Default state - all off
@@ -160,7 +159,7 @@ namespace display {
         sendState();
     }
 
-    void setLetter(char letter, uint8_t visible){
+    void setLetter(char letter, bool visible){
         if(visible){
             if(letter > 'D' || letter < 'A') letter = 'A';
             currentState[7] = 0x0f & (letter - 55);
@@ -192,7 +191,7 @@ namespace display {
         return (ledColor)(currentState[8]);
     }
 
-    bool getConnected(){
+    bool isConnected(){
         return connected;
     }
 
@@ -252,7 +251,7 @@ namespace display {
 
     extern "C" void EXTI15_10_IRQHandler(){
         display::disp_sense.clearInterruptFlag(); // Clear the interrupt flag
-        display::connected = !display::disp_sense.read(); // Update the connected state based on the pin state
+        display::connected = !disp_sense.read(); // Update the connected state based on the pin state
         NVIC_ClearPendingIRQ(EXTI15_10_IRQn);  
     }
 

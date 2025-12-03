@@ -154,7 +154,7 @@
  {
    (const char[]) { 0x09, 0x04 }, // 0: is supported language is English (0x0409)
    "Vojtech Vosahlo",                        // 1: Manufacturer
-   "MIDIControl Base",             // 2: Product
+   "MIDIControl base",             // 2: Product
    NULL,                          // 3: UID (generated bellow)
    "Serial Communication",// 4: Serial Interface
    "MIDI interface",   // 5: MIDI interface

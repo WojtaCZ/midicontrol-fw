@@ -3,7 +3,7 @@
 
 
 //Initialize keepalive scheduler
-Scheduler keepaliveScheduler = Scheduler(1000, &Base::CurrentSource::toggle, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
+Scheduler keepaliveScheduler = Scheduler(1000, &base::current::toggle, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
 //Function to process and increment the scheduler counter
 void Scheduler::increment(){

@@ -48,11 +48,11 @@ namespace GUI{
 
 	Checkbox chck_power({{Language::EN, "Organ Power"},{Language::CS, "Napajeni Varhan"}},
 		[](Item * itm){
-			if(Base::CurrentSource::isEnabled()){
-				Base::CurrentSource::disable();
+			if(base::current::isEnabled()){
+				base::current::disable();
 				chck_power.setChecked(false);
 			}else{
-				Base::CurrentSource::enable();
+				base::current::enable();
 				chck_power.setChecked(true);
 			}
 		}
@@ -81,7 +81,7 @@ namespace GUI{
 		}
 
 		display(new Paragraph({
-				"Connected: " + string((display::getConnected() == true) ? "true" : "false"),
+				"Connected: " + string((display::isConnected() == true) ? "true" : "false"),
 				"Song: " + to_string(display::getSong()),
 				"Verse: " + to_string(display::getVerse()),
 				"Letter: " + string(1, display::getLetter()),
@@ -112,7 +112,7 @@ namespace GUI{
 		}, &menu_main
 	);
 
-	Splash splash_welcome(Base::DEVICE_NAME, Base::DEVICE_TYPE, git::revision + " (" + git::branch + ")", [](Splash * splash){ displayActiveMenu(); });
+	Splash splash_welcome(base::DEVICE_NAME, base::DEVICE_TYPE, git::revision + " (" + git::branch + ")", [](Splash * splash){ displayActiveMenu(); });
 	
 	Paragraph paragraph_firmwareInfo(
 		{

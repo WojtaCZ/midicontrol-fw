@@ -28,7 +28,7 @@ set(SOURCES
 	${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/scheduler.cpp
 	${SOURCE_BASE}/bluetooth.cpp
-	#${SOURCE_BASE}/comm.cpp
+	${SOURCE_BASE}/comm.cpp
 	${SOURCE_BASE}/led.cpp
 	${SOURCE_BASE}/midi.cpp
 	${SOURCE_BASE}/oled.cpp

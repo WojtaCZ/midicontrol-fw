@@ -5,9 +5,9 @@
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
 
-Scheduler keypressScheduler(10, &Base::Encoder::process, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
+Scheduler keypressScheduler(10, &base::Encoder::process, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
 
-namespace Base{
+namespace base{
 	
 	//Initialization of necessary objects
 	void init(){
@@ -114,9 +114,9 @@ namespace Base{
 		IWDG->KR = 0xAAAA; // Reload the watchdog
 		IWDG->KR = 0xCCCC; // Start the watchdog
 	}
-}
+} 
 
-namespace Base::CurrentSource{
+namespace base::current{
 	bool enabled = false;
 
 	// Get actual state of the current source
@@ -127,19 +127,15 @@ namespace Base::CurrentSource{
 	// Enable the current source
 	void enable(){
 		enabled = true;
+		GPIOA->BSRR = GPIO_BSRR_BS4;
 
-		if(!!(GPIOA->ODR & GPIO_ODR_OD4) != enabled){
-			GPIOA->BSRR = GPIO_BSRR_BS4;
-		}
 	}
 
 	// Disable the current source
 	void disable(){
 		enabled = false;
-
-		if(!!(GPIOA->ODR & GPIO_ODR_OD4) != enabled){
-			GPIOA->BSRR = GPIO_BSRR_BR4;
-		}
+		GPIOA->BSRR = GPIO_BSRR_BR4;
+		
 	}
 
 	void toggle(void){
@@ -148,9 +144,14 @@ namespace Base::CurrentSource{
 		} else enable();
 	}
 
+	void set(bool value){
+		if(value) enable();
+		else disable();
+	}
+
 }
 
-namespace Base::Encoder{
+namespace base::Encoder{
 	uint16_t gpioState, gpioStateOld = 0xffff;
 	uint8_t readCode = 0, storedCode = 0;
 	int pos = 0;
