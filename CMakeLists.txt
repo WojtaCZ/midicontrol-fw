@@ -26,7 +26,6 @@ set(SOURCES
 	${SOURCE_BASE}/base.cpp
 	${SOURCE_BASE}/display.cpp
 	${SOURCE_BASE}/menu.cpp
-	${SOURCE_BASE}/scheduler.cpp
 	${SOURCE_BASE}/bluetooth.cpp
 	${SOURCE_BASE}/comm.cpp
 	${SOURCE_BASE}/led.cpp
@@ -47,6 +46,7 @@ set(SOURCES
 	${CMAKE_SOURCE_DIR}/lib/tinyusb/src/device/usbd_control.c
 	${CMAKE_SOURCE_DIR}/lib/tinyusb/src/class/cdc/cdc_device.c
 	${CMAKE_SOURCE_DIR}/lib/tinyusb/src/class/midi/midi_device.c
+	${CMAKE_SOURCE_DIR}/lib/tinyusb/src/class/vendor/vendor_device.c
 	${CMAKE_SOURCE_DIR}/lib/tinyusb/src/portable/st/stm32_fsdev/dcd_stm32_fsdev.c
 
 	startup/startup_stm32g431xx.s

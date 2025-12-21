@@ -1,5 +1,5 @@
 #include "oled.hpp"
-#include "scheduler.hpp"
+#include <stmcpp/scheduler.hpp>
 #include "base.hpp"
 #include "menu.hpp"
 
@@ -11,7 +11,7 @@
 #include "stmcpp/gpio.hpp"
 
 //Scheduler used to time oled sleep
-Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
+stmcpp::scheduler::Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, false, true);
 
 uint8_t screenBuffer[OLED_SCREENBUF_SIZE];
 

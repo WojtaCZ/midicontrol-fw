@@ -1,13 +1,15 @@
 #ifndef OLED_H
 #define OLED_H
 
-#include "scheduler.hpp"
+#include <stmcpp/scheduler.hpp>
+#include <stmcpp/units.hpp>
 #include "oled_fonts.hpp"
 #include <string>
 #include <array>
 #include <utility>
 
 using namespace std;
+using namespace stmcpp::units;
 
 #define OLED_MEM_CMD			0x00
 #define OLED_MEM_DAT			0x40
@@ -19,7 +21,7 @@ using namespace std;
 #define OLED_XOFFSET            2
 #define OLED_YOFFSET            0
 
-#define OLED_SLEEP_INTERVAL     5000
+#define OLED_SLEEP_INTERVAL     5000_ms
 
 //Velikost bufferu
 #define OLED_SCREENBUF_SIZE		(OLED_WIDTH*OLED_HEIGHT / 8) + 8

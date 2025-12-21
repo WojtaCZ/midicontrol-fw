@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <stmcpp/units.hpp>
 #include <memory>
 
 using namespace std;
+using namespace stmcpp::units;
 
 #define MENU_MENUMODE_NORMAL	0
 #define MENU_MENUMODE_SPLASH	1
@@ -27,7 +29,7 @@ using namespace std;
 
 #define MENU_ICON_FONT Icon_11x18
 
-#define MENU_SCROLL_PAUSE	1000
+#define MENU_SCROLL_PAUSE	1000_ms
 
 // How many spaces is between arrow symbol and menu item
 // useful to set zero on smaller displays

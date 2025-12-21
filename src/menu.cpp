@@ -1,5 +1,7 @@
 #include "menu.hpp"
-#include "scheduler.hpp"
+#include <stmcpp/scheduler.hpp>
+#include <stmcpp/units.hpp>
+#include "base.hpp"
 #include "comm.hpp"
 #include "git.hpp"
 #include "display.hpp"
@@ -9,9 +11,10 @@
 
 
 using namespace std;
+using namespace stmcpp::units;
 
-Scheduler guiRenderScheduler(30, &GUI::render, Scheduler::PERIODICAL | Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
-Scheduler menuScrollScheduler(2000, &GUI::scroll_callback, Scheduler::PERIODICAL | Scheduler::DISPATCH_ON_INCREMENT);
+stmcpp::scheduler::Scheduler guiRenderScheduler(30_ms, &GUI::render, true, true);
+stmcpp::scheduler::Scheduler menuScrollScheduler(2000_ms, &GUI::scroll_callback, true, false);
 
 namespace GUI{
 	//Variables global to the namespace
@@ -386,7 +389,7 @@ namespace GUI{
 		size_t titleLength = activeMenu->getSelectedItem().getTitle(LANG).length();
 		//If the text is too long to display, enable scrolling
 		int idx = activeMenu->getSelectedIndex();
-		if(titleLength > 9 && !menuScrollScheduler.isActive()){
+		if(titleLength > 9 && !menuScrollScheduler.isRunning()){
 			scrollIndex = 0;
 			hadScrollPause = false;
 			menuScrollScheduler.pause();
@@ -433,7 +436,7 @@ namespace GUI{
 		Oled::writeString(activeSplash->getTitle().substr(0,11), Font_11x18, Oled::Color::WHITE);
 
 		//If the text is too long to display, enable scrolling
-		if(activeSplash->getSubtitle().length() > 12 && !menuScrollScheduler.isActive()){
+		if(activeSplash->getSubtitle().length() > 12 && !menuScrollScheduler.isRunning()){
 			scrollIndex = 0;
 			hadScrollPause = false;
 			menuScrollScheduler.pause();
@@ -500,7 +503,7 @@ namespace GUI{
 
 		    forceRender = true;
 		}else{
-			menuScrollScheduler.setInterval(500);
+			menuScrollScheduler.setInterval(500_ms);
 			hadScrollPause = true;
 		}
 	}

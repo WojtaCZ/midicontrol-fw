@@ -25,21 +25,20 @@
 
 using namespace stmcpp::units;
 
-extern Scheduler oledSleepScheduler;
-extern Scheduler keypressScheduler;
-extern Scheduler keepaliveScheduler;
-extern Scheduler guiRenderScheduler;
-extern Scheduler menuScrollScheduler;
-extern Scheduler commTimeoutScheduler;
-extern Scheduler dispChangeScheduler;
+extern stmcpp::scheduler::Scheduler oledSleepScheduler;
+extern stmcpp::scheduler::Scheduler keypressScheduler;
+extern stmcpp::scheduler::Scheduler keepaliveScheduler;
+extern stmcpp::scheduler::Scheduler guiRenderScheduler;
+extern stmcpp::scheduler::Scheduler menuScrollScheduler;
+extern stmcpp::scheduler::Scheduler commTimeoutScheduler;
+extern stmcpp::scheduler::Scheduler dispChangeScheduler;
 extern void signalError();
 
-Scheduler ledScheduler(500, [](){ 
+stmcpp::scheduler::Scheduler ledScheduler(500_ms, [](){ 
 	display::sendState();
+}, true, false);
 
-}, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL);
-
-Scheduler startupSplashScheduler(2000, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, Scheduler::ACTIVE | Scheduler::DISPATCH_ON_INCREMENT);
+stmcpp::scheduler::Scheduler startupSplashScheduler(2000_ms, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, false, true);
 
 
 extern "C" void SystemInit(void) {
@@ -50,7 +49,7 @@ extern "C" void SystemInit(void) {
     #endif
 
 	//Initialize io and other stuff related to the base 
-	base::init();
+	base::initClock();
 	
 
 
@@ -58,14 +57,6 @@ extern "C" void SystemInit(void) {
 
 extern "C" void SysTick_Handler(void){
 	stmcpp::systick::increment();
-	//oledSleepScheduler.increment();
-	keypressScheduler.increment();
-	guiRenderScheduler.increment();
-	menuScrollScheduler.increment();
-	startupSplashScheduler.increment();
-	//commTimeoutScheduler.increment();
-	//dispChangeScheduler.increment();
-    ledScheduler.increment();
 }
 
 
@@ -131,6 +122,15 @@ extern "C" int main(void)
 			tud_midi_packet_read(&packet[0]);
 			midi::send(packet);
 		}
+
+		//oledSleepScheduler.increment();
+		keypressScheduler.dispatch();
+		guiRenderScheduler.dispatch();
+		menuScrollScheduler.dispatch();
+		startupSplashScheduler.dispatch();
+		//commTimeoutScheduler.increment();
+		//dispChangeScheduler.increment();
+		ledScheduler.dispatch();
 
 		if(Bluetooth::isCommandAvailable()){
 			std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();

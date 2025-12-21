@@ -1,5 +1,4 @@
 #include "comm.hpp"
-#include "scheduler.hpp"
 #include "base.hpp"
 #include "menu.hpp"
 #include "display.hpp"
