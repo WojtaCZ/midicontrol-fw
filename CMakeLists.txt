@@ -25,16 +25,21 @@ set(SOURCES
 	${SOURCE_BASE}/main.cpp
 	${SOURCE_BASE}/base.cpp
 	${SOURCE_BASE}/display.cpp
-	${SOURCE_BASE}/menu.cpp
+	#${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/bluetooth.cpp
 	${SOURCE_BASE}/comm.cpp
 	${SOURCE_BASE}/led.cpp
 	${SOURCE_BASE}/midi.cpp
 	${SOURCE_BASE}/oled.cpp
-	${SOURCE_BASE}/oled_fonts.cpp
+	#${SOURCE_BASE}/oled_fonts.cpp
 	${SOURCE_BASE}/usb.cpp
 	${SOURCE_BASE}/usb_descriptors.c
 	${SOURCE_BASE}/debug.cpp
+
+
+	${CMAKE_SOURCE_DIR}/lib/menu/src/icons.cpp
+	${CMAKE_SOURCE_DIR}/lib/menu/src/font_7x10.cpp
+	${CMAKE_SOURCE_DIR}/lib/menu/src/font_11x18.cpp
 
 
 
@@ -110,6 +115,7 @@ ${CMAKE_SOURCE_DIR}/lib/CMSIS/Include
 ${CMAKE_SOURCE_DIR}/lib/CMSIS/Device/ST/STM32G4xx/Include
 ${CMAKE_SOURCE_DIR}/lib/tinyusb/src/
 ${CMAKE_SOURCE_DIR}/lib/stmcpp
+${CMAKE_SOURCE_DIR}/lib/menu/inc/
 
 )
 

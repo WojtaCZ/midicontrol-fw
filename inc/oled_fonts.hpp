@@ -1,7 +1,7 @@
 #include <cstdint>
 
-#ifndef OLED_FONTS_H
-#define OLED_FONTS_H
+#ifndef MENU_TEXT_H
+#define MENU_TEXT_H
 
 typedef struct {
 	const uint8_t FontWidth;    /*!< Font width in pixels */

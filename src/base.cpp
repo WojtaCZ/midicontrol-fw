@@ -188,7 +188,7 @@ namespace base::Encoder{
 
 			// Update the status according to the gpio state
 			if(btnPress){
-				GUI::keypress(UserInput::Key::ENTER);
+				//GUI::keypress(UserInput::Key::ENTER);
 			}
 		}
 		
@@ -210,10 +210,10 @@ namespace base::Encoder{
 
 		// Handle a shift in position
 		if(pos > 0){
-			GUI::keypress(UserInput::Key::DOWN);
+			//GUI::keypress(UserInput::Key::DOWN);
 			pos = 0;
 		}else if(pos < 0){
-			GUI::keypress(UserInput::Key::UP);
+			//GUI::keypress(UserInput::Key::UP);
 			pos = 0;
 		}
 

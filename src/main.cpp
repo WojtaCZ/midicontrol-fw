@@ -19,6 +19,9 @@
 #include <tusb.h>
 #include <tinyusb/src/class/midi/midi_device.h>
 #include <tinyusb/src/class/midi/midi.h>
+
+#include <menu/inc/text.hpp>
+#include <menu/inc/drawing.hpp>
 //#include "stmcpp/register.hpp"
 //#include "stmcpp/units.hpp"
 //#include "stmcpp/systick.hpp"
@@ -34,12 +37,13 @@ extern stmcpp::scheduler::Scheduler commTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler dispChangeScheduler;
 extern void signalError();
 
+extern Oled::OledBuffer frameBuffer;
+
 stmcpp::scheduler::Scheduler ledScheduler(500_ms, [](){ 
 	display::sendState();
 }, true, false);
 
-stmcpp::scheduler::Scheduler startupSplashScheduler(2000_ms, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, false, true);
-
+//stmcpp::scheduler::Scheduler startupSplashScheduler(2000_ms, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, false, true);
 
 extern "C" void SystemInit(void) {
 
@@ -60,8 +64,7 @@ extern "C" void SysTick_Handler(void){
 }
 
 
-extern "C" int main(void)
-{
+extern "C" int main(void) {
 	stmcpp::systick::enable(144_MHz, 1_ms);
 
 	Debug::setLevel(Debug::Level::INFO);
@@ -101,14 +104,32 @@ extern "C" int main(void)
 
 
 
-
 	//RCC->CCIPR &= ~(RCC_CCIPR_CLK48SEL_Msk << RCC_CCIPR_CLK48SEL_Pos);
 	//RCC->CCIPR |= (clksel << RCC_CCIPR_CLK48SEL_SHIFT);
 
+
+	while (true)
+	{
+		menu::drawing::drawIcon(frameBuffer, battery_empty, 64, 32, menu::Anchor::Center, (uint8_t)1);
+		Oled::update();
+		stmcpp::systick::waitBlocking(300_ms);
+		menu::drawing::drawIcon(frameBuffer, battery_1_4, 64, 32, menu::Anchor::Center, (uint8_t)1);
+		Oled::update();
+		stmcpp::systick::waitBlocking(300_ms);
+		menu::drawing::drawIcon(frameBuffer, battery_2_4, 64, 32, menu::Anchor::Center, (uint8_t)1);
+		Oled::update();
+		stmcpp::systick::waitBlocking(300_ms);
+		menu::drawing::drawIcon(frameBuffer, battery_3_4, 64, 32, menu::Anchor::Center, (uint8_t)1);
+		Oled::update();
+		stmcpp::systick::waitBlocking(300_ms);
+		menu::drawing::drawIcon(frameBuffer, battery_full, 64, 32, menu::Anchor::Center, (uint8_t)1);
+		Oled::update();
+		stmcpp::systick::waitBlocking(300_ms);
+
+	}
 	
 
-
-	oledSleepScheduler.pause();
+	//oledSleepScheduler.pause();
 
 
 	uint8_t packet[4];
@@ -125,9 +146,9 @@ extern "C" int main(void)
 
 		//oledSleepScheduler.increment();
 		keypressScheduler.dispatch();
-		guiRenderScheduler.dispatch();
-		menuScrollScheduler.dispatch();
-		startupSplashScheduler.dispatch();
+		//guiRenderScheduler.dispatch();
+		//menuScrollScheduler.dispatch();
+		//startupSplashScheduler.dispatch();
 		//commTimeoutScheduler.increment();
 		//dispChangeScheduler.increment();
 		ledScheduler.dispatch();

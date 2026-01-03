@@ -6,6 +6,7 @@
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
+#include <cstring>
 
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
@@ -14,6 +15,8 @@
 stmcpp::scheduler::Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, false, true);
 
 uint8_t screenBuffer[OLED_SCREENBUF_SIZE];
+
+Oled::OledBuffer frameBuffer;
 
 namespace Oled{
     //Coordinates on the oled
@@ -141,7 +144,7 @@ namespace Oled{
     //Sleep function for the oled
     void sleep(){
         if(!isSleeping()){
-            fill(Color::BLACK);
+            //fill(Color::BLACK);
             update();
             sleeping = true;
         }
@@ -175,14 +178,14 @@ namespace Oled{
             pageBuffer[2] = 0x00;
             pageBuffer[3] = 0x10;
 
-            screenBuffer[0]        = OLED_MEM_DAT;
+           /* screenBuffer[0]        = OLED_MEM_DAT;
             screenBuffer[131]       = OLED_MEM_DAT;
             screenBuffer[262]       = OLED_MEM_DAT;
             screenBuffer[393]       = OLED_MEM_DAT;
             screenBuffer[524]       = OLED_MEM_DAT;
             screenBuffer[655]       = OLED_MEM_DAT;
             screenBuffer[786]       = OLED_MEM_DAT;
-            screenBuffer[917]       = OLED_MEM_DAT;
+            screenBuffer[917]       = OLED_MEM_DAT;*/
 
             dmaStatus = 0;
             dmaIndex = 0;
@@ -222,7 +225,7 @@ namespace Oled{
                 }else{
 
                     // Reinitialize the DMA and SPI buffer to use the image buffer instead
-                    stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&screenBuffer[dmaIndex]));
+                    stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(frameBuffer.getBufferAddress(dmaIndex)));
                     stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), 131);
                     stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, 131, I2C_CR2_NBYTES_Pos);
                 }
@@ -263,80 +266,59 @@ namespace Oled{
         wakeup();
     }
 
-    //Fill the whole screen with the given color
-    void fill(Color color) {
-        for(uint32_t i = 0; i < sizeof(screenBuffer); i++) {
-            if(i % 131){
-                screenBuffer[i] = (color == Color::BLACK) ? 0x00 : 0xFF;
-            }else continue;
+    // Constructor
+    OledBuffer::OledBuffer() {
+        // 1. Clear all memory to 0 (Black)
+        std::memset(buffer, 0, BUFFER_SIZE);
+
+        // 2. Initialize the Control Bytes at the start of every page
+        // Layout: [CMD, D0, D1... D129], [CMD, D0... ]
+        for (int p = 0; p < PAGES; p++) {
+            buffer[p * STRIDE] = OLED_MEM_DAT;
         }
     }
 
-    //Draw a pixel in the screenbuffer
-    void drawPixel(pair<uint16_t, uint16_t> coord, Color color) {
-        coord.first += OLED_XOFFSET;
-        coord.second += OLED_YOFFSET;
-        
-        if(coord.first >= OLED_WIDTH || coord.second >= OLED_HEIGHT) {
-            // Don't write outside the buffer
-            return;
-        }
 
-        // Check if pixel should be inverted
-        if(isInverted()) {
-            color = !color;
-        }
+    void OledBuffer::setPixel(int x, int y, uint8_t color) {
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
 
-        // Draw in the right color
-        if(color == Color::WHITE) {
-            screenBuffer[1 + (coord.second/8) + coord.first + (coord.second / 8) * OLED_WIDTH] |= 1 << (coord.second % 8);
+        // Convert (x,y) to Page/Bit format
+        int page = y / 8;       // Which horizontal band (0-7)
+        int bit  = y % 8;       // Which bit inside the byte (0-7)
+
+        // Calculate index: (Page Start) + (Control Offset) + X
+        int index = (page * STRIDE) + CONTROL_BYTES + x;
+
+        if (color > 0) {
+            buffer[index] |= (1 << bit); // Set bit
         } else {
-            screenBuffer[1 + (coord.second/8)+ coord.first + (coord.second / 8) * OLED_WIDTH] &= ~(1 << (coord.second % 8));
+            buffer[index] &= ~(1 << bit); // Clear bit
         }
     }
 
-    //Draw a char to the screen buffer
-    void writeSymbol(char c, FontDef font, Color color) {
-        uint32_t i, b, j;
+    uint8_t OledBuffer::getPixel(int x, int y) const {
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return 0;
 
-        // Check remaining space on current line
-        if (OLED_WIDTH <= (coordinates.first + font.FontWidth) ||
-            OLED_HEIGHT <= (coordinates.second + font.FontHeight))
-        {
-            // Not enough space on current line
-            return;
-        }
+        int page = y / 8;
+        int bit  = y % 8;
+        int index = (page * STRIDE) + CONTROL_BYTES + x;
 
-        // Use the font to write
-        for(i = 0; i < font.FontHeight; i++) {
-            b = font.data[(c - 32) * font.FontHeight + i];
-            for(j = 0; j < font.FontWidth; j++) {
-                if((b << j) & 0x8000)  {
-                    drawPixel({coordinates.first + j, (coordinates.second + i)}, color);
-                } else {
-                    drawPixel({coordinates.first + j, (coordinates.second + i)}, !color);
-                }
-            }
-        }
-
-        // The current space is now taken
-        coordinates.first += font.FontWidth;
+        return (buffer[index] & (1 << bit)) ? 1 : 0;
     }
 
-    void writeSymbol(Icon icon, FontDef font, Color color) {
-        writeSymbol(static_cast<char>(icon), font, color);
+    int OledBuffer::getWidth() const {
+        return WIDTH;
     }
 
-    // Write full string to screenbuffer
-    void writeString(string str, FontDef font, Color color) {
-        //Write string to screenbuffer
-        for(char c : str){
-            writeSymbol(c, font, color);
-        }
+    int OledBuffer::getHeight() const {
+        return HEIGHT;
     }
 
-    // Position the cursor
-    void setCursor(pair<uint16_t, uint16_t> coord) {
-        coordinates = coord;
+    uint8_t * OledBuffer::getBufferAddress(int offset) {
+        return &buffer[offset];
+    }
+
+    int OledBuffer::getBufferSize() const {
+        return BUFFER_SIZE;
     }
 }

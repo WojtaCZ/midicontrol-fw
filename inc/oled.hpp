@@ -3,6 +3,7 @@
 
 #include <stmcpp/scheduler.hpp>
 #include <stmcpp/units.hpp>
+#include <menu/inc/text.hpp>
 #include "oled_fonts.hpp"
 #include <string>
 #include <array>
@@ -27,6 +28,46 @@ using namespace stmcpp::units;
 #define OLED_SCREENBUF_SIZE		(OLED_WIDTH*OLED_HEIGHT / 8) + 8
 
 namespace Oled{
+
+    class OledBuffer : public menu::IFrameBuffer<uint8_t> {
+        public:
+            OledBuffer();
+            virtual ~OledBuffer() = default;
+
+            // --- Pixel Logic ---
+            uint8_t getPixel(int x, int y) const override;
+            void setPixel(int x, int y, uint8_t color) override;
+
+            // --- Metadata & Hardware ---
+            int getWidth() const override;
+            int getHeight() const override;
+            uint8_t * getBufferAddress(int offset);
+            int getBufferSize() const;
+
+        private:
+            // Dimensions
+            static constexpr int WIDTH = 130;
+            static constexpr int HEIGHT = 64;
+            static constexpr int PAGES = 8; // 64 pixels / 8 bits
+
+            // Memory Layout
+            // 0x40 is the "Data" command byte for SSD1306/SH1106
+            static constexpr int CONTROL_BYTES = 1;
+            static constexpr int STRIDE = CONTROL_BYTES + WIDTH; // 131 bytes
+            static constexpr int BUFFER_SIZE = STRIDE * PAGES;   // 1048 bytes
+
+            // The actual container
+            uint8_t buffer[BUFFER_SIZE];
+    };
+
+
+
+
+
+
+
+
+
 
     enum class Color{
         BLACK,
@@ -62,12 +103,12 @@ namespace Oled{
     void setInitialized(bool state);
 
     void update();
-    void fill(Color color);
-    void setCursor(pair<uint16_t, uint16_t> coord);
+    /*void fill(Color color);
+   void setCursor(pair<uint16_t, uint16_t> coord);
     void drawPixel(pair<uint16_t, uint16_t> coord, Color color);
     void writeSymbol(char c, FontDef font, Color color);
     void writeSymbol(Icon icon, FontDef font, Color color);
-    void writeString(string str, FontDef font, Color color);
+    void writeString(string str, FontDef font, Color color);*/
     void init();
 
     

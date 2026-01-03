@@ -4,3 +4,6 @@
 [submodule "lib/stmcpp"]
 	path = lib/stmcpp
 	url = git@github.com:WojtaCZ/stmcpp.git
+[submodule "lib/menu"]
+	path = lib/menu
+	url = git@github.com:WojtaCZ/menu.git
