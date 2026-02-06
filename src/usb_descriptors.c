@@ -27,8 +27,8 @@
  #include <stm32g431xx.h>
  #include <stdio.h>
  
- #define USB_PID   0x4000 
- #define USB_VID   0xCafe
+ #define USB_PID   0x1234 
+ #define USB_VID   0xABCD
  #define USB_BCD   0x0200
  
  //--------------------------------------------------------------------+

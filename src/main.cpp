@@ -108,26 +108,7 @@ extern "C" int main(void) {
 	//RCC->CCIPR |= (clksel << RCC_CCIPR_CLK48SEL_SHIFT);
 
 
-	while (true)
-	{
-		menu::drawing::drawIcon(frameBuffer, battery_empty, 64, 32, menu::Anchor::Center, (uint8_t)1);
-		Oled::update();
-		stmcpp::systick::waitBlocking(300_ms);
-		menu::drawing::drawIcon(frameBuffer, battery_1_4, 64, 32, menu::Anchor::Center, (uint8_t)1);
-		Oled::update();
-		stmcpp::systick::waitBlocking(300_ms);
-		menu::drawing::drawIcon(frameBuffer, battery_2_4, 64, 32, menu::Anchor::Center, (uint8_t)1);
-		Oled::update();
-		stmcpp::systick::waitBlocking(300_ms);
-		menu::drawing::drawIcon(frameBuffer, battery_3_4, 64, 32, menu::Anchor::Center, (uint8_t)1);
-		Oled::update();
-		stmcpp::systick::waitBlocking(300_ms);
-		menu::drawing::drawIcon(frameBuffer, battery_full, 64, 32, menu::Anchor::Center, (uint8_t)1);
-		Oled::update();
-		stmcpp::systick::waitBlocking(300_ms);
 
-	}
-	
 
 	//oledSleepScheduler.pause();
 

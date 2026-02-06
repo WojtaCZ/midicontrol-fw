@@ -1,93 +1,225 @@
-# VSCode template
-- this repo serves as template for vscode STM32 projects, primarily targeting Linux
-- files come from TLM project with some modifications
+# Special MIDI Messages
 
-## Linux 
-### SW reuirements
-- up to date distro (rolling release is advantage)
-- vscode/vscodium
-  - distribution repository/snap package/github release
-  - necessary plugins:
-    - Cmake Tools
-    - C/C++
-    - cortex-debug
-- toolchain (GCC arm-none-eabi)
-  - distribution repository/[[https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm/downloads | arm.com]]
-- upstream openocd, stable release is over 3 years old, so pretty much outdated
-  - compile from sources (Arch AUR)/[[https://github.com/xpack-dev-tools/openocd-xpack | find some binary build]]
-- cmake
-  - distribution repository
-- ninja build system
-  - distribution repository
+## SysEx zprávy pro ovládání displeje
 
-*following instructions expect all binaries are in PATH*
+Tento dokument popisuje **strukturu MIDI SysEx zpráv** používaných pro ovládání displeje.
+Všechny zprávy používají **stejnou hlavičku**, liší se pouze **cílem zprávy** a **datovou částí**.
 
-### What is in this repo
-- `.vscode`
-  - usually hidden directory with all vscode config relevant to this workspace
-  - `tasks.json`
-    - contains user definable tasks like build/install/flash/...
-    - feel free to experiment (vscode does auto-complete from json config files)
-  - `launch.json`
-    - contains launch (debug/attach) configurations like binary location, SWO config, etc.
-  - `settings.json`
-    - contains workspace config, only cmake config by default
-  - other config files, workspace specific config files
-- `CMakeLists.txt` build configuration (MCU, FPU, linker script file, warnings, ...)
-- `STM32[F,L]xx.svd` placeholder for SW file for for your MCU (allows looking into peripheral registers)
-  - replace this file with one matching your MCU, adjust filename in `launch.json`
-- `STM32[F,L]xx.ld` placeholder linked script
-  - replace with your linker script. Or if want to start from scratch, this one should do, you'll have to adjust memory (RAM) addresses and sizes.
-- `openocd.cfg`
-  - Openocd configuration including target and adapter selection
-  - uncomment appropriate line with your MCU
-- `.gitignore` (hidden)
-  - used to disable some files to be added into repo, usually files produces by build
-- `.clang-format`
-  - authors' preferred formatting config (generated using [this online tool]https://zed0.co.uk/clang-format-configurator/), feel free to adjust
+---
 
-### How to use
-*following text expects working git client on your machine including SSH keys etc. and working all software mentioned above*
+## Obecná struktura SysEx zprávy
 
-- download contents of this repo: `git clone git@eforce1.feld.cvut.cz:fse/vscode_template.git`
-- modify all necessary files (linker script, openocd.cfg, launch.json, CMakeLists.txt)
-- copy your source into this repo (`src` directory is reasonable)
-- add sources into `CMakeLists.txt`, also adjust include paths (this is kinda pain with HAl etc)
-- create directory build `mkdir build` and cd there `cd build`
-- configure cmake `cmake -GNinja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-arm-none-eabi.cmake ..`
+Každý rámec má následující strukturu (bez standardních MIDI `F0` / `F7`, které se řeší mimo tento protokol):
 
-*Now to vscode...*
-- open vscode, then `add directory to workspace` and select this cloned repo
-- vscode will ask, if you want to configure CMake at launch, say yet for this workspace
-- F7 should start build, if it fails, **read error message** and you'll probably know what is wrong, possible errors:
-  - wroken code
-  - wrong filenames
-  - forgot to select/uncomment/configure something
-  - ???
-- F5 launches debug session, if everything works, you should see startup file and MCU being at the start of reset vector
-- **Enjoy debugging!**
+```
+[HLAVIČKA] [ZAŘÍZENÍ] [CÍL] [DATA...]
+```
 
-#### Ready to commit...
-- head to our [gitlab](https://eforce1.feld.cvut.cz/gitlab/) and create new project, resulting address will be something like `https://eforce1.feld.cvut.cz/gitlab/your_user_name/my_awesome_project`
-- `cd vscode_template`
-- remove this repo history `rm -rf .git`
+| Pole     | Velikost | Popis                                    |
+| -------- | -------- | ---------------------------------------- |
+| Hlavička | 2 B      | Identifikace protokolu         |
+| Zařízení | 1 B      | Typ cílového zařízení                    |
+| Cíl      | 1 B      | Určuje, která část displeje se nastavuje |
+| Data     | N B      | Data odpovídající danému cíli            |
 
-*these instructions are identical to those given by gitlab after new repo creation*
+---
 
-*(Git global setup)*
-- `git config --global user.name "Yout Name"`
-- `git config --global user.email "yournameornick@eforce.fel.cvut.cz"`
+## Fixní hlavička
 
-*(Push an existing folder)*
-- `git init`
-- `git remote add origin git@eforce1.feld.cvut.cz:your_user_name/your_awesome_project.git`
-- `git add .` (if you want to add all files)
-- `git commit -m "Initial commit"`
-- `git push -u origin master`
+Hlavička je **pevná a povinná** pro všechny zprávy.
+
+| Byte | Hodnota |
+| ---- | ------- |
+| 0    | `0x4D`  |
+| 1    | `0x43`  |
 
 
-## some tips
-- Learn Rust or C++, C is just too unsafe
-- When using raw IRQ handlers in C++, don't forget to prefix their definitions with `extern "C"` to have C style linkage for startup file (ASM/C)
-- understand your MCU and HW (at least schematic)
-- if in doubt or stuck on error, don't hesitate to contact other team members on Discord
+---
+
+## Typ zařízení
+
+| Hodnota | Význam  |
+| ------: | ------- |
+|  `0x01` | Displej |
+
+Ostatní hodnoty jsou **rezervovány**.
+
+---
+
+## Cíl zprávy
+
+Cíl určuje, **která část displeje se aktualizuje** a tím pádem i strukturu datové části.
+
+| Hodnota | Cíl          |
+| ------: | ------------ |
+|  `0x00` | Celý displej |
+|  `0x01` | Číslo písně  |
+|  `0x02` | Číslo sloky  |
+|  `0x03` | Písmeno      |
+|  `0x04` | LED          |
+
+---
+
+# Kódování hodnot
+
+## Čísla (píseň, sloka)
+
+* Každý znak = **1 nibble (4 bity)**
+* `0x0–0x9` → číslice
+* `0xF` → mezera
+
+### Číslo písně
+
+* Rozsah: `0–1999`
+* Velikost: **2 byty (4 znaky)**
+
+| Byty        | Zobrazení |
+| ----------- | --------- |
+| `0x12 0x34` | `1234`    |
+| `0x0F 0x23` | `0 23`    |
+
+---
+
+### Číslo sloky
+
+* Rozsah: `0–99`
+* Velikost: **1 byte (2 znaky)**
+
+| Byte   | Zobrazení |
+| ------ | --------- |
+| `0x09` | `09`      |
+| `0xF5` | ` 5`      |
+
+---
+
+## Písmeno
+
+Kódováno jedním nibblem (nižší 4 bity):
+
+| Hodnota | Zobrazení |
+| ------: | --------- |
+|   `0xA` | A         |
+|   `0xB` | B         |
+|   `0xC` | C         |
+|   `0xD` | D         |
+|   `0xF` | zhasnuto    |
+
+---
+
+## LED
+
+| Hodnota | Význam      |
+| ------: | ----------- |
+|   `0x1` | Červená     |
+|   `0x2` | Zelená      |
+|   `0x3` | Modrá       |
+|   `0x4` | Žlutá       |
+|   `0xF` | zhasnuto |
+
+
+# Jednotlivé typy rámců
+
+## Nastavení celého displeje (`Cíl = 0x00`)
+
+Používá se pro **kompletní aktualizaci** (např. po zapnutí).
+
+### Struktura rámce
+
+```
+0x4D 0x43 | 0x01 | 0x00 | [SONG_H] [SONG_L] | [VERSE] | [LETTER] | [LED]
+```
+
+| Pole        | Velikost | Popis             |
+| ----------- | -------- | ----------------- |
+| Číslo písně | 2 B      | 4 nibble (0–1999) |
+| Číslo sloky | 1 B      | 2 nibble (0–99)   |
+| Písmeno     | 1 B      | 1 nibble          |
+| LED         | 1 B      | Barva / vypnuto   |
+
+### Příklad
+
+Zobrazí:
+
+* píseň `1234`
+* sloku `05`
+* písmeno `B`
+* LED zelená
+
+```
+0x4D 0x43 0x01 0x00  0x12 0x34  0x05  0x0B  0x02
+```
+
+---
+
+## Nastavení pouze čísla písně (`Cíl = 0x01`)
+
+### Struktura
+
+```
+0x4D 0x43 | 0x01 | 0x01 | [SONG_H] [SONG_L]
+```
+
+### Příklad
+
+Zobrazí `0078`:
+
+```
+0x4D 0x43 0x01 0x01  0x00 0x78
+```
+
+---
+
+## Nastavení pouze čísla sloky (`Cíl = 0x02`)
+
+### Struktura
+
+```
+0x4D 0x43 | 0x01 | 0x02 | [VERSE]
+```
+
+### Příklad
+
+Zobrazí ` 5`:
+
+```
+0x4D 0x43 0x01 0x02  0xF5
+```
+
+---
+
+## Nastavení pouze písmene (`Cíl = 0x03`)
+
+### Struktura
+
+```
+0x4D 0x43 | 0x01 | 0x03 | [LETTER]
+```
+
+### Příklad
+
+Zobrazí `C`:
+
+```
+0x4D 0x43 0x01 0x03  0x0C
+```
+
+---
+
+## Nastavení LED (`Cíl = 0x04`)
+
+### Struktura
+
+```
+0x4D 0x43 | 0x01 | 0x04 | [LED]
+```
+
+### Příklad
+
+LED žlutá:
+
+```
+0x4D 0x43 0x01 0x04  0x04
+```
+
+---
+

@@ -19,6 +19,9 @@ using namespace std;
 namespace midi {
 
 	uint8_t packet[4];
+
+	uint8_t tbuff[1024];
+	int tindex = 0;
 	static bool receptionOngoing = false;
 	static uint8_t receivedIdx = 0;
 
@@ -131,6 +134,7 @@ namespace midi {
 		if (USART3->ISR & USART_ISR_RXNE) {
 			// Read the received byte (this also clears the RXNE flag)
 			uint8_t data = stmcpp::reg::read(std::ref(USART3->RDR));
+			tbuff[tindex++] = data;
 
 			// If we get channel voice message
 			if (isStatusByte(data) && !isSysEx(data)) {
