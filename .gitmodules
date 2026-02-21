@@ -7,3 +7,9 @@
 [submodule "lib/menu"]
 	path = lib/menu
 	url = git@github.com:WojtaCZ/menu.git
+[submodule "lib/gfx"]
+	path = lib/gfx
+	url = git@github.com:WojtaCZ/stmcpp-gfx.git
+[submodule "lib/ui"]
+	path = lib/ui
+	url = git@github.com:WojtaCZ/stmcpp-ui.git
