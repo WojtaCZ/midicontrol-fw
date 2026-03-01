@@ -25,7 +25,7 @@ set(SOURCES
 	${SOURCE_BASE}/main.cpp
 	${SOURCE_BASE}/base.cpp
 	${SOURCE_BASE}/display.cpp
-	#${SOURCE_BASE}/menu.cpp
+	${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/bluetooth.cpp
 	${SOURCE_BASE}/comm.cpp
 	${SOURCE_BASE}/led.cpp
@@ -37,11 +37,20 @@ set(SOURCES
 	${SOURCE_BASE}/debug.cpp
 
 
-	${CMAKE_SOURCE_DIR}/lib/menu/src/icons.cpp
-	${CMAKE_SOURCE_DIR}/lib/menu/src/font_7x10.cpp
-	${CMAKE_SOURCE_DIR}/lib/menu/src/font_11x18.cpp
+	${CMAKE_SOURCE_DIR}/lib/gfx/src/icons.cpp
+	${CMAKE_SOURCE_DIR}/lib/gfx/src/font_7x10.cpp
+	${CMAKE_SOURCE_DIR}/lib/gfx/src/font_11x18.cpp
 
+	${CMAKE_SOURCE_DIR}/lib/ui/src/menu_screen.cpp
+	${CMAKE_SOURCE_DIR}/lib/ui/src/splash_screen.cpp
+	${CMAKE_SOURCE_DIR}/lib/ui/src/paragraph_screen.cpp
+	${CMAKE_SOURCE_DIR}/lib/ui/src/number_screen.cpp
+	${CMAKE_SOURCE_DIR}/lib/ui/src/confirm_screen.cpp
+	${CMAKE_SOURCE_DIR}/lib/ui/src/navigator.cpp
 
+	${CMAKE_SOURCE_DIR}/lib/protocol/src/crc8.cpp
+	${CMAKE_SOURCE_DIR}/lib/protocol/src/codec.cpp
+	${CMAKE_SOURCE_DIR}/lib/protocol/src/parser.cpp
 
 	# common
 	${CMAKE_SOURCE_DIR}/lib/tinyusb/src/tusb.c
@@ -115,7 +124,9 @@ ${CMAKE_SOURCE_DIR}/lib/CMSIS/Include
 ${CMAKE_SOURCE_DIR}/lib/CMSIS/Device/ST/STM32G4xx/Include
 ${CMAKE_SOURCE_DIR}/lib/tinyusb/src/
 ${CMAKE_SOURCE_DIR}/lib/stmcpp
-${CMAKE_SOURCE_DIR}/lib/menu/inc/
+${CMAKE_SOURCE_DIR}/lib/gfx/inc/
+${CMAKE_SOURCE_DIR}/lib/ui/inc/
+${CMAKE_SOURCE_DIR}/lib/protocol/inc/
 
 )
 

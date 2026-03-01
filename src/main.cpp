@@ -19,31 +19,180 @@
 #include <tusb.h>
 #include <tinyusb/src/class/midi/midi_device.h>
 #include <tinyusb/src/class/midi/midi.h>
+#include <tinyusb/src/class/cdc/cdc_device.h>
 
-#include <menu/inc/text.hpp>
-#include <menu/inc/drawing.hpp>
+#include "protocol/parser.hpp"
+#include "protocol/codec.hpp"
+#include "protocol/types.hpp"
+#include "protocol/constants.hpp"
+
+#include <gfx/text.hpp>
+#include <gfx/icon.hpp>
 //#include "stmcpp/register.hpp"
 //#include "stmcpp/units.hpp"
 //#include "stmcpp/systick.hpp"
 
 using namespace stmcpp::units;
 
+// Transportní rozhraní, ze kterého paket přišel
+enum class Transport : uint8_t {
+	USB_CDC,
+	BLE,
+};
+
+// USB CDC protokolový parser
+static protocol::Parser _cdcParser;
+static uint8_t _cdcPacketId = 0;
+
+// Odeslání paketu přes USB CDC
+static void sendCdcPacket(const protocol::Packet &pkt) {
+	uint8_t buf[protocol::MAX_FRAME_SIZE];
+	uint16_t len = protocol::encode(pkt, buf);
+	if (len > 0) {
+		tud_cdc_write(buf, len);
+		tud_cdc_write_flush();
+	}
+}
+
+// Odeslání ACK paketu
+static void sendAck(uint8_t dest, uint8_t ackedPacketId, Transport via) {
+	protocol::Packet ack = {};
+	ack.source = protocol::ADDR_BASE;
+	ack.dest = dest;
+	ack.packetId = _cdcPacketId++;
+	ack.msgType = protocol::MsgType::ACK;
+	ack.payload[0] = ackedPacketId;
+	ack.payloadLen = 1;
+
+	if (via == Transport::USB_CDC) {
+		sendCdcPacket(ack);
+	} else {
+		Bluetooth::sendProtocolPacket(ack);
+	}
+}
+
+// Odeslání NAK paketu
+static void sendNak(uint8_t dest, uint8_t ackedPacketId, protocol::NakReason reason, Transport via) {
+	protocol::Packet nak = {};
+	nak.source = protocol::ADDR_BASE;
+	nak.dest = dest;
+	nak.packetId = _cdcPacketId++;
+	nak.msgType = protocol::MsgType::NAK;
+	nak.payload[0] = ackedPacketId;
+	nak.payload[1] = static_cast<uint8_t>(reason);
+	nak.payloadLen = 2;
+
+	if (via == Transport::USB_CDC) {
+		sendCdcPacket(nak);
+	} else {
+		Bluetooth::sendProtocolPacket(nak);
+	}
+}
+
+// Zpracování lokálního paketu (určeného pro Base)
+static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
+	bool needsAck = (pkt.msgType != protocol::MsgType::ACK && pkt.msgType != protocol::MsgType::NAK);
+
+	switch (pkt.msgType) {
+		case protocol::MsgType::SET_CURRENT:
+			if (pkt.payloadLen >= 1) {
+				base::current::set(static_cast<bool>(pkt.payload[0]));
+				if (needsAck) sendAck(pkt.source, pkt.packetId, via);
+			} else {
+				sendNak(pkt.source, pkt.packetId, protocol::NakReason::INVALID_PAYLOAD, via);
+			}
+			break;
+
+		case protocol::MsgType::GET_STATUS: {
+			protocol::Packet resp = {};
+			resp.source = protocol::ADDR_BASE;
+			resp.dest = pkt.source;
+			resp.packetId = _cdcPacketId++;
+			resp.msgType = protocol::MsgType::STATUS_RESP;
+			resp.payload[0] = static_cast<uint8_t>(Bluetooth::isConnected());
+			resp.payload[1] = static_cast<uint8_t>(base::current::isEnabled());
+			resp.payload[2] = static_cast<uint8_t>(display::isConnected());
+			resp.payloadLen = 3;
+
+			if (via == Transport::USB_CDC) {
+				sendCdcPacket(resp);
+			} else {
+				Bluetooth::sendProtocolPacket(resp);
+			}
+			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
+			break;
+		}
+
+		// Příkazy pro přehrávání — Base je pouze přeposílá, ale potvrdí příjem
+		case protocol::MsgType::PLAY_SONG:
+		case protocol::MsgType::STOP_SONG:
+		case protocol::MsgType::RECORD_SONG:
+		case protocol::MsgType::GET_SONG_LIST:
+		case protocol::MsgType::SONG_LIST_RESP:
+		case protocol::MsgType::SIGNAL_PLAYING:
+		case protocol::MsgType::SIGNAL_RECORDING:
+		case protocol::MsgType::SIGNAL_STOPPED:
+		case protocol::MsgType::STATUS_RESP:
+			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
+			break;
+
+		case protocol::MsgType::ACK:
+		case protocol::MsgType::NAK:
+			// Potvrzení — prozatím jen ignorujeme
+			break;
+
+		default:
+			sendNak(pkt.source, pkt.packetId, protocol::NakReason::UNKNOWN_MSG, via);
+			break;
+	}
+}
+
+// Směrování paketu podle cílové adresy
+static void processProtocolPacket(const protocol::Packet &pkt, Transport via) {
+	bool forBase = (pkt.dest == protocol::ADDR_BASE || pkt.dest == protocol::ADDR_BROADCAST);
+
+	// Lokální zpracování
+	if (forBase) {
+		handleLocalPacket(pkt, via);
+	}
+
+	// Přeposlání na Remote přes BLE (pokud nepřišel z BLE)
+	if ((pkt.dest == protocol::ADDR_REMOTE || pkt.dest == protocol::ADDR_BROADCAST) && via != Transport::BLE) {
+		Bluetooth::sendProtocolPacket(pkt);
+	}
+
+	// Přeposlání na PC přes CDC (pokud nepřišel z CDC)
+	if ((pkt.dest == protocol::ADDR_PC || pkt.dest == protocol::ADDR_BROADCAST) && via != Transport::USB_CDC) {
+		sendCdcPacket(pkt);
+	}
+}
+
 extern stmcpp::scheduler::Scheduler oledSleepScheduler;
 extern stmcpp::scheduler::Scheduler keypressScheduler;
 extern stmcpp::scheduler::Scheduler keepaliveScheduler;
 extern stmcpp::scheduler::Scheduler guiRenderScheduler;
-extern stmcpp::scheduler::Scheduler menuScrollScheduler;
 extern stmcpp::scheduler::Scheduler commTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler dispChangeScheduler;
 extern void signalError();
 
 extern Oled::OledBuffer frameBuffer;
 
-stmcpp::scheduler::Scheduler ledScheduler(500_ms, [](){ 
+stmcpp::scheduler::Scheduler ledScheduler(500_ms, [](){
 	display::sendState();
 }, true, false);
 
-//stmcpp::scheduler::Scheduler startupSplashScheduler(2000_ms, [](void){GUI::displayActiveMenu(); oledSleepScheduler.resume(); startupSplashScheduler.pause();}, false, true);
+// One-shot scheduler: auto-dismiss the splash screen after 3 seconds
+stmcpp::scheduler::Scheduler splashDismissScheduler(3000_ms, [](){
+	GUI::keypress(ui::InputEvent::Enter);
+}, false, false);
+
+// One-shot scheduler: show pairing screen if SECURED doesn't arrive in time
+stmcpp::scheduler::Scheduler pairingDelayScheduler(500_ms, [](){
+	if (Bluetooth::isConnected() && !Bluetooth::isBonded()) {
+		GUI::showPairingConfirm();
+		GUI::renderForce();
+	}
+}, false, false);
 
 extern "C" void SystemInit(void) {
 
@@ -71,6 +220,8 @@ extern "C" int main(void) {
 
 	//Initialize the OLED
 	Oled::init();
+	GUI::init();
+	splashDismissScheduler.start();
 	//Check if we want to enable DFU
 	//base::dfuCheck();
 	//Start the watchdog
@@ -88,6 +239,7 @@ extern "C" int main(void) {
 	if(Bluetooth::init()){
 		signalError();
 	}
+	
 	//Initialize LED display
 	display::init();
 
@@ -101,6 +253,10 @@ extern "C" int main(void) {
 	CRS->CFGR |= CRS_CR_CEN;
 
 	usb::init();
+
+	if(Bluetooth::configure()){
+		signalError();
+	}
 
 
 
@@ -117,7 +273,7 @@ extern "C" int main(void) {
 
 	while (1) {
 
-		tud_task();	
+		tud_task();
 
 		if(tud_midi_available()) {
 			// Read MIDI messages
@@ -125,13 +281,26 @@ extern "C" int main(void) {
 			midi::send(packet);
 		}
 
-		//oledSleepScheduler.increment();
+		// Čtení protokolových dat z USB CDC
+		if (tud_cdc_available()) {
+			uint8_t cdcBuf[64];
+			uint32_t count = tud_cdc_read(cdcBuf, sizeof(cdcBuf));
+			for (uint32_t i = 0; i < count; ++i) {
+				if (_cdcParser.feed(cdcBuf[i])) {
+					processProtocolPacket(_cdcParser.getPacket(), Transport::USB_CDC);
+				}
+			}
+		}
+
+		// Kontrola protokolových paketů z BLE
+		if (Bluetooth::isProtocolPacketAvailable()) {
+			processProtocolPacket(Bluetooth::getProtocolPacket(), Transport::BLE);
+		}
+
 		keypressScheduler.dispatch();
-		//guiRenderScheduler.dispatch();
-		//menuScrollScheduler.dispatch();
-		//startupSplashScheduler.dispatch();
-		//commTimeoutScheduler.increment();
-		//dispChangeScheduler.increment();
+		guiRenderScheduler.dispatch();
+		splashDismissScheduler.dispatch();
+		pairingDelayScheduler.dispatch();
 		ledScheduler.dispatch();
 
 		if(Bluetooth::isCommandAvailable()){
@@ -148,8 +317,15 @@ extern "C" int main(void) {
 			switch (type) {
 				// --- Simple Commands ---
 				case Bluetooth::Command::Type::ADV_TIMEOUT:     snprintf(packet, sizeof(packet), "Got ble: ADV_TIMEOUT\r\n"); break;
-				case Bluetooth::Command::Type::BONDED:          snprintf(packet, sizeof(packet), "Got ble: BONDED\r\n"); break;
-				case Bluetooth::Command::Type::DISCONNECT:      snprintf(packet, sizeof(packet), "Got ble: DISCONNECT\r\n"); break;
+				case Bluetooth::Command::Type::BONDED:
+					Bluetooth::setBonded(true);
+					pairingDelayScheduler.stop();
+					snprintf(packet, sizeof(packet), "Got ble: BONDED\r\n"); break;
+				case Bluetooth::Command::Type::DISCONNECT:
+					Bluetooth::setConnected(false);
+					pairingDelayScheduler.stop();
+					GUI::renderForce();
+					snprintf(packet, sizeof(packet), "Got ble: DISCONNECT\r\n"); break;
 				case Bluetooth::Command::Type::ERR_CONNPARAM:   snprintf(packet, sizeof(packet), "Got ble: ERR_CONNPARAM\r\n"); break;
 				case Bluetooth::Command::Type::ERR_MEMORY:      snprintf(packet, sizeof(packet), "Got ble: ERR_MEMORY\r\n"); break;
 				case Bluetooth::Command::Type::ERR_READ:        snprintf(packet, sizeof(packet), "Got ble: ERR_READ\r\n"); break;
@@ -166,7 +342,10 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::REBOOT:          snprintf(packet, sizeof(packet), "Got ble: REBOOT\r\n"); break;
 				case Bluetooth::Command::Type::RMT_CMD_OFF:     snprintf(packet, sizeof(packet), "Got ble: RMT_CMD_OFF\r\n"); break;
 				case Bluetooth::Command::Type::RMT_CMD_ON:      snprintf(packet, sizeof(packet), "Got ble: RMT_CMD_ON\r\n"); break;
-				case Bluetooth::Command::Type::SECURED:         snprintf(packet, sizeof(packet), "Got ble: SECURED\r\n"); break;
+				case Bluetooth::Command::Type::SECURED:
+					Bluetooth::setBonded(true);
+					pairingDelayScheduler.stop();
+					snprintf(packet, sizeof(packet), "Got ble: SECURED\r\n"); break;
 				case Bluetooth::Command::Type::STREAM_OPEN:     snprintf(packet, sizeof(packet), "Got ble: STREAM_OPEN\r\n"); break;
 				case Bluetooth::Command::Type::TMR1:            snprintf(packet, sizeof(packet), "Got ble: TMR1\r\n"); break;
 				case Bluetooth::Command::Type::TMR2:            snprintf(packet, sizeof(packet), "Got ble: TMR2\r\n"); break;
@@ -181,7 +360,17 @@ extern "C" int main(void) {
 				}
 				case Bluetooth::Command::Type::CONNECT: {
 					auto* cmd = static_cast<Bluetooth::ConnectCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: CONNECT conn=%d, addr=%s\r\n", 
+					if (cmd->getConnected() == 1) {
+						Bluetooth::setConnected(true);
+						Bluetooth::setBonded(false);
+						// Delay pairing screen — if SECURED arrives first, device is already bonded
+						pairingDelayScheduler.start();
+					} else {
+						Bluetooth::setConnected(false);
+						pairingDelayScheduler.stop();
+					}
+					GUI::renderForce();
+					snprintf(packet, sizeof(packet), "Got ble: CONNECT conn=%d, addr=%s\r\n",
 							cmd->getConnected(), cmd->getAddr().c_str());
 					break;
 				}

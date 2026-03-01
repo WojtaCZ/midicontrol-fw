@@ -10,6 +10,8 @@
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
 #include "stmcpp/systick.hpp"
+#include "protocol/parser.hpp"
+#include "protocol/codec.hpp"
 
 namespace Bluetooth{
 
@@ -225,6 +227,7 @@ namespace Bluetooth{
     
 
     uint8_t init(void);
+    uint8_t configure();
     bool isCommandAvailable();
     std::unique_ptr<Command> getCommand();
     uint8_t _send_string(std::string data);
@@ -233,6 +236,20 @@ namespace Bluetooth{
 
     CommandResponse sendCommand(std::string command);
     CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse = true, stmcpp::units::duration timeout = DEFAULT_TIMEOUT);
+
+    // Connection state
+    bool isConnected();
+    void setConnected(bool connected);
+    bool isBonded();
+    void setBonded(bool bonded);
+
+    // Data receive timestamp
+    stmcpp::units::duration getDataReceivedTimestamp();
+
+    // Protokolové pakety
+    bool isProtocolPacketAvailable();
+    const protocol::Packet &getProtocolPacket();
+    uint8_t sendProtocolPacket(const protocol::Packet &pkt);
 
 }
 

@@ -33,6 +33,10 @@ namespace Bluetooth{
 
 	Mode _mode = Mode::DATA;
 
+	bool _connected = false;
+	bool _bonded = false;
+	duration _dataReceivedTimestamp = 0_ms;
+
 	bool _processingCommand = false;
 	CommandResponse _commandResponse = CommandResponse::NONE;
 	char _commandResponseString[BUFF_SIZE];
@@ -43,6 +47,13 @@ namespace Bluetooth{
 	uint8_t _rxStatusIndex = 0, _rxDataIndex = 0;
 
 	std::deque<std::string> _commandTextQueue;
+
+	// Protokolový parser a stav
+	protocol::Parser _protocolParser;
+	volatile bool _protocolPacketReady = false;
+	bool _receivingProtocol = false;
+	protocol::Packet _protocolPacket = {};
+	uint8_t _protocolTxBuffer[protocol::MAX_FRAME_SIZE];
 
 	
 	CommandResponse sendCommand(std::string command) {
@@ -284,6 +295,24 @@ namespace Bluetooth{
 		}else return 1;
 	}
 
+	uint8_t configure() {
+		if (setMode(Mode::COMMAND) != Mode::COMMAND) {
+			return 1;
+		}
+
+		if (sendCommand("SN,MIDIControl Base") != CommandResponse::OK) return 1;
+		if (sendCommand("SA,1") != CommandResponse::OK) return 1;
+		
+		return 0;
+	}
+
+	bool isConnected() { return _connected; }
+	void setConnected(bool connected) { _connected = connected; }
+	bool isBonded() { return _bonded; }
+	void setBonded(bool bonded) { _bonded = bonded; }
+
+	duration getDataReceivedTimestamp() { return _dataReceivedTimestamp; }
+
 	bool isCommandAvailable() {
         return !_commandTextQueue.empty();
     }
@@ -302,6 +331,28 @@ namespace Bluetooth{
     }
 
 
+
+	bool isProtocolPacketAvailable() {
+		return _protocolPacketReady;
+	}
+
+	const protocol::Packet &getProtocolPacket() {
+		_protocolPacketReady = false;
+		return _protocolPacket;
+	}
+
+	uint8_t sendProtocolPacket(const protocol::Packet &pkt) {
+		if (DMA1_Channel2->CCR & DMA_CCR_EN) return 1;
+
+		uint16_t len = protocol::encode(pkt, _protocolTxBuffer);
+		if (len == 0 || len > protocol::MAX_FRAME_SIZE) return 1;
+
+		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_protocolTxBuffer[0]));
+		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), len);
+		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
+
+		return 0;
+	}
 
 	extern "C" void DMA1_Channel2_IRQHandler(){
 		// Disable TX DMA
@@ -328,38 +379,57 @@ namespace Bluetooth{
 				_commandTextQueue.push_back(string(_rxStatusBuffer));
 				_rxStatusIndex = 0;
 			}else if (!_receivingStatus && c != STATUS_DELIMITER){
-				_rxDataBuffer[_rxDataIndex++] = c;
+				_dataReceivedTimestamp = stmcpp::systick::getDuration();
 
-				if(!strcmp(_rxDataBuffer + (_rxDataIndex - OK_STRING.length()), OK_STRING.c_str())){
-
-					if(_processingCommand){
-						_commandResponse = CommandResponse::OK;
+				// Směrování protokolových rámců do parseru
+				if (c == protocol::FRAME_START) {
+					_receivingProtocol = true;
+					_protocolParser.feed(static_cast<uint8_t>(c));
+				} else if (_receivingProtocol) {
+					if (_protocolParser.feed(static_cast<uint8_t>(c))) {
+						// Kompletní paket přijat
+						_protocolPacket = _protocolParser.getPacket();
+						_protocolPacketReady = true;
+						_receivingProtocol = false;
+					} else if (c == protocol::FRAME_END) {
+						// Neplatný rámec — parser ho zahodil
+						_receivingProtocol = false;
 					}
+				} else {
+					// Ostatní data (příkazové odpovědi apod.)
+					_rxDataBuffer[_rxDataIndex++] = c;
 
-					_rxDataIndex = 0;
-					_rxDataBuffer[_rxDataIndex] = '\0'; 
-				}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - ERROR_STRING.length()), ERROR_STRING.c_str())){
-					if(_processingCommand){
-						_commandResponse = CommandResponse::ERROR;
+					if(!strcmp(_rxDataBuffer + (_rxDataIndex - OK_STRING.length()), OK_STRING.c_str())){
+
+						if(_processingCommand){
+							_commandResponse = CommandResponse::OK;
+						}
+
+						_rxDataIndex = 0;
+						_rxDataBuffer[_rxDataIndex] = '\0';
+					}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - ERROR_STRING.length()), ERROR_STRING.c_str())){
+						if(_processingCommand){
+							_commandResponse = CommandResponse::ERROR;
+						}
+
+						_rxDataIndex = 0;
+						_rxDataBuffer[_rxDataIndex] = '\0';
+					}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - CMD_STRING.length()), CMD_STRING.c_str())){
+						_mode = Mode::COMMAND;
+
+						if(_processingCommand){
+							_commandResponse = CommandResponse::OK;
+						} else _commandResponse = CommandResponse::NONE;
+
+						_rxDataIndex = 0;
+						_rxDataBuffer[_rxDataIndex] = '\0';
+					}else if(c == MESSAGE_DELIMITER){
+						// End of data message
+						strcpy(_commandResponseString, _rxDataBuffer);
+						_commandResponseString[_rxDataIndex] = '\0';
+						_rxDataIndex = 0;
+						_rxDataBuffer[_rxDataIndex] = '\0';
 					}
-
-					_rxDataIndex = 0;		
-					_rxDataBuffer[_rxDataIndex] = '\0'; 
-				}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - CMD_STRING.length()), CMD_STRING.c_str())){
-					_mode = Mode::COMMAND;
-
-					if(_processingCommand){
-						_commandResponse = CommandResponse::OK;
-					} else _commandResponse = CommandResponse::NONE;
-
-					_rxDataIndex = 0;
-					_rxDataBuffer[_rxDataIndex] = '\0'; 
-				}else if(c == MESSAGE_DELIMITER){
-					// End of data message
-					strcpy(_commandResponseString, _rxDataBuffer);
-					_commandResponseString[_rxDataIndex] = '\0';
-					_rxDataIndex = 0;
-					_rxDataBuffer[_rxDataIndex] = '\0'; 
 				}
 			}
 
