@@ -114,8 +114,8 @@ namespace base{
 			if(GPIOB->IDR & GPIO_IDR_ID1) return;
 		}
 		
-		GUI::display(new GUI::Splash("MIDIControl", "DFU MODE", "Program over USB"));
-		GUI::render();
+		// DFU splash display removed — parent project should set up
+		// a splash screen via ui::Navigator before entering DFU mode.
 
 		#define FW_ADDR    0x1FFF0000
 		SCB->VTOR = FW_ADDR & 0xFFFF;
@@ -188,7 +188,7 @@ namespace base::Encoder{
 
 			// Update the status according to the gpio state
 			if(btnPress){
-				//GUI::keypress(UserInput::Key::ENTER);
+				GUI::keypress(ui::InputEvent::Enter);
 			}
 		}
 		
@@ -210,10 +210,10 @@ namespace base::Encoder{
 
 		// Handle a shift in position
 		if(pos > 0){
-			//GUI::keypress(UserInput::Key::DOWN);
+			GUI::keypress(ui::InputEvent::Down);
 			pos = 0;
 		}else if(pos < 0){
-			//GUI::keypress(UserInput::Key::UP);
+			GUI::keypress(ui::InputEvent::Up);
 			pos = 0;
 		}
 

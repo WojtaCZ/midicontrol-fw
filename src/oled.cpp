@@ -1,7 +1,6 @@
 #include "oled.hpp"
 #include <stmcpp/scheduler.hpp>
 #include "base.hpp"
-#include "menu.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>

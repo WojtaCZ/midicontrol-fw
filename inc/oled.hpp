@@ -3,8 +3,7 @@
 
 #include <stmcpp/scheduler.hpp>
 #include <stmcpp/units.hpp>
-#include <menu/inc/text.hpp>
-#include "oled_fonts.hpp"
+#include <gfx/framebuffer.hpp>
 #include <string>
 #include <array>
 #include <utility>
@@ -29,7 +28,7 @@ using namespace stmcpp::units;
 
 namespace Oled{
 
-    class OledBuffer : public menu::IFrameBuffer<uint8_t> {
+    class OledBuffer : public gfx::IFrameBuffer<uint8_t> {
         public:
             OledBuffer();
             virtual ~OledBuffer() = default;
@@ -60,15 +59,6 @@ namespace Oled{
             uint8_t buffer[BUFFER_SIZE];
     };
 
-
-
-
-
-
-
-
-
-
     enum class Color{
         BLACK,
         WHITE
@@ -80,20 +70,6 @@ namespace Oled{
         }else return Color::BLACK;
     }
 
-    enum class Icon{
-        UP_ARROW = 34,
-        DOWN_ARROW = 35,
-        LEFT_ARROW_UNSEL = 36,
-        LEFT_ARROW_SEL = 37,
-        CHECKBOX_SEL_UNCH = 40,
-        CHECKBOX_SEL_CHCK = 41,
-        CHECKBOX_UNSEL_UNCH = 38,
-        CHECKBOX_UNSEL_CHCK = 39,
-        DOT_SEL = 32,
-        DOT_UNSEL = 33,
-        SIG_4 = 18
-    };
-
     void setCoordinates(pair<uint16_t, uint16_t> coord);
     void sleep();
     void wakeup();
@@ -103,21 +79,11 @@ namespace Oled{
     void setInitialized(bool state);
 
     void update();
-    /*void fill(Color color);
-   void setCursor(pair<uint16_t, uint16_t> coord);
-    void drawPixel(pair<uint16_t, uint16_t> coord, Color color);
-    void writeSymbol(char c, FontDef font, Color color);
-    void writeSymbol(Icon icon, FontDef font, Color color);
-    void writeString(string str, FontDef font, Color color);*/
     void init();
 
-    
     void sleepCallback(void);
     void wakeupCallback(void);
-    
+
 }
-
-
-
 
 #endif
