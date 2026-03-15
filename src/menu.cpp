@@ -133,6 +133,7 @@ static ui::ParagraphScreen displayScreen(dispLines, 5, onDisplayDismiss);
 
 static StopCallback _stopCallback = nullptr;
 static char _nowPlayingSong[64] = "";
+static char _nowPlayingInfo[32] = "";
 static bool _nowPlayingActive = false;
 
 static void onNowPlayingDismiss(void* userData) {
@@ -342,6 +343,8 @@ void showNowPlaying(const char* songName) {
     std::strncpy(_nowPlayingSong, songName, sizeof(_nowPlayingSong) - 1);
     _nowPlayingSong[sizeof(_nowPlayingSong) - 1] = '\0';
     nowPlayingScreen.setSubtitle(_nowPlayingSong);
+    nowPlayingScreen.setComment("Stiskni pro zastaveni");
+    _nowPlayingInfo[0] = '\0';
     _nowPlayingActive = true;
     nav.push(&nowPlayingScreen);
     nav.forceRender();
@@ -353,6 +356,24 @@ void dismissNowPlaying() {
         nav.pop();
         nav.forceRender();
     }
+}
+
+void updateNowPlayingInfo() {
+    if (!_nowPlayingActive) return;
+
+    uint16_t song = display::getSong();
+    uint8_t verse = display::getVerse();
+    char letter = display::getLetter();
+
+    if (letter != ' ' && letter != '\0') {
+        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
+                      "P:%u S:%02u %c", song, verse, letter);
+    } else {
+        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
+                      "P:%u S:%02u", song, verse);
+    }
+    nowPlayingScreen.setComment(_nowPlayingInfo);
+    nav.forceRender();
 }
 
 void setStopCallback(StopCallback cb) {

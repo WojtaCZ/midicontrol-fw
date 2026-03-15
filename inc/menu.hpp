@@ -36,6 +36,9 @@ namespace GUI {
     void showNowPlaying(const char* songName);
     void dismissNowPlaying();
 
+    // Aktualizace info na "Now Playing" obrazovce (song/verse/letter z display::)
+    void updateNowPlayingInfo();
+
     // Registrace callbacku pro zastavení přehrávání (volá se při dismiss z OLED)
     using StopCallback = void (*)();
     void setStopCallback(StopCallback cb);

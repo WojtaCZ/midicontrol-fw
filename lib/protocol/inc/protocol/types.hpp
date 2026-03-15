@@ -13,6 +13,7 @@ namespace protocol {
 		PLAY_SONG          = 0x10,
 		STOP_SONG          = 0x11,
 		RECORD_SONG        = 0x12,
+		NOW_PLAYING_INFO   = 0x13,
 
 		GET_SONG_LIST      = 0x20,
 		SONG_LIST_RESP     = 0x21,

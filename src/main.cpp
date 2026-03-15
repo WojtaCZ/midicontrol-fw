@@ -99,7 +99,8 @@ static void sendNak(uint8_t dest, uint8_t ackedPacketId, protocol::NakReason rea
 // Zpracování lokálního paketu (určeného pro Base)
 static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
 	bool needsAck = (pkt.msgType != protocol::MsgType::ACK && pkt.msgType != protocol::MsgType::NAK
-					 && pkt.msgType != protocol::MsgType::KEEPALIVE && pkt.msgType != protocol::MsgType::KEEPALIVE_ACK);
+					 && pkt.msgType != protocol::MsgType::KEEPALIVE && pkt.msgType != protocol::MsgType::KEEPALIVE_ACK
+					 && pkt.msgType != protocol::MsgType::NOW_PLAYING_INFO);
 
 	switch (pkt.msgType) {
 		case protocol::MsgType::SET_CURRENT:
@@ -149,6 +150,59 @@ static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
 			GUI::dismissNowPlaying();
 			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
 			break;
+
+		case protocol::MsgType::NOW_PLAYING_INFO: {
+			// Payload: [song_h, song_l, verse, letter, led] — 0xFF = beze změny
+			if (pkt.payloadLen >= 5) {
+				uint8_t song_h = pkt.payload[0];
+				uint8_t song_l = pkt.payload[1];
+				uint8_t verse_bcd = pkt.payload[2];
+				uint8_t letter_raw = pkt.payload[3];
+				uint8_t led_raw = pkt.payload[4];
+
+				// Song: 2 BCD bajty → uint16_t
+				if (song_h != 0xFF && song_l != 0xFF) {
+					uint16_t d3 = (song_h >> 4) & 0x0F;
+					uint16_t d2 = song_h & 0x0F;
+					uint16_t d1 = (song_l >> 4) & 0x0F;
+					uint16_t d0 = song_l & 0x0F;
+					uint16_t song = d3 * 1000 + d2 * 100 + d1 * 10 + d0;
+					display::setSong(song, true);
+				}
+
+				// Verse: BCD
+				if (verse_bcd != 0xFF) {
+					uint8_t v1 = (verse_bcd >> 4) & 0x0F;
+					uint8_t v0 = verse_bcd & 0x0F;
+					uint8_t verse = v1 * 10 + v0;
+					display::setVerse(verse, true);
+				}
+
+				// Letter: 0xA=A .. 0xD=D, 0xF=off
+				if (letter_raw != 0xFF) {
+					if (letter_raw >= 0x0A && letter_raw <= 0x0D) {
+						display::setLetter('A' + (letter_raw - 0x0A), true);
+					} else {
+						display::setLetter(' ', false);
+					}
+				}
+
+				// LED: 1=red, 2=green, 3=blue, 4=yellow, 0xF=off
+				if (led_raw != 0xFF) {
+					switch (led_raw) {
+						case 1: display::setLed(display::ledColor::RED); break;
+						case 2: display::setLed(display::ledColor::GREEN); break;
+						case 3: display::setLed(display::ledColor::BLUE); break;
+						case 4: display::setLed(display::ledColor::YELLOW); break;
+						default: display::setLed(display::ledColor::OFF); break;
+					}
+				}
+
+				GUI::updateNowPlayingInfo();
+			}
+			// Bez ACK — časté aktualizace
+			break;
+		}
 
 		case protocol::MsgType::SIGNAL_PLAYING:
 		case protocol::MsgType::SIGNAL_RECORDING:
