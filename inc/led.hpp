@@ -47,6 +47,7 @@ namespace LED{
             Pixel(Color color, bool turnedOn = true) : color_(color), turnedOn_(turnedOn) {}
             Color & getColor(){ return color_; };
             void setColor(Color color){ color_ = color; update(); };
+            void setColorQuiet(Color color){ color_ = color; };
             void setIntensity(float intensity) { color_.setIntensity(intensity);  update();  };
             void shiftHue(int16_t degrees) { if(color_.raw() != 0) color_.shiftHue(degrees); update(); };
             bool isOn() const { return turnedOn_; };
@@ -69,7 +70,6 @@ namespace LED{
     };
 
     void colorToTiming(Color & color, uint8_t * timingBuffer);
-    extern Pixel usb, display, current, midia, midib, bluetooth;
 	extern Strip<6> rearStrip;
     extern Strip<4> frontStrip;
 

@@ -406,7 +406,7 @@ extern "C" int main(void) {
 	midi::init();
 
 	LED::init();
-	ledScheduler.resume(); // Start the LED scheduler
+	ledScheduler.start(); // Start the LED scheduler
 
 	//Initialize bluetooth
 	if(Bluetooth::init()){

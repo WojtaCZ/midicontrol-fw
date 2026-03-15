@@ -20,6 +20,7 @@ namespace LED{
 
 	// Sledování aktivity — timestamp posledního notifyActivity() pro každý pixel
 	static duration activityTimestamp[6] = {};
+	
 	static constexpr duration BLINK_DURATION = 100_ms;
 
 	constexpr uint16_t timerPeriod = (144e6 / 800000);	// 144MHz clock, 800kHz LED strip
@@ -29,21 +30,20 @@ namespace LED{
 
 
 
-	Pixel usb(LED::Color(0, 0, 0, 0));
-	Pixel display(LED::Color(0, 0, 0, 0));
-	Pixel current(LED::Color(0, 0, 0, 0));
-	Pixel midia(LED::Color(255, 0, 0, 0.1));
-	Pixel midib(LED::Color(0, 255, 0, 0.1));
-	Pixel bluetooth(LED::Color(0, 0, 0, 0));
-
-	std::array rearPixels = {usb, display, current, midia, midib, bluetooth};
-	LED::Strip<6> rearStrip(rearPixels);
+	LED::Strip<6> rearStrip(std::array{
+		Pixel(LED::Color(0, 0, 0, 0)),       // USB
+		Pixel(LED::Color(0, 0, 0, 0)),       // Display
+		Pixel(LED::Color(0, 0, 0, 0)),       // Current
+		Pixel(LED::Color(255, 0, 0, 0.1)),   // MIDI A
+		Pixel(LED::Color(0, 255, 0, 0.1)),   // MIDI B
+		Pixel(LED::Color(0, 0, 0, 0)),       // Bluetooth
+	});
 
 	
 	std::array frontPixels = {Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0))};
 	LED::Strip<4> frontStrip(frontPixels);
 
-	uint8_t rearBuffer[2*resetSlots + rearPixels.size() * 24]; // Reset slots and 3 bytes per pixel
+	uint8_t rearBuffer[2*resetSlots + 6 * 24]; // Reset slots and 3 bytes per pixel
 	uint8_t frontBuffer[2*resetSlots + frontPixels.size() * 24]; // Reset slots and 3 bytes per pixel
 
 	void init(){
@@ -149,8 +149,12 @@ namespace LED{
 			pixelIndex++;
 		}
 
-		stmcpp::reg::set(std::ref(DMA2_Channel2->CCR), DMA_CCR_EN); // Enable DMA channel
-		stmcpp::reg::set(std::ref(DMA2_Channel1->CCR), DMA_CCR_EN); // Enable DMA channel
+		// Reprogram CNDTR before re-enabling — STM32G4 DMA requires this after channel was disabled
+		stmcpp::reg::write(std::ref(DMA2_Channel2->CNDTR), sizeof(frontBuffer));
+		stmcpp::reg::set(std::ref(DMA2_Channel2->CCR), DMA_CCR_EN);
+
+		stmcpp::reg::write(std::ref(DMA2_Channel1->CNDTR), sizeof(rearBuffer));
+		stmcpp::reg::set(std::ref(DMA2_Channel1->CCR), DMA_CCR_EN);
 	}
 
 	void colorToTiming(Color & color, uint8_t * timingBuffer){ 
@@ -264,52 +268,56 @@ namespace LED{
 		Color red(255, 0, 0, INTENSITY);
 		Color white(255, 255, 255, INTENSITY);
 
+		auto &pixels = rearStrip.getPixels();
+
 		// USB
 		if (master && isPcAlive()) {
 			bool blink = (now - activityTimestamp[PIXEL_USB]) < BLINK_DURATION;
-			usb.setColor(blink ? white : green);
+			pixels[PIXEL_USB].setColorQuiet(blink ? white : green);
 		} else {
-			usb.setColor(off);
+			pixels[PIXEL_USB].setColorQuiet(off);
 		}
 
 		// Display
 		if (master && ::display::isConnected()) {
 			bool blink = (now - activityTimestamp[PIXEL_DISPLAY]) < BLINK_DURATION;
-			LED::display.setColor(blink ? white : green);
+			pixels[PIXEL_DISPLAY].setColorQuiet(blink ? white : green);
 		} else {
-			LED::display.setColor(off);
+			pixels[PIXEL_DISPLAY].setColorQuiet(off);
 		}
 
 		// Current
 		if (master && base::current::isEnabled()) {
 			bool blink = (now - activityTimestamp[PIXEL_CURRENT]) < BLINK_DURATION;
-			current.setColor(blink ? white : green);
+			pixels[PIXEL_CURRENT].setColorQuiet(blink ? white : green);
 		} else {
-			current.setColor(off);
+			pixels[PIXEL_CURRENT].setColorQuiet(off);
 		}
 
 		// MIDI A — vždy červená pokud roleId, bliká bíle pokud master
 		if (roleId) {
 			bool blink = master && (now - activityTimestamp[PIXEL_MIDIA]) < BLINK_DURATION;
-			midia.setColor(blink ? white : red);
+			pixels[PIXEL_MIDIA].setColorQuiet(blink ? white : red);
 		} else {
-			midia.setColor(off);
+			pixels[PIXEL_MIDIA].setColorQuiet(off);
 		}
 
 		// MIDI B — vždy zelená pokud roleId, bliká bíle pokud master
 		if (roleId) {
 			bool blink = master && (now - activityTimestamp[PIXEL_MIDIB]) < BLINK_DURATION;
-			midib.setColor(blink ? white : green);
+			pixels[PIXEL_MIDIB].setColorQuiet(blink ? white : green);
 		} else {
-			midib.setColor(off);
+			pixels[PIXEL_MIDIB].setColorQuiet(off);
 		}
 
 		// Bluetooth
 		if (master && Bluetooth::isConnected()) {
 			bool blink = (now - activityTimestamp[PIXEL_BLUETOOTH]) < BLINK_DURATION;
-			bluetooth.setColor(blink ? white : green);
+			pixels[PIXEL_BLUETOOTH].setColorQuiet(blink ? white : green);
 		} else {
-			bluetooth.setColor(off);
+			pixels[PIXEL_BLUETOOTH].setColorQuiet(off);
 		}
+
+		update();
 	}
 }
