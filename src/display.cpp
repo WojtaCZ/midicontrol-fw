@@ -210,44 +210,54 @@ namespace display {
         changed = true;
     }
 
-    // Send display state to MIDI as sysex
+    // Převod interního stavu číslice na SysEx byte (0x00-0x09 nebo 0x0F=off)
+    static uint8_t stateToSysexDigit(uint8_t state) {
+        return (state & 0xF0) == 0xE0 ? 0x0F : (state & 0x0F);
+    }
+
+    // Převod interního stavu LED na SysEx byte
+    static uint8_t stateToSysexLed(uint8_t state) {
+        switch(state) {
+            case RED:    return 0x01;
+            case YELLOW: return 0x04;
+            case GREEN:  return 0x02;
+            case BLUE:   return 0x03;
+            default:     return 0x0F; // OFF
+        }
+    }
+
+    // Převod interního stavu písmene na SysEx byte
+    static uint8_t stateToSysexLetter(uint8_t state) {
+        uint8_t val = state & 0x0F;
+        return (val >= 0x0A && val <= 0x0D) ? val : 0x0F;
+    }
+
+    // Send display state to MIDI as SysEx
+    // Formát: F0 4D 43 01 00 S3 S2 S1 S0 V1 V0 LETTER LED F7
+    // Všechny datové byty jsou v rozsahu 0x00-0x0F (7-bit safe)
     void sendToMIDI(){
-       /* // Create a MIDI message
-        const uint8_t buff[] = {
-            // Header - sysex start + real-time + ID (assigned 1 to display)
-            0x04, 0xF0, 0x7E, 0x01, 
-            0x04, Display::getRawSysex(1), Display::getRawSysex(2), Display::getRawSysex(3),
-            0x04, Display::getRawSysex(4), Display::getRawSysex(5), Display::getRawSysex(6),
-            0x07, Display::getRawSysex(7), Display::getRawSysex(8), 0xF7
+        uint8_t s3 = stateToSysexDigit(currentState[6]); // tisíce
+        uint8_t s2 = stateToSysexDigit(currentState[5]); // stovky
+        uint8_t s1 = stateToSysexDigit(currentState[4]); // desítky
+        uint8_t s0 = stateToSysexDigit(currentState[3]); // jednotky
+        uint8_t v1 = stateToSysexDigit(currentState[2]); // desítky sloky
+        uint8_t v0 = stateToSysexDigit(currentState[1]); // jednotky sloky
+        uint8_t letter = stateToSysexLetter(currentState[7]);
+        uint8_t led = stateToSysexLed(currentState[8]);
+
+        // USB MIDI packets (4 bytes each: [CIN, MIDI1, MIDI2, MIDI3])
+        const uint8_t packets[][4] = {
+            {0x04, 0xF0, 0x4D, 0x43},     // SysEx start + header
+            {0x04, 0x01, 0x00, s3},        // device, target, S3
+            {0x04, s2,   s1,   s0},        // S2, S1, S0
+            {0x04, v1,   v0,   letter},    // V1, V0, LETTER
+            {0x06, led,  0xF7, 0x00},      // LED, SysEx end (CIN=6: 2-byte end)
         };
 
-        // Send the message over
-        tud_midi_packet_write(&buff[0]);*/
+        for(const auto& pkt : packets) {
+            tud_midi_packet_write(pkt);
+        }
     }
-
-    // Returns the raw state bytes formatted for midi sysex message
-    /*uint8_t getRawSysex(int index){
-        if(index > state.size() || index < 0) return 0;
-        // Sysex doesn't allow high bits set in data- reformat 0xE0 to 0x0E
-        if(state.at(index) > 0x0F && index != 8) return (getRawState(index) >> 4) & 0x0F;
-        // Handle LED byte which needs a format of 0x2X
-        if(index == 8 && (state.at(index) & 0xF0) == 0xE0) return 0x0E;
-
-        return state.at(index) & 0x0F;
-    }
-*/
-
-
-
-    /*extern "C" void display_setRawSysex(uint8_t data, int index){
-        // Reinterpret invalid data as digit off
-        if(data >= 0x0E && index != 8) data = 0xE0;
-        // Handle LED byte with specific format
-        if(data > 3 && index == 8) data = 0xE0;
-        if(data <= 3 && index == 8) data |= 0x20;
-
-        setRawState(data, index);
-    }*/
 
     extern "C" void EXTI15_10_IRQHandler(){
         display::disp_sense.clearInterruptFlag(); // Clear the interrupt flag

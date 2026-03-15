@@ -46,9 +46,10 @@ static uint8_t _cdcPacketId = 0;
 
 // Keepalive: čas posledního paketu z PC
 static duration _lastPcKeepalive = 0_ms;
+static bool _pcEverSeen = false;
 
 bool isPcAlive() {
-	return (stmcpp::systick::getDuration() - _lastPcKeepalive) < 5000_ms;
+	return _pcEverSeen && (stmcpp::systick::getDuration() - _lastPcKeepalive) < 5000_ms;
 }
 
 // Odeslání paketu přes USB CDC
@@ -251,6 +252,7 @@ static void processProtocolPacket(const protocol::Packet &pkt, Transport via) {
 	// Aktualizace keepalive timestampu při každém paketu z PC
 	if (via == Transport::USB_CDC) {
 		_lastPcKeepalive = stmcpp::systick::getDuration();
+		_pcEverSeen = true;
 	}
 
 	bool forBase = (pkt.dest == protocol::ADDR_BASE || pkt.dest == protocol::ADDR_BROADCAST);
@@ -283,6 +285,34 @@ extern Oled::OledBuffer frameBuffer;
 stmcpp::scheduler::Scheduler ledScheduler(500_ms, [](){
 	display::sendState();
 }, true, false);
+
+// Callback: firmware požaduje seznam písní z PC
+static void onRequestSongList() {
+	protocol::Packet pkt = {};
+	pkt.source = protocol::ADDR_BASE;
+	pkt.dest = protocol::ADDR_PC;
+	pkt.packetId = _cdcPacketId++;
+	pkt.msgType = protocol::MsgType::GET_SONG_LIST;
+	pkt.payloadLen = 0;
+	sendCdcPacket(pkt);
+}
+
+// Callback: uživatel vybral píseň ze seznamu → odešleme PLAY_SONG na PC
+static void onPlaySongSelected(const char* songName) {
+	protocol::Packet pkt = {};
+	pkt.source = protocol::ADDR_BASE;
+	pkt.dest = protocol::ADDR_PC;
+	pkt.packetId = _cdcPacketId++;
+	pkt.msgType = protocol::MsgType::PLAY_SONG;
+	uint8_t len = 0;
+	while (songName[len] && len < protocol::MAX_PAYLOAD_SIZE - 1) {
+		pkt.payload[len] = static_cast<uint8_t>(songName[len]);
+		len++;
+	}
+	pkt.payload[len] = 0;
+	pkt.payloadLen = len + 1;
+	sendCdcPacket(pkt);
+}
 
 // Callback: uživatel stiskl encoder na "Now Playing" → odešleme STOP_SONG
 static void onUserStopPlayback() {
@@ -341,6 +371,8 @@ extern "C" int main(void) {
 	Oled::init();
 	GUI::init();
 	GUI::setStopCallback(onUserStopPlayback);
+	GUI::setRequestSongListCallback(onRequestSongList);
+	GUI::setPlaySongCallback(onPlaySongSelected);
 	splashDismissScheduler.start();
 	//Check if we want to enable DFU
 	//base::dfuCheck();

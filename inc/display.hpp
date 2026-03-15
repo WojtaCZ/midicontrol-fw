@@ -29,15 +29,9 @@ namespace display{
     ledColor getLed();
     bool isConnected();
     bool wasChanged();
-    //uint8_t (&data)[9] getRawState();
     uint8_t getRawState(int index);
-    //void setRawState(array<std::uint8_t, 9> state);
-    //void setRawState(std::uint8_t data, int index);
-    uint8_t getRawSysex(int index);
     void sendToMIDI();
 
 }
-
-extern "C" void display_setRawSysex(uint8_t data, int index);
 
 #endif

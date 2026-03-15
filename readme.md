@@ -64,31 +64,30 @@ Cíl určuje, **která část displeje se aktualizuje** a tím pádem i struktur
 
 ## Čísla (píseň, sloka)
 
-* Každý znak = **1 nibble (4 bity)**
-* `0x0–0x9` → číslice
-* `0xF` → mezera
+* Každý znak = **1 byte** (hodnota `0x00–0x09` = číslice, `0x0F` = mezera)
+* Všechny hodnoty jsou ≤ `0x0F`, tedy v rozsahu platném pro MIDI SysEx (0–127)
 
 ### Číslo písně
 
 * Rozsah: `0–1999`
-* Velikost: **2 byty (4 znaky)**
+* Velikost: **4 byty (4 znaky)**
 
-| Byty        | Zobrazení |
-| ----------- | --------- |
-| `0x12 0x34` | `1234`    |
-| `0x0F 0x23` | `0 23`    |
+| Byty                  | Zobrazení |
+| --------------------- | --------- |
+| `0x01 0x02 0x03 0x04` | `1234`    |
+| `0x0F 0x00 0x02 0x03` | ` 023`    |
 
 ---
 
 ### Číslo sloky
 
 * Rozsah: `0–99`
-* Velikost: **1 byte (2 znaky)**
+* Velikost: **2 byty (2 znaky)**
 
-| Byte   | Zobrazení |
-| ------ | --------- |
-| `0x09` | `09`      |
-| `0xF5` | ` 5`      |
+| Byty        | Zobrazení |
+| ----------- | --------- |
+| `0x00 0x09` | `09`      |
+| `0x0F 0x05` | ` 5`      |
 
 ---
 
@@ -126,15 +125,15 @@ Používá se pro **kompletní aktualizaci** (např. po zapnutí).
 ### Struktura rámce
 
 ```
-0x4D 0x43 | 0x01 | 0x00 | [SONG_H] [SONG_L] | [VERSE] | [LETTER] | [LED]
+0x4D 0x43 | 0x01 | 0x00 | [S3] [S2] [S1] [S0] | [V1] [V0] | [LETTER] | [LED]
 ```
 
-| Pole        | Velikost | Popis             |
-| ----------- | -------- | ----------------- |
-| Číslo písně | 2 B      | 4 nibble (0–1999) |
-| Číslo sloky | 1 B      | 2 nibble (0–99)   |
-| Písmeno     | 1 B      | 1 nibble          |
-| LED         | 1 B      | Barva / vypnuto   |
+| Pole        | Velikost | Popis                    |
+| ----------- | -------- | ------------------------ |
+| Číslo písně | 4 B      | 4 znaky, 1 byte/znak    |
+| Číslo sloky | 2 B      | 2 znaky, 1 byte/znak    |
+| Písmeno     | 1 B      | Viz kódování písmene     |
+| LED         | 1 B      | Barva / vypnuto          |
 
 ### Příklad
 
@@ -146,7 +145,7 @@ Zobrazí:
 * LED zelená
 
 ```
-0x4D 0x43 0x01 0x00  0x12 0x34  0x05  0x0B  0x02
+0x4D 0x43 0x01 0x00  0x01 0x02 0x03 0x04  0x00 0x05  0x0B  0x02
 ```
 
 ---
@@ -156,7 +155,7 @@ Zobrazí:
 ### Struktura
 
 ```
-0x4D 0x43 | 0x01 | 0x01 | [SONG_H] [SONG_L]
+0x4D 0x43 | 0x01 | 0x01 | [S3] [S2] [S1] [S0]
 ```
 
 ### Příklad
@@ -164,7 +163,7 @@ Zobrazí:
 Zobrazí `0078`:
 
 ```
-0x4D 0x43 0x01 0x01  0x00 0x78
+0x4D 0x43 0x01 0x01  0x00 0x00 0x07 0x08
 ```
 
 ---
@@ -174,7 +173,7 @@ Zobrazí `0078`:
 ### Struktura
 
 ```
-0x4D 0x43 | 0x01 | 0x02 | [VERSE]
+0x4D 0x43 | 0x01 | 0x02 | [V1] [V0]
 ```
 
 ### Příklad
@@ -182,7 +181,7 @@ Zobrazí `0078`:
 Zobrazí ` 5`:
 
 ```
-0x4D 0x43 0x01 0x02  0xF5
+0x4D 0x43 0x01 0x02  0x0F 0x05
 ```
 
 ---

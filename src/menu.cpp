@@ -22,6 +22,9 @@ extern Oled::OledBuffer frameBuffer;
 // PC keepalive — definováno v main.cpp
 extern bool isPcAlive();
 
+// Timeout scheduler — definováno na konci tohoto souboru
+extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
+
 namespace GUI {
 
 // ── Theme ─────────────────────────────────────────────────────────────
@@ -136,6 +139,17 @@ static char _nowPlayingSong[64] = "";
 static char _nowPlayingInfo[32] = "";
 static bool _nowPlayingActive = false;
 
+// ── Song list data ──────────────────────────────────────────────────────
+
+static constexpr int MAX_SONGS = 12;
+static char _songNames[MAX_SONGS][24];       // 23 chars + null
+static ui::MenuItem _songListItems[MAX_SONGS + 1]; // items + Back
+static int _songCount = 0;
+static bool _songListPending = false;
+
+static RequestSongListCallback _requestSongListCallback = nullptr;
+static PlaySongCallback _playSongCallback = nullptr;
+
 static void onNowPlayingDismiss(void* userData) {
     (void)userData;
     _nowPlayingActive = false;
@@ -161,10 +175,46 @@ static void onPairResult(bool confirmed, void* userData) {
 
 static ui::ConfirmScreen pairingScreen("Pair device?", onPairResult);
 
+// ── Song list screens ─────────────────────────────────────────────────
+
+static void onLoadingDismiss(void* userData) {
+    (void)userData;
+    _songListPending = false;
+    songListTimeoutScheduler.stop();
+    nav.pop();
+}
+
+static ui::SplashScreen songListLoadingScreen(
+    "Pisne", "Nacitani...", "Cekam na PC", onLoadingDismiss
+);
+
+static void onSongSelected(ui::MenuItem* item, void* userData);
+
+static ui::MenuScreen songListScreen("Pisne", _songListItems, 0);
+
+static void onSongSelected(ui::MenuItem* item, void* userData) {
+    (void)userData;
+    if (_playSongCallback && item) {
+        _playSongCallback(item->title());
+    }
+    // Pop song list — NowPlaying bude pushed existujícím PLAY_SONG handlerem
+    nav.pop();
+}
+
 // ── Callbacks ─────────────────────────────────────────────────────────
 
 static void playCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
+    if (!isPcAlive()) return;
+    if (!_requestSongListCallback) return;
+
+    _songListPending = true;
+    _requestSongListCallback();
+    songListLoadingScreen.setSubtitle("Nacitani...");
+    songListLoadingScreen.setComment("Cekam na PC");
+    nav.push(&songListLoadingScreen);
+    nav.forceRender();
+    songListTimeoutScheduler.start();
 }
 
 static void recordCallback(ui::MenuItem* item, void* userData) {
@@ -299,7 +349,7 @@ void keypress(ui::InputEvent event) {
     // because the navigator doesn't have RTTI to auto-detect MenuScreen
     ui::Screen* cur = nav.current();
     if (event == ui::InputEvent::Enter && cur) {
-        if (cur == &mainScreen || cur == &settingsScreen) {
+        if (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen) {
             auto* menu = static_cast<ui::MenuScreen*>(cur);
             ui::MenuItem* sel = menu->selectedItem();
 
@@ -380,8 +430,70 @@ void setStopCallback(StopCallback cb) {
     _stopCallback = cb;
 }
 
+void setRequestSongListCallback(RequestSongListCallback cb) {
+    _requestSongListCallback = cb;
+}
+
+void setPlaySongCallback(PlaySongCallback cb) {
+    _playSongCallback = cb;
+}
+
+void handleSongListResponse(const char* payload, uint8_t len) {
+    if (!_songListPending) return;
+    _songListPending = false;
+    songListTimeoutScheduler.stop();
+
+    // Parsování středníkem oddělených jmen písní
+    _songCount = 0;
+    int nameStart = 0;
+    for (int i = 0; i <= len && _songCount < MAX_SONGS; ++i) {
+        if (i == len || payload[i] == ';') {
+            int nameLen = i - nameStart;
+            if (nameLen > 0) {
+                if (nameLen > 23) nameLen = 23;
+                std::memcpy(_songNames[_songCount], &payload[nameStart], nameLen);
+                _songNames[_songCount][nameLen] = '\0';
+                _songListItems[_songCount] = ui::MenuItem(_songNames[_songCount], onSongSelected);
+                _songCount++;
+            }
+            nameStart = i + 1;
+        }
+    }
+
+    // Prázdná složka
+    if (_songCount == 0) {
+        songListLoadingScreen.setSubtitle("Zadne pisne");
+        songListLoadingScreen.setComment("Stiskni pro navrat");
+        nav.forceRender();
+        return;
+    }
+
+    // Přidání položky Zpět
+    _songListItems[_songCount] = ui::MenuItem::back("Zpet");
+
+    // Rekonstrukce song list screen s aktuálním počtem
+    songListScreen = ui::MenuScreen("Pisne", _songListItems, _songCount + 1);
+
+    // Pop loading screen, push song list
+    nav.pop();
+    nav.push(&songListScreen);
+    nav.forceRender();
+}
+
+// Voláno z timeout scheduleru
+void songListTimeout() {
+    if (_songListPending) {
+        songListLoadingScreen.setSubtitle("PC neodpovida");
+        songListLoadingScreen.setComment("Stiskni pro navrat");
+        nav.forceRender();
+    }
+}
+
 } // namespace GUI
 
 // ── Scheduler ─────────────────────────────────────────────────────────
 
 stmcpp::scheduler::Scheduler guiRenderScheduler(30_ms, &GUI::render, true, true);
+
+// One-shot: timeout pro načítání seznamu písní (3s)
+stmcpp::scheduler::Scheduler songListTimeoutScheduler(3000_ms, GUI::songListTimeout, false, false);

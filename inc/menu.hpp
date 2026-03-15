@@ -42,6 +42,15 @@ namespace GUI {
     // Registrace callbacku pro zastavení přehrávání (volá se při dismiss z OLED)
     using StopCallback = void (*)();
     void setStopCallback(StopCallback cb);
+
+    // Callbacky pro seznam písní a přehrávání
+    using RequestSongListCallback = void (*)();
+    using PlaySongCallback = void (*)(const char* songName);
+    void setRequestSongListCallback(RequestSongListCallback cb);
+    void setPlaySongCallback(PlaySongCallback cb);
+
+    // Zpracování odpovědi se seznamem písní z PC
+    void handleSongListResponse(const char* payload, uint8_t len);
 }
 
 #endif
