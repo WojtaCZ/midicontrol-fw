@@ -84,7 +84,7 @@ static void midiRoleCallback(ui::MenuItem* item, void* userData);
 
 static ui::MenuItem settingsItems[] = {
     ui::MenuItem::checkbox("LED",  true,  ledMasterCallback),
-    ui::MenuItem::checkbox("MIDI ID", true, midiRoleCallback),
+    ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
     ui::MenuItem("Firmware", firmwareCallback),
     ui::MenuItem("Display",  displayCallback),
     ui::MenuItem::back("Zpet"),
