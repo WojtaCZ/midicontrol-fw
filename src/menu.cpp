@@ -19,6 +19,9 @@ using namespace stmcpp::units;
 // External framebuffer defined in oled.cpp
 extern Oled::OledBuffer frameBuffer;
 
+// PC keepalive — definováno v main.cpp
+extern bool isPcAlive();
+
 namespace GUI {
 
 // ── Theme ─────────────────────────────────────────────────────────────
@@ -125,6 +128,25 @@ static void onDisplayDismiss(void* userData) {
 }
 
 static ui::ParagraphScreen displayScreen(dispLines, 5, onDisplayDismiss);
+
+// ── Now Playing screen ─────────────────────────────────────────────────
+
+static StopCallback _stopCallback = nullptr;
+static char _nowPlayingSong[64] = "";
+static bool _nowPlayingActive = false;
+
+static void onNowPlayingDismiss(void* userData) {
+    (void)userData;
+    _nowPlayingActive = false;
+    nav.pop();
+    if (_stopCallback) {
+        _stopCallback();
+    }
+}
+
+static ui::SplashScreen nowPlayingScreen(
+    "Prehravani", "", "Stiskni pro zastaveni", onNowPlayingDismiss
+);
 
 // ── Pairing confirm screen ─────────────────────────────────────────────
 
@@ -249,6 +271,15 @@ void render() {
         dirty = true;
     }
 
+    // Ikona PC připojení (vlevo od BLE ikony)
+    if (isPcAlive()) {
+        int pcIconX = theme.displayOffsetX + theme.displayWidth - 14 - 2 - 10; // 14=BLE šířka, 2=mezera, 10=PC šířka
+        int pcIconY = 1;
+        gfx::drawFilledRect(frameBuffer, pcIconX, pcIconY, 10, 8, (uint8_t)0);
+        gfx::drawIcon(frameBuffer, pc_monitor, pcIconX, pcIconY, gfx::Anchor::TopLeft, (uint8_t)1);
+        dirty = true;
+    }
+
     if (dirty) {
         Oled::update();
     }
@@ -305,6 +336,27 @@ ui::MenuItem& checkboxPower() {
 
 void showPairingConfirm() {
     nav.push(&pairingScreen);
+}
+
+void showNowPlaying(const char* songName) {
+    std::strncpy(_nowPlayingSong, songName, sizeof(_nowPlayingSong) - 1);
+    _nowPlayingSong[sizeof(_nowPlayingSong) - 1] = '\0';
+    nowPlayingScreen.setSubtitle(_nowPlayingSong);
+    _nowPlayingActive = true;
+    nav.push(&nowPlayingScreen);
+    nav.forceRender();
+}
+
+void dismissNowPlaying() {
+    if (_nowPlayingActive) {
+        _nowPlayingActive = false;
+        nav.pop();
+        nav.forceRender();
+    }
+}
+
+void setStopCallback(StopCallback cb) {
+    _stopCallback = cb;
 }
 
 } // namespace GUI

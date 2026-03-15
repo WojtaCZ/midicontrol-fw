@@ -31,6 +31,14 @@ namespace GUI {
 
     // Show the BLE pairing confirmation dialog
     void showPairingConfirm();
+
+    // Zobrazení/skrytí obrazovky "Přehrávání"
+    void showNowPlaying(const char* songName);
+    void dismissNowPlaying();
+
+    // Registrace callbacku pro zastavení přehrávání (volá se při dismiss z OLED)
+    using StopCallback = void (*)();
+    void setStopCallback(StopCallback cb);
 }
 
 #endif

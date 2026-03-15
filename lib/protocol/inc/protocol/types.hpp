@@ -25,6 +25,9 @@ namespace protocol {
 
 		GET_STATUS         = 0x50,
 		STATUS_RESP        = 0x51,
+
+		KEEPALIVE          = 0x60,
+		KEEPALIVE_ACK      = 0x61,
 	};
 
 	enum class NakReason : uint8_t {

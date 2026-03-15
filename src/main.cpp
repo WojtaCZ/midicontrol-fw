@@ -44,6 +44,13 @@ enum class Transport : uint8_t {
 static protocol::Parser _cdcParser;
 static uint8_t _cdcPacketId = 0;
 
+// Keepalive: čas posledního paketu z PC
+static duration _lastPcKeepalive = 0_ms;
+
+bool isPcAlive() {
+	return (stmcpp::systick::getDuration() - _lastPcKeepalive) < 5000_ms;
+}
+
 // Odeslání paketu přes USB CDC
 static void sendCdcPacket(const protocol::Packet &pkt) {
 	uint8_t buf[protocol::MAX_FRAME_SIZE];
@@ -91,7 +98,8 @@ static void sendNak(uint8_t dest, uint8_t ackedPacketId, protocol::NakReason rea
 
 // Zpracování lokálního paketu (určeného pro Base)
 static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
-	bool needsAck = (pkt.msgType != protocol::MsgType::ACK && pkt.msgType != protocol::MsgType::NAK);
+	bool needsAck = (pkt.msgType != protocol::MsgType::ACK && pkt.msgType != protocol::MsgType::NAK
+					 && pkt.msgType != protocol::MsgType::KEEPALIVE && pkt.msgType != protocol::MsgType::KEEPALIVE_ACK);
 
 	switch (pkt.msgType) {
 		case protocol::MsgType::SET_CURRENT:
@@ -112,7 +120,8 @@ static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
 			resp.payload[0] = static_cast<uint8_t>(Bluetooth::isConnected());
 			resp.payload[1] = static_cast<uint8_t>(base::current::isEnabled());
 			resp.payload[2] = static_cast<uint8_t>(display::isConnected());
-			resp.payloadLen = 3;
+			resp.payload[3] = static_cast<uint8_t>(isPcAlive());
+			resp.payloadLen = 4;
 
 			if (via == Transport::USB_CDC) {
 				sendCdcPacket(resp);
@@ -123,17 +132,53 @@ static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
 			break;
 		}
 
-		// Příkazy pro přehrávání — Base je pouze přeposílá, ale potvrdí příjem
-		case protocol::MsgType::PLAY_SONG:
+		case protocol::MsgType::PLAY_SONG: {
+			// Zobrazení "Now Playing" na OLED
+			if (pkt.payloadLen > 0) {
+				char songName[64] = {};
+				uint8_t len = pkt.payloadLen < sizeof(songName) - 1 ? pkt.payloadLen : sizeof(songName) - 1;
+				memcpy(songName, pkt.payload, len);
+				songName[len] = '\0';
+				GUI::showNowPlaying(songName);
+			}
+			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
+			break;
+		}
+
 		case protocol::MsgType::STOP_SONG:
-		case protocol::MsgType::RECORD_SONG:
-		case protocol::MsgType::GET_SONG_LIST:
-		case protocol::MsgType::SONG_LIST_RESP:
+			GUI::dismissNowPlaying();
+			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
+			break;
+
 		case protocol::MsgType::SIGNAL_PLAYING:
 		case protocol::MsgType::SIGNAL_RECORDING:
 		case protocol::MsgType::SIGNAL_STOPPED:
+		case protocol::MsgType::RECORD_SONG:
+		case protocol::MsgType::GET_SONG_LIST:
+		case protocol::MsgType::SONG_LIST_RESP:
 		case protocol::MsgType::STATUS_RESP:
 			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
+			break;
+
+		case protocol::MsgType::KEEPALIVE: {
+			// Odpovědět KEEPALIVE_ACK odesílateli
+			protocol::Packet ackPkt = {};
+			ackPkt.source = protocol::ADDR_BASE;
+			ackPkt.dest = pkt.source;
+			ackPkt.packetId = _cdcPacketId++;
+			ackPkt.msgType = protocol::MsgType::KEEPALIVE_ACK;
+			ackPkt.payloadLen = 0;
+
+			if (via == Transport::USB_CDC) {
+				sendCdcPacket(ackPkt);
+			} else {
+				Bluetooth::sendProtocolPacket(ackPkt);
+			}
+			break;
+		}
+
+		case protocol::MsgType::KEEPALIVE_ACK:
+			// Ignorujeme — Base nepotřebuje sledovat ACK od PC
 			break;
 
 		case protocol::MsgType::ACK:
@@ -149,6 +194,11 @@ static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
 
 // Směrování paketu podle cílové adresy
 static void processProtocolPacket(const protocol::Packet &pkt, Transport via) {
+	// Aktualizace keepalive timestampu při každém paketu z PC
+	if (via == Transport::USB_CDC) {
+		_lastPcKeepalive = stmcpp::systick::getDuration();
+	}
+
 	bool forBase = (pkt.dest == protocol::ADDR_BASE || pkt.dest == protocol::ADDR_BROADCAST);
 
 	// Lokální zpracování
@@ -169,7 +219,6 @@ static void processProtocolPacket(const protocol::Packet &pkt, Transport via) {
 
 extern stmcpp::scheduler::Scheduler oledSleepScheduler;
 extern stmcpp::scheduler::Scheduler keypressScheduler;
-extern stmcpp::scheduler::Scheduler keepaliveScheduler;
 extern stmcpp::scheduler::Scheduler guiRenderScheduler;
 extern stmcpp::scheduler::Scheduler commTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler dispChangeScheduler;
@@ -180,6 +229,22 @@ extern Oled::OledBuffer frameBuffer;
 stmcpp::scheduler::Scheduler ledScheduler(500_ms, [](){
 	display::sendState();
 }, true, false);
+
+// Callback: uživatel stiskl encoder na "Now Playing" → odešleme STOP_SONG
+static void onUserStopPlayback() {
+	protocol::Packet stopPkt = {};
+	stopPkt.source = protocol::ADDR_BASE;
+	stopPkt.dest = protocol::ADDR_PC;
+	stopPkt.packetId = _cdcPacketId++;
+	stopPkt.msgType = protocol::MsgType::STOP_SONG;
+	stopPkt.payloadLen = 0;
+	sendCdcPacket(stopPkt);
+
+	// Také na Remote přes BLE
+	stopPkt.dest = protocol::ADDR_REMOTE;
+	stopPkt.packetId = _cdcPacketId++;
+	Bluetooth::sendProtocolPacket(stopPkt);
+}
 
 // One-shot scheduler: auto-dismiss the splash screen after 3 seconds
 stmcpp::scheduler::Scheduler splashDismissScheduler(3000_ms, [](){
@@ -221,6 +286,7 @@ extern "C" int main(void) {
 	//Initialize the OLED
 	Oled::init();
 	GUI::init();
+	GUI::setStopCallback(onUserStopPlayback);
 	splashDismissScheduler.start();
 	//Check if we want to enable DFU
 	//base::dfuCheck();
