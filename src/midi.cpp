@@ -1,5 +1,6 @@
 #include "midi.hpp"
 #include "base.hpp"
+#include "led.hpp"
 
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
@@ -14,14 +15,10 @@
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
 
-using namespace std;
-
 namespace midi {
 
 	uint8_t packet[4];
 
-	uint8_t tbuff[1024];
-	int tindex = 0;
 	static bool receptionOngoing = false;
 	static uint8_t receivedIdx = 0;
 
@@ -134,7 +131,6 @@ namespace midi {
 		if (USART3->ISR & USART_ISR_RXNE) {
 			// Read the received byte (this also clears the RXNE flag)
 			uint8_t data = stmcpp::reg::read(std::ref(USART3->RDR));
-			tbuff[tindex++] = data;
 
 			// If we get channel voice message
 			if (isStatusByte(data) && !isSysEx(data)) {
@@ -170,6 +166,7 @@ namespace midi {
 				}
 
 				tud_midi_packet_write(packet);
+				LED::notifyActivity(LED::PIXEL_MIDIA);
 				receptionOngoing = false; // End reception
 				receivedIdx = 0;
 
@@ -180,6 +177,7 @@ namespace midi {
 			if(receptionOngoing && receivedIdx > messageSize(packet[0])) {
 				// If we have received enough bytes, send the packet
 				tud_midi_packet_write(packet);
+				LED::notifyActivity(LED::PIXEL_MIDIA);
 
 				if(packet[0] != MIDI_CIN_SYSEX_START) {
 					receptionOngoing = false;

@@ -160,7 +160,7 @@
  };
  
  static uint16_t _desc_str[32 + 1];
- static char * strUID;
+ static char strUID[25];
  
  // Invoked when received GET STRING DESCRIPTOR request
  // Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
@@ -176,7 +176,7 @@
  
      case STRID_SERIAL:
        // Create the serial string from the MCUs 96bit UID
-       sprintf(strUID, "%08X%08X%08X", *(uint32_t *)(UID_BASE), *(uint32_t *)(UID_BASE + 4), *(uint32_t *)(UID_BASE + 8));
+       snprintf(strUID, sizeof(strUID), "%08X%08X%08X", *(uint32_t *)(UID_BASE), *(uint32_t *)(UID_BASE + 4), *(uint32_t *)(UID_BASE + 8));
        chr_count = strlen(strUID);
        // Convert ASCII string into UTF-16
        for ( size_t i = 0; i < chr_count; i++ ) {

@@ -3,15 +3,12 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <string>
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
 #include <tusb.h>
 
-
-using namespace std;
 
 namespace Debug {
     static Level _currentLevel = Level::NONE;
@@ -28,17 +25,17 @@ namespace Debug {
 
     void log(Level level, const char* message, int len) {
         if (level <= _currentLevel) {
-            std::string levelString;
+            const char* levelString;
 
             switch (level) {
                 case Level::ERROR:
                     levelString = "ERROR";
                     break;
-                
+
                 case Level::WARNING:
                     levelString = "WARNING";
                     break;
-                
+
                 case Level::INFO:
                     levelString = "INFO";
                     break;
@@ -48,14 +45,14 @@ namespace Debug {
                     levelString = "DEBUG";
                     break;
             }
-            
-            sprintf( "[%s]: %.*s\n", levelString.c_str(), len, message);
+
+            snprintf(_logBuffer, sizeof(_logBuffer), "[%s]: %.*s\n", levelString, len, message);
 
             tud_cdc_write_str(_logBuffer);
         }
     }
 
-    void log(Level level, std::string message) {
-        log(level, message.c_str(), message.length());
+    void log(Level level, const char* message) {
+        log(level, message, strlen(message));
     }
-} 
+}

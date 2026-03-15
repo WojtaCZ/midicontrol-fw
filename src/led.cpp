@@ -1,5 +1,9 @@
 #include "led.hpp"
 #include "base.hpp"
+#include "settings.hpp"
+#include "main.hpp"
+#include "display.hpp"
+#include "bluetooth.hpp"
 #include <cstring>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
@@ -7,8 +11,16 @@
 
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
+#include "stmcpp/systick.hpp"
+#include "stmcpp/units.hpp"
+
+using namespace stmcpp::units;
 
 namespace LED{
+
+	// Sledování aktivity — timestamp posledního notifyActivity() pro každý pixel
+	static duration activityTimestamp[6] = {};
+	static constexpr duration BLINK_DURATION = 100_ms;
 
 	constexpr uint16_t timerPeriod = (144e6 / 800000);	// 144MHz clock, 800kHz LED strip
 	constexpr uint16_t resetSlots = 200; 		// Reset slots for terminating the transmission and also setting the refresh rate
@@ -28,11 +40,11 @@ namespace LED{
 	LED::Strip<6> rearStrip(rearPixels);
 
 	
-	std::array fronPixels = {Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0))};
-	LED::Strip<4> frontStrip(fronPixels);
+	std::array frontPixels = {Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0)), Pixel(LED::Color(0, 0, 0, 0))};
+	LED::Strip<4> frontStrip(frontPixels);
 
 	uint8_t rearBuffer[2*resetSlots + rearPixels.size() * 24]; // Reset slots and 3 bytes per pixel
-	uint8_t frontBuffer[2*resetSlots + fronPixels.size() * 24]; // Reset slots and 3 bytes per pixel
+	uint8_t frontBuffer[2*resetSlots + frontPixels.size() * 24]; // Reset slots and 3 bytes per pixel
 
 	void init(){
 
@@ -233,5 +245,71 @@ namespace LED{
 		rgb2hsv(r_, g_, b_, h, s, v);
 		h = std::fmod(h + degrees + 360.0, 360.0);
 		hsv2rgb(h, s, v, r_, g_, b_);
+	}
+
+	void notifyActivity(uint8_t pixelIndex) {
+		if (pixelIndex < 6) {
+			activityTimestamp[pixelIndex] = stmcpp::systick::getDuration();
+		}
+	}
+
+	void updateStatus() {
+		bool master = settings::ledMasterEnable();
+		bool roleId = settings::midiRoleIdentifier();
+		duration now = stmcpp::systick::getDuration();
+
+		constexpr float INTENSITY = 0.1f;
+		Color off(0, 0, 0, 0);
+		Color green(0, 255, 0, INTENSITY);
+		Color red(255, 0, 0, INTENSITY);
+		Color white(255, 255, 255, INTENSITY);
+
+		// USB
+		if (master && isPcAlive()) {
+			bool blink = (now - activityTimestamp[PIXEL_USB]) < BLINK_DURATION;
+			usb.setColor(blink ? white : green);
+		} else {
+			usb.setColor(off);
+		}
+
+		// Display
+		if (master && ::display::isConnected()) {
+			bool blink = (now - activityTimestamp[PIXEL_DISPLAY]) < BLINK_DURATION;
+			LED::display.setColor(blink ? white : green);
+		} else {
+			LED::display.setColor(off);
+		}
+
+		// Current
+		if (master && base::current::isEnabled()) {
+			bool blink = (now - activityTimestamp[PIXEL_CURRENT]) < BLINK_DURATION;
+			current.setColor(blink ? white : green);
+		} else {
+			current.setColor(off);
+		}
+
+		// MIDI A — vždy červená pokud roleId, bliká bíle pokud master
+		if (roleId) {
+			bool blink = master && (now - activityTimestamp[PIXEL_MIDIA]) < BLINK_DURATION;
+			midia.setColor(blink ? white : red);
+		} else {
+			midia.setColor(off);
+		}
+
+		// MIDI B — vždy zelená pokud roleId, bliká bíle pokud master
+		if (roleId) {
+			bool blink = master && (now - activityTimestamp[PIXEL_MIDIB]) < BLINK_DURATION;
+			midib.setColor(blink ? white : green);
+		} else {
+			midib.setColor(off);
+		}
+
+		// Bluetooth
+		if (master && Bluetooth::isConnected()) {
+			bool blink = (now - activityTimestamp[PIXEL_BLUETOOTH]) < BLINK_DURATION;
+			bluetooth.setColor(blink ? white : green);
+		} else {
+			bluetooth.setColor(off);
+		}
 	}
 }

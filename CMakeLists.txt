@@ -34,6 +34,7 @@ set(SOURCES
 	${SOURCE_BASE}/usb.cpp
 	${SOURCE_BASE}/usb_descriptors.c
 	${SOURCE_BASE}/debug.cpp
+	${SOURCE_BASE}/settings.cpp
 
 
 	${CMAKE_SOURCE_DIR}/lib/gfx/src/icons.cpp

@@ -2,7 +2,6 @@
 #define DEBUG_HPP
 
 #include <cstdint>
-#include <string>
 
 namespace Debug {
 
@@ -18,7 +17,7 @@ namespace Debug {
     Level getLevel();
 
     void log(Level level, const char* message, int len);
-    void log(Level level, std::string message);
+    void log(Level level, const char* message);
 
 }
 

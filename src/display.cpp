@@ -1,6 +1,5 @@
 #include "display.hpp"
-//#include "base.hpp"
-//#include "scheduler.hpp"
+#include "led.hpp"
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cstdint>
@@ -25,8 +24,6 @@ Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most
 */
 
 
-
-//Scheduler dispChangeScheduler(300, [](){ if(Display::wasChanged() && Display::getConnected()) Display::send();}, Scheduler::DISPATCH_ON_INCREMENT | Scheduler::PERIODICAL | Scheduler::ACTIVE);
 
 namespace display {
 
@@ -111,8 +108,9 @@ namespace display {
     }
 
     void sendState(){
-        if(!connected) return; 
+        if(!connected) return;
 
+        LED::notifyActivity(LED::PIXEL_DISPLAY);
         memcpy(txBuffer, currentState, sizeof(txBuffer));
         // Send display state over MIDI if changed
         sendToMIDI();

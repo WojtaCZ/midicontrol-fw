@@ -1,6 +1,7 @@
 #include "bluetooth.hpp"
 #include "menu.hpp"
 #include "debug.hpp"
+#include "led.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -219,17 +220,6 @@ namespace Bluetooth{
 		return 0;
 	}
 
-	uint8_t _send_char(char c) {
-		if(DMA1_Channel2->CCR & DMA_CCR_EN) return 1;
-
-		_txBuffer[0] = c;
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_txBuffer[0]));
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), 1);
-		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
-
-		return 0;
-	}
-
 	uint8_t init(){
 		// USART GPIOs
 		stmcpp::gpio::pin<stmcpp::gpio::port::porta, 2> usart_tx (stmcpp::gpio::mode::af7, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
@@ -350,6 +340,8 @@ namespace Bluetooth{
 		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_protocolTxBuffer[0]));
 		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), len);
 		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
+
+		LED::notifyActivity(LED::PIXEL_BLUETOOTH);
 
 		return 0;
 	}

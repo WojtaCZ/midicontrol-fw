@@ -6,6 +6,7 @@
 #include "git.hpp"
 #include "display.hpp"
 #include "bluetooth.hpp"
+#include "settings.hpp"
 
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
@@ -22,8 +23,9 @@ extern Oled::OledBuffer frameBuffer;
 // PC keepalive — definováno v main.cpp
 extern bool isPcAlive();
 
-// Timeout scheduler — definováno na konci tohoto souboru
+// Schedulery — definovány na konci tohoto souboru
 extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
+extern stmcpp::scheduler::Scheduler songListDelayScheduler;
 
 namespace GUI {
 
@@ -75,16 +77,20 @@ static void recordCallback(ui::MenuItem* item, void* userData);
 static void powerCallback(ui::MenuItem* item, void* userData);
 static void firmwareCallback(ui::MenuItem* item, void* userData);
 static void displayCallback(ui::MenuItem* item, void* userData);
+static void ledMasterCallback(ui::MenuItem* item, void* userData);
+static void midiRoleCallback(ui::MenuItem* item, void* userData);
 
 // ── Settings menu items & screen (defined first so mainItems can reference it) ─
 
 static ui::MenuItem settingsItems[] = {
+    ui::MenuItem::checkbox("LED",  true,  ledMasterCallback),
+    ui::MenuItem::checkbox("MIDI ID", true, midiRoleCallback),
     ui::MenuItem("Firmware", firmwareCallback),
     ui::MenuItem("Display",  displayCallback),
     ui::MenuItem::back("Zpet"),
 };
 
-static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 3);
+static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 5);
 
 // ── Main menu items & screen ──────────────────────────────────────────
 
@@ -141,11 +147,15 @@ static bool _nowPlayingActive = false;
 
 // ── Song list data ──────────────────────────────────────────────────────
 
-static constexpr int MAX_SONGS = 12;
+static constexpr int MAX_SONGS = 32;
 static char _songNames[MAX_SONGS][24];       // 23 chars + null
 static ui::MenuItem _songListItems[MAX_SONGS + 1]; // items + Back
 static int _songCount = 0;
-static bool _songListPending = false;
+static bool _hasMoreSongs = false;
+static bool _loadingScreenShown = false;
+
+enum class SongListState : uint8_t { Idle, WaitingFirst, WaitingMore };
+static SongListState _songListState = SongListState::Idle;
 
 static RequestSongListCallback _requestSongListCallback = nullptr;
 static PlaySongCallback _playSongCallback = nullptr;
@@ -160,7 +170,7 @@ static void onNowPlayingDismiss(void* userData) {
 }
 
 static ui::SplashScreen nowPlayingScreen(
-    "Prehravani", "", "Stiskni pro zastaveni", onNowPlayingDismiss
+    "Prehravani", "", "[STOP]", onNowPlayingDismiss
 );
 
 // ── Pairing confirm screen ─────────────────────────────────────────────
@@ -179,8 +189,10 @@ static ui::ConfirmScreen pairingScreen("Pair device?", onPairResult);
 
 static void onLoadingDismiss(void* userData) {
     (void)userData;
-    _songListPending = false;
+    _songListState = SongListState::Idle;
+    _loadingScreenShown = false;
     songListTimeoutScheduler.stop();
+    songListDelayScheduler.stop();
     nav.pop();
 }
 
@@ -208,13 +220,13 @@ static void playCallback(ui::MenuItem* item, void* userData) {
     if (!isPcAlive()) return;
     if (!_requestSongListCallback) return;
 
-    _songListPending = true;
-    _requestSongListCallback();
-    songListLoadingScreen.setSubtitle("Nacitani...");
-    songListLoadingScreen.setComment("Cekam na PC");
-    nav.push(&songListLoadingScreen);
-    nav.forceRender();
-    songListTimeoutScheduler.start();
+    _songCount = 0;
+    _hasMoreSongs = false;
+    _loadingScreenShown = false;
+    _songListState = SongListState::WaitingFirst;
+    _requestSongListCallback(0);
+    songListDelayScheduler.start();   // 500ms delay before showing loading screen
+    songListTimeoutScheduler.start(); // 3s timeout
 }
 
 static void recordCallback(ui::MenuItem* item, void* userData) {
@@ -237,6 +249,18 @@ static void firmwareCallback(ui::MenuItem* item, void* userData) {
     std::snprintf(fwLine2, sizeof(fwLine2), "Date: %s",   git::build_date.c_str());
     std::snprintf(fwLine3, sizeof(fwLine3), "Time: %s",   git::build_time.c_str());
     nav.push(&firmwareScreen);
+}
+
+static void ledMasterCallback(ui::MenuItem* item, void* userData) {
+    (void)item; (void)userData;
+    settings::setLedMasterEnable(!settings::ledMasterEnable());
+    settings::save();
+}
+
+static void midiRoleCallback(ui::MenuItem* item, void* userData) {
+    (void)item; (void)userData;
+    settings::setMidiRoleIdentifier(!settings::midiRoleIdentifier());
+    settings::save();
 }
 
 static void displayCallback(ui::MenuItem* item, void* userData) {
@@ -289,6 +313,10 @@ void init() {
         onSplashDismiss
     );
 
+    // Synchronizace checkboxů z uložených nastavení
+    settingsItems[0].setChecked(settings::ledMasterEnable());
+    settingsItems[1].setChecked(settings::midiRoleIdentifier());
+
     nav.push(&splashScreen);
 }
 
@@ -297,7 +325,11 @@ void render() {
 
     bool dirty = nav.render(frameBuffer);
 
-    if (Bluetooth::isConnected()) {
+    // Status ikony pouze na menu obrazovkách (ne na SplashScreen, ParagraphScreen, ConfirmScreen)
+    ui::Screen* cur = nav.current();
+    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen);
+
+    if (showStatusIcons && Bluetooth::isConnected()) {
         int iconX = theme.displayOffsetX + theme.displayWidth - 14;
         int iconY = 0;
 
@@ -323,7 +355,7 @@ void render() {
     }
 
     // Ikona PC připojení (vlevo od BLE ikony)
-    if (isPcAlive()) {
+    if (showStatusIcons && isPcAlive()) {
         int pcIconX = theme.displayOffsetX + theme.displayWidth - 14 - 2 - 10; // 14=BLE šířka, 2=mezera, 10=PC šířka
         int pcIconY = 1;
         gfx::drawFilledRect(frameBuffer, pcIconX, pcIconY, 10, 8, (uint8_t)0);
@@ -370,6 +402,17 @@ void keypress(ui::InputEvent event) {
     }
 
     nav.handleInput(event);
+
+    // Auto-load next page when scrolling near bottom of song list
+    if (event == ui::InputEvent::Down && cur == &songListScreen && _songListState == SongListState::Idle
+        && _hasMoreSongs && _songCount < MAX_SONGS) {
+        auto* menu = static_cast<ui::MenuScreen*>(cur);
+        if (menu->selectedIndex() >= _songCount - 2 && _requestSongListCallback) {
+            _songListState = SongListState::WaitingMore;
+            _requestSongListCallback(static_cast<uint8_t>(_songCount));
+        }
+    }
+
     nav.forceRender();
 }
 
@@ -385,6 +428,14 @@ ui::MenuItem& checkboxPower() {
     return mainItems[2];
 }
 
+ui::MenuItem& checkboxLedMaster() {
+    return settingsItems[0];
+}
+
+ui::MenuItem& checkboxMidiRole() {
+    return settingsItems[1];
+}
+
 void showPairingConfirm() {
     nav.push(&pairingScreen);
 }
@@ -393,7 +444,7 @@ void showNowPlaying(const char* songName) {
     std::strncpy(_nowPlayingSong, songName, sizeof(_nowPlayingSong) - 1);
     _nowPlayingSong[sizeof(_nowPlayingSong) - 1] = '\0';
     nowPlayingScreen.setSubtitle(_nowPlayingSong);
-    nowPlayingScreen.setComment("Stiskni pro zastaveni");
+    nowPlayingScreen.setComment("[STOP]");
     _nowPlayingInfo[0] = '\0';
     _nowPlayingActive = true;
     nav.push(&nowPlayingScreen);
@@ -415,14 +466,16 @@ void updateNowPlayingInfo() {
     uint8_t verse = display::getVerse();
     char letter = display::getLetter();
 
-    if (letter != ' ' && letter != '\0') {
-        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
-                      "P:%u S:%02u %c", song, verse, letter);
-    } else {
-        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
-                      "P:%u S:%02u", song, verse);
+    if (song > 0 || verse > 0) {
+        if (letter != ' ' && letter != '\0') {
+            std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
+                          "P:%u S:%02u %c [STOP]", song, verse, letter);
+        } else {
+            std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
+                          "P:%u S:%02u [STOP]", song, verse);
+        }
+        nowPlayingScreen.setComment(_nowPlayingInfo);
     }
-    nowPlayingScreen.setComment(_nowPlayingInfo);
     nav.forceRender();
 }
 
@@ -438,13 +491,27 @@ void setPlaySongCallback(PlaySongCallback cb) {
     _playSongCallback = cb;
 }
 
-void handleSongListResponse(const char* payload, uint8_t len) {
-    if (!_songListPending) return;
-    _songListPending = false;
-    songListTimeoutScheduler.stop();
+void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
+    if (_songListState == SongListState::Idle) return;
+
+    bool isFirstPage = (_songListState == SongListState::WaitingFirst);
+    _songListState = SongListState::Idle;
+    _hasMoreSongs = hasMore;
+
+    if (isFirstPage) {
+        songListTimeoutScheduler.stop();
+        songListDelayScheduler.stop();
+    }
+
+    // Uložení aktuální pozice pro append
+    int savedIndex = isFirstPage ? 0 : songListScreen.selectedIndex();
+    int startCount = isFirstPage ? 0 : _songCount;
+
+    if (isFirstPage) {
+        _songCount = 0;
+    }
 
     // Parsování středníkem oddělených jmen písní
-    _songCount = 0;
     int nameStart = 0;
     for (int i = 0; i <= len && _songCount < MAX_SONGS; ++i) {
         if (i == len || payload[i] == ';') {
@@ -460,10 +527,18 @@ void handleSongListResponse(const char* payload, uint8_t len) {
         }
     }
 
-    // Prázdná složka
-    if (_songCount == 0) {
-        songListLoadingScreen.setSubtitle("Zadne pisne");
-        songListLoadingScreen.setComment("Stiskni pro navrat");
+    // Prázdná složka (pouze pro první stránku)
+    if (isFirstPage && _songCount == 0) {
+        if (!_loadingScreenShown) {
+            // Loading screen ještě nebyla zobrazena — zobrazíme ji s chybou
+            songListLoadingScreen.setSubtitle("Zadne pisne");
+            songListLoadingScreen.setComment("Stiskni pro navrat");
+            nav.push(&songListLoadingScreen);
+            _loadingScreenShown = true;
+        } else {
+            songListLoadingScreen.setSubtitle("Zadne pisne");
+            songListLoadingScreen.setComment("Stiskni pro navrat");
+        }
         nav.forceRender();
         return;
     }
@@ -473,18 +548,45 @@ void handleSongListResponse(const char* payload, uint8_t len) {
 
     // Rekonstrukce song list screen s aktuálním počtem
     songListScreen = ui::MenuScreen("Pisne", _songListItems, _songCount + 1);
+    songListScreen.setSelectedIndex(savedIndex);
 
-    // Pop loading screen, push song list
-    nav.pop();
-    nav.push(&songListScreen);
+    if (isFirstPage) {
+        // Pop loading screen pokud byla zobrazena, push song list
+        if (_loadingScreenShown) {
+            nav.pop();
+            _loadingScreenShown = false;
+        }
+        nav.push(&songListScreen);
+    }
+    // Pro append: screen je již na stacku, stačí forceRender
+
     nav.forceRender();
 }
 
-// Voláno z timeout scheduleru
+// Voláno z delay scheduleru (500ms) — zobrazí loading screen pokud stále čekáme
+void songListDelayShow() {
+    if (_songListState == SongListState::WaitingFirst && !_loadingScreenShown) {
+        songListLoadingScreen.setSubtitle("Nacitani...");
+        songListLoadingScreen.setComment("Cekam na PC");
+        nav.push(&songListLoadingScreen);
+        _loadingScreenShown = true;
+        nav.forceRender();
+    }
+}
+
+// Voláno z timeout scheduleru (3s)
 void songListTimeout() {
-    if (_songListPending) {
-        songListLoadingScreen.setSubtitle("PC neodpovida");
-        songListLoadingScreen.setComment("Stiskni pro navrat");
+    if (_songListState == SongListState::WaitingFirst) {
+        songListDelayScheduler.stop();
+        if (!_loadingScreenShown) {
+            songListLoadingScreen.setSubtitle("PC neodpovida");
+            songListLoadingScreen.setComment("Stiskni pro navrat");
+            nav.push(&songListLoadingScreen);
+            _loadingScreenShown = true;
+        } else {
+            songListLoadingScreen.setSubtitle("PC neodpovida");
+            songListLoadingScreen.setComment("Stiskni pro navrat");
+        }
         nav.forceRender();
     }
 }
@@ -494,6 +596,9 @@ void songListTimeout() {
 // ── Scheduler ─────────────────────────────────────────────────────────
 
 stmcpp::scheduler::Scheduler guiRenderScheduler(30_ms, &GUI::render, true, true);
+
+// One-shot: delayed loading screen (500ms grace period)
+stmcpp::scheduler::Scheduler songListDelayScheduler(500_ms, GUI::songListDelayShow, false, false);
 
 // One-shot: timeout pro načítání seznamu písní (3s)
 stmcpp::scheduler::Scheduler songListTimeoutScheduler(3000_ms, GUI::songListTimeout, false, false);

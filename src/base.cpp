@@ -1,5 +1,6 @@
 #include "base.hpp"
 #include "menu.hpp"
+#include "led.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -142,21 +143,23 @@ namespace base::current{
 	// Enable the current source
 	void enable(){
 		current_enable.set();
-
+		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
 
 	// Disable the current source
 	void disable(){
 		current_enable.clear();
-		
+		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
 
 	void toggle(void){
 		current_enable.toggle();
+		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
 
 	void set(bool value){
 		current_enable.write(value);
+		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
 
 }

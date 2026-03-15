@@ -7,8 +7,18 @@
 
 namespace LED{
 
+    // Indexy pixelů na zadním LED pásku
+    constexpr uint8_t PIXEL_USB       = 0;
+    constexpr uint8_t PIXEL_DISPLAY   = 1;
+    constexpr uint8_t PIXEL_CURRENT   = 2;
+    constexpr uint8_t PIXEL_MIDIA     = 3;
+    constexpr uint8_t PIXEL_MIDIB     = 4;
+    constexpr uint8_t PIXEL_BLUETOOTH = 5;
+
     void init(void);
     void update();
+    void notifyActivity(uint8_t pixelIndex);
+    void updateStatus();
 
 
     class Color{

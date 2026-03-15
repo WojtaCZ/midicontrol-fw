@@ -9,8 +9,7 @@
 #include "display.hpp"
 #include "usb.hpp"
 #include "debug.hpp"
-
-#include <utility>
+#include "settings.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -28,9 +27,6 @@
 
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
-//#include "stmcpp/register.hpp"
-//#include "stmcpp/units.hpp"
-//#include "stmcpp/systick.hpp"
 
 using namespace stmcpp::units;
 
@@ -59,6 +55,7 @@ static void sendCdcPacket(const protocol::Packet &pkt) {
 	if (len > 0) {
 		tud_cdc_write(buf, len);
 		tud_cdc_write_flush();
+		LED::notifyActivity(LED::PIXEL_USB);
 	}
 }
 
@@ -205,12 +202,29 @@ static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
 			break;
 		}
 
+		case protocol::MsgType::SONG_LIST_RESP: {
+			if (pkt.payloadLen > 1) {
+				bool hasMore = (pkt.payload[0] != 0x00);
+				// Písně začínají od payload[1]
+				char songList[protocol::MAX_PAYLOAD_SIZE];
+				uint8_t len = pkt.payloadLen - 1;
+				if (len > protocol::MAX_PAYLOAD_SIZE - 1) len = protocol::MAX_PAYLOAD_SIZE - 1;
+				memcpy(songList, &pkt.payload[1], len);
+				songList[len] = '\0';
+				GUI::handleSongListResponse(songList, len, hasMore);
+			} else if (pkt.payloadLen == 1) {
+				// Pouze has_more byte, žádné písně
+				GUI::handleSongListResponse("", 0, false);
+			}
+			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
+			break;
+		}
+
 		case protocol::MsgType::SIGNAL_PLAYING:
 		case protocol::MsgType::SIGNAL_RECORDING:
 		case protocol::MsgType::SIGNAL_STOPPED:
 		case protocol::MsgType::RECORD_SONG:
 		case protocol::MsgType::GET_SONG_LIST:
-		case protocol::MsgType::SONG_LIST_RESP:
 		case protocol::MsgType::STATUS_RESP:
 			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
 			break;
@@ -278,22 +292,34 @@ extern stmcpp::scheduler::Scheduler keypressScheduler;
 extern stmcpp::scheduler::Scheduler guiRenderScheduler;
 extern stmcpp::scheduler::Scheduler commTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler dispChangeScheduler;
+extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
+extern stmcpp::scheduler::Scheduler songListDelayScheduler;
 extern void signalError();
 
 extern Oled::OledBuffer frameBuffer;
 
-stmcpp::scheduler::Scheduler ledScheduler(500_ms, [](){
-	display::sendState();
+static uint8_t ledSubCounter = 0;
+
+stmcpp::scheduler::Scheduler ledScheduler(50_ms, [](){
+	LED::updateStatus();
+	LED::update();
+
+	// Odesílání stavu displeje každých 500ms (každý 10. tick)
+	if (++ledSubCounter >= 10) {
+		ledSubCounter = 0;
+		display::sendState();
+	}
 }, true, false);
 
-// Callback: firmware požaduje seznam písní z PC
-static void onRequestSongList() {
+// Callback: firmware požaduje seznam písní z PC (s offsetem pro paginaci)
+static void onRequestSongList(uint8_t offset) {
 	protocol::Packet pkt = {};
 	pkt.source = protocol::ADDR_BASE;
 	pkt.dest = protocol::ADDR_PC;
 	pkt.packetId = _cdcPacketId++;
 	pkt.msgType = protocol::MsgType::GET_SONG_LIST;
-	pkt.payloadLen = 0;
+	pkt.payload[0] = offset;
+	pkt.payloadLen = 1;
 	sendCdcPacket(pkt);
 }
 
@@ -367,6 +393,9 @@ extern "C" int main(void) {
 
 	Debug::setLevel(Debug::Level::INFO);
 
+	// Načtení nastavení z flash (před LED a GUI)
+	settings::init();
+
 	//Initialize the OLED
 	Oled::init();
 	GUI::init();
@@ -374,17 +403,9 @@ extern "C" int main(void) {
 	GUI::setRequestSongListCallback(onRequestSongList);
 	GUI::setPlaySongCallback(onPlaySongSelected);
 	splashDismissScheduler.start();
-	//Check if we want to enable DFU
-	//base::dfuCheck();
-	//Start the watchdog
-	//base::wdtStart();
-	//Initialize MIDIlow
 	midi::init();
 
 	LED::init();
-	//Initialize LED indicator
-
-	//LED::frontStrip.setColor(LED::Color(0, 0, 255, 0.1)); // Set front strip to blue
 	ledScheduler.resume(); // Start the LED scheduler
 
 	//Initialize bluetooth
@@ -412,15 +433,6 @@ extern "C" int main(void) {
 
 
 
-	//RCC->CCIPR &= ~(RCC_CCIPR_CLK48SEL_Msk << RCC_CCIPR_CLK48SEL_Pos);
-	//RCC->CCIPR |= (clksel << RCC_CCIPR_CLK48SEL_SHIFT);
-
-
-
-
-	//oledSleepScheduler.pause();
-
-
 	uint8_t packet[4];
 
 	while (1) {
@@ -431,12 +443,14 @@ extern "C" int main(void) {
 			// Read MIDI messages
 			tud_midi_packet_read(&packet[0]);
 			midi::send(packet);
+			LED::notifyActivity(LED::PIXEL_MIDIB);
 		}
 
 		// Čtení protokolových dat z USB CDC
 		if (tud_cdc_available()) {
 			uint8_t cdcBuf[64];
 			uint32_t count = tud_cdc_read(cdcBuf, sizeof(cdcBuf));
+			LED::notifyActivity(LED::PIXEL_USB);
 			for (uint32_t i = 0; i < count; ++i) {
 				if (_cdcParser.feed(cdcBuf[i])) {
 					processProtocolPacket(_cdcParser.getPacket(), Transport::USB_CDC);
@@ -446,6 +460,7 @@ extern "C" int main(void) {
 
 		// Kontrola protokolových paketů z BLE
 		if (Bluetooth::isProtocolPacketAvailable()) {
+			LED::notifyActivity(LED::PIXEL_BLUETOOTH);
 			processProtocolPacket(Bluetooth::getProtocolPacket(), Transport::BLE);
 		}
 
@@ -454,6 +469,8 @@ extern "C" int main(void) {
 		splashDismissScheduler.dispatch();
 		pairingDelayScheduler.dispatch();
 		ledScheduler.dispatch();
+		songListTimeoutScheduler.dispatch();
+		songListDelayScheduler.dispatch();
 
 		if(Bluetooth::isCommandAvailable()){
 			std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
@@ -591,10 +608,6 @@ extern "C" int main(void) {
 		}
 
 
-
-		//LED::update();
-		// Reset the Independent Watchdog Timer (IWDG)
-		//IWDG->KR = 0xAAAA;
 
 	}
 
