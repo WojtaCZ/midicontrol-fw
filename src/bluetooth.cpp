@@ -292,7 +292,31 @@ namespace Bluetooth{
 
 		if (sendCommand("SN,MIDIControl Base") != CommandResponse::OK) return 1;
 		if (sendCommand("SA,1") != CommandResponse::OK) return 1;
-		
+		if (sendCommand("SR,80000000") != CommandResponse::OK) return 1;
+		if (sendCommand("R,1") != CommandResponse::OK) return 1;
+
+		// Čekání na REBOOT status po restartu modulu (max 2s)
+		_mode = Mode::DATA;
+		duration timestamp = stmcpp::systick::getDuration();
+		while (!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + 2000_ms)) {;}
+
+		if (isCommandAvailable()) {
+			auto cmd = getCommand();
+			if (cmd->getType() != Command::Type::REBOOT) return 1;
+		} else {
+			return 1;
+		}
+
+		// Pokus o připojení k bondovanému zařízení
+		if (sendCommand("E") != CommandResponse::OK) return 1;
+		setMode(Mode::DATA);
+
+		return 0;
+	}
+
+	uint8_t reconnect() {
+		if (sendCommand("E") != CommandResponse::OK) return 1;
+		setMode(Mode::DATA);
 		return 0;
 	}
 

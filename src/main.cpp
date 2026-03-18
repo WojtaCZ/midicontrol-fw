@@ -44,6 +44,11 @@ static uint8_t _cdcPacketId = 0;
 static duration _lastPcKeepalive = 0_ms;
 static bool _pcEverSeen = false;
 
+// Auto-reconnect stav
+static bool _reconnectNeeded = true;
+static duration _lastReconnectAttempt = 0_ms;
+static constexpr duration RECONNECT_INTERVAL = 5000_ms;
+
 bool isPcAlive() {
 	return _pcEverSeen && (stmcpp::systick::getDuration() - _lastPcKeepalive) < 5000_ms;
 }
@@ -472,6 +477,13 @@ extern "C" int main(void) {
 		songListTimeoutScheduler.dispatch();
 		songListDelayScheduler.dispatch();
 
+		// Auto-reconnect k bondovanému Remote zařízení
+		if (_reconnectNeeded && !Bluetooth::isConnected()
+			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
+			_lastReconnectAttempt = stmcpp::systick::getDuration();
+			Bluetooth::reconnect();
+		}
+
 		if(Bluetooth::isCommandAvailable()){
 			std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
 			Bluetooth::Command::Type type = command->getType();
@@ -492,6 +504,7 @@ extern "C" int main(void) {
 					snprintf(packet, sizeof(packet), "Got ble: BONDED\r\n"); break;
 				case Bluetooth::Command::Type::DISCONNECT:
 					Bluetooth::setConnected(false);
+					_reconnectNeeded = true;
 					pairingDelayScheduler.stop();
 					GUI::renderForce();
 					snprintf(packet, sizeof(packet), "Got ble: DISCONNECT\r\n"); break;
@@ -532,10 +545,12 @@ extern "C" int main(void) {
 					if (cmd->getConnected() == 1) {
 						Bluetooth::setConnected(true);
 						Bluetooth::setBonded(false);
+						_reconnectNeeded = false;
 						// Delay pairing screen — if SECURED arrives first, device is already bonded
 						pairingDelayScheduler.start();
 					} else {
 						Bluetooth::setConnected(false);
+						_reconnectNeeded = true;
 						pairingDelayScheduler.stop();
 					}
 					GUI::renderForce();

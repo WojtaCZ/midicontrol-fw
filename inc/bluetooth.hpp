@@ -228,6 +228,7 @@ namespace Bluetooth{
 
     uint8_t init(void);
     uint8_t configure();
+    uint8_t reconnect();
     bool isCommandAvailable();
     std::unique_ptr<Command> getCommand();
     uint8_t _send_string(std::string data);
