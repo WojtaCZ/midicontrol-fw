@@ -13,3 +13,6 @@
 [submodule "lib/ui"]
 	path = lib/ui
 	url = git@github.com:WojtaCZ/stmcpp-ui.git
+[submodule "lib/protocol"]
+	path = lib/protocol
+	url = git@github.com:WojtaCZ/midicontrol-protocol.git
