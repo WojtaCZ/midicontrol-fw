@@ -119,8 +119,8 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
 ${SOURCE_BASE}
 ${CMAKE_SOURCE_DIR}/inc/
 ${CMAKE_SOURCE_DIR}/lib/
-${CMAKE_SOURCE_DIR}/lib/CMSIS/Include
-${CMAKE_SOURCE_DIR}/lib/CMSIS/Device/ST/STM32G4xx/Include
+${CMAKE_SOURCE_DIR}/lib/CMSIS_5/CMSIS/Core/Include
+${CMAKE_SOURCE_DIR}/lib/cmsis-device-g4/Include
 ${CMAKE_SOURCE_DIR}/lib/tinyusb/src/
 ${CMAKE_SOURCE_DIR}/lib/stmcpp
 ${CMAKE_SOURCE_DIR}/lib/gfx/inc/

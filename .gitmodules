@@ -16,3 +16,9 @@
 [submodule "lib/protocol"]
 	path = lib/protocol
 	url = git@github.com:WojtaCZ/midicontrol-protocol.git
+[submodule "lib/CMSIS_5"]
+	path = lib/CMSIS_5
+	url = git@github.com:ARM-software/CMSIS_5.git
+[submodule "lib/cmsis-device-g4"]
+	path = lib/cmsis-device-g4
+	url = git@github.com:STMicroelectronics/cmsis-device-g4.git
