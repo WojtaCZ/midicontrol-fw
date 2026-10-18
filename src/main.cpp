@@ -200,6 +200,7 @@ extern "C" int main(void) {
 
 		keypressScheduler.dispatch();
 		guiRenderScheduler.dispatch();
+		Oled::process();
 		splashDismissScheduler.dispatch();
 		pairingDelayScheduler.dispatch();
 		ledScheduler.dispatch();

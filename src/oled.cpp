@@ -22,16 +22,33 @@ namespace Oled{
     pair<uint16_t, uint16_t> coordinates;
     //Flags
     bool inverted;
-    bool initialized;
+    volatile bool initialized;
     bool sleeping;
-    //Screen buffer storing image data
-    
-    //Buffers used for initialization
-    uint8_t pageBuffer[4];
 
-    //DMA flags
-    uint8_t dmaStatus;
-    uint16_t dmaIndex;
+    // Snímek odesílaného rámce: GUI dál kreslí do frameBuffer, DMA čte odsud, takže na displej
+    // nikdy nedojde napůl překreslená stránka. Zároveň odpovídá obsahu RAM displeje, posílají
+    // se jen změněné stránky.
+    uint8_t txBuffer[OledBuffer::BUFFER_SIZE];
+    // Obsah RAM displeje neznámý (po inicializaci): poslat všechny stránky
+    bool fullFrame = true;
+
+    // Adresa stránky (page start, sloupec 0), jeden 4bajtový blok na stránku
+    const uint8_t pageCmd[8][4] = {
+        {OLED_MEM_CMD, 0xb0, 0x00, 0x10}, {OLED_MEM_CMD, 0xb1, 0x00, 0x10},
+        {OLED_MEM_CMD, 0xb2, 0x00, 0x10}, {OLED_MEM_CMD, 0xb3, 0x00, 0x10},
+        {OLED_MEM_CMD, 0xb4, 0x00, 0x10}, {OLED_MEM_CMD, 0xb5, 0x00, 0x10},
+        {OLED_MEM_CMD, 0xb6, 0x00, 0x10}, {OLED_MEM_CMD, 0xb7, 0x00, 0x10},
+    };
+
+    // Seznam bloků rámce; další blok startuje přerušení DMA po dokončení předchozího
+    constexpr int MAX_CHUNKS = 16;
+    const uint8_t * chunkPtr[MAX_CHUNKS];
+    uint16_t chunkLen[MAX_CHUNKS];
+    uint8_t chunkCount;
+    volatile uint8_t chunkIndex;
+    // Rámec na sběrnici; nový se spustí až po dokončení (process()), nikdy uprostřed přenosu
+    volatile bool busy;
+    bool framePending;
 
     const uint8_t initBuffer[] = {
         //CMD type
@@ -175,77 +192,62 @@ namespace Oled{
         return inverted;
     }
 
-    void update(){
-        if(isInitialized() && !isSleeping()){
-            //Prepare the buffer to contain frame data
-            pageBuffer[0] = OLED_MEM_CMD;
-            pageBuffer[1] = 0xB0;
-            pageBuffer[2] = 0x00;
-            pageBuffer[3] = 0x10;
+    void startChunk(uint8_t idx){
+        stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(chunkPtr[idx]));
+        stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), chunkLen[idx]);
+        stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, chunkLen[idx], I2C_CR2_NBYTES_Pos);
 
-           /* screenBuffer[0]        = OLED_MEM_DAT;
-            screenBuffer[131]       = OLED_MEM_DAT;
-            screenBuffer[262]       = OLED_MEM_DAT;
-            screenBuffer[393]       = OLED_MEM_DAT;
-            screenBuffer[524]       = OLED_MEM_DAT;
-            screenBuffer[655]       = OLED_MEM_DAT;
-            screenBuffer[786]       = OLED_MEM_DAT;
-            screenBuffer[917]       = OLED_MEM_DAT;*/
+        // Reenable DMA
+        stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
 
-            dmaStatus = 0;
-            dmaIndex = 0;
+        //Generate start
+        stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
+    }
 
+    // Spustí čekající rámec, jakmile je sběrnice volná (volá se z hlavní smyčky)
+    void process(){
+        if(!isInitialized() || isSleeping() || busy || !framePending) return;
+        framePending = false;
 
-            // Reinitialize the DMA and SPI buffer to use the image buffer instead
-            stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&pageBuffer[0]));
-            stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), sizeof(pageBuffer));
-            stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, sizeof(pageBuffer), I2C_CR2_NBYTES_Pos);
-
-            // Reenable DMA
-            stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
-
-            //Generate start
-            stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
+        constexpr int STRIDE = OledBuffer::STRIDE;
+        uint8_t count = 0;
+        for(int p = 0; p < OledBuffer::PAGES; p++){
+            const uint8_t * src = frameBuffer.getBufferAddress(p * STRIDE);
+            uint8_t * dst = &txBuffer[p * STRIDE];
+            if(!fullFrame && std::memcmp(src, dst, STRIDE) == 0) continue;
+            std::memcpy(dst, src, STRIDE);
+            chunkPtr[count]   = pageCmd[p];
+            chunkLen[count++] = sizeof(pageCmd[p]);
+            chunkPtr[count]   = dst;
+            chunkLen[count++] = STRIDE;
         }
+        fullFrame = false;
+        if(count == 0) return;
+
+        chunkCount = count;
+        chunkIndex = 0;
+        busy = true;
+        startChunk(0);
+    }
+
+    void update(){
+        framePending = true;
+        process();
     }
 
     extern "C" void DMA1_Channel3_IRQHandler(void){
         //Disable DMA and clear the flag
         stmcpp::reg::clear(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
-    
+
 
         //Check if the init sequence has been done
         if(isInitialized()){
-            if(dmaStatus < 15){
-                if(dmaStatus % 2){
-                    pageBuffer[1]++;
-                    dmaIndex += 131;
-
-                    // Reinitialize the DMA and SPI buffer to use the image buffer instead
-                    stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(&pageBuffer[0]));
-                    stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), 4);
-                    stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, 4, I2C_CR2_NBYTES_Pos);
-
-                    
-                }else{
-
-                    // Reinitialize the DMA and SPI buffer to use the image buffer instead
-                    stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(frameBuffer.getBufferAddress(dmaIndex)));
-                    stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), 131);
-                    stmcpp::reg::change(std::ref(I2C1->CR2), 0xff, 131, I2C_CR2_NBYTES_Pos);
-                }
-
-                // Reenable DMA
-                stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
-
-                dmaStatus++;
-
-                //Generate start
-                stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
-
+            uint8_t next = chunkIndex + 1;
+            if(busy && next < chunkCount){
+                chunkIndex = next;
+                startChunk(next);
             }else{
-                //Disable DMA
-                stmcpp::reg::clear(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);
+                busy = false;
             }
         }else{
             //Disable DMA

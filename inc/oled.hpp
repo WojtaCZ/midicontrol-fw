@@ -43,7 +43,6 @@ namespace Oled{
             uint8_t * getBufferAddress(int offset);
             int getBufferSize() const;
 
-        private:
             // Dimensions
             static constexpr int WIDTH = 130;
             static constexpr int HEIGHT = 64;
@@ -54,6 +53,8 @@ namespace Oled{
             static constexpr int CONTROL_BYTES = 1;
             static constexpr int STRIDE = CONTROL_BYTES + WIDTH; // 131 bytes
             static constexpr int BUFFER_SIZE = STRIDE * PAGES;   // 1048 bytes
+
+        private:
 
             // The actual container
             uint8_t buffer[BUFFER_SIZE];
@@ -79,6 +80,7 @@ namespace Oled{
     void setInitialized(bool state);
 
     void update();
+    void process();
     void init();
 
     void sleepCallback(void);
