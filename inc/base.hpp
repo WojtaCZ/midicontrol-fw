@@ -11,7 +11,7 @@ namespace base{
     using namespace std;
 
     static string DEVICE_NAME = "MIDIControl";
-    static string DEVICE_TYPE = "BASE";
+    static string DEVICE_TYPE = "ZAKLADNA";
     static string FW_VERSION = "2.0.0";
 
     void initClock(void);

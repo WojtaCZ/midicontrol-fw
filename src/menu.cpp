@@ -85,8 +85,8 @@ static void midiRoleCallback(ui::MenuItem* item, void* userData);
 static ui::MenuItem settingsItems[] = {
     ui::MenuItem::checkbox("LED",  true,  ledMasterCallback),
     ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
-    ui::MenuItem("Firmware", firmwareCallback),
-    ui::MenuItem("Display",  displayCallback),
+    ui::MenuItem("Verze FW", firmwareCallback),
+    ui::MenuItem("Displej",  displayCallback),
     ui::MenuItem::back("Zpet"),
 };
 
@@ -183,7 +183,7 @@ static void onPairResult(bool confirmed, void* userData) {
     nav.pop();
 }
 
-static ui::ConfirmScreen pairingScreen("Pair device?", onPairResult);
+static ui::ConfirmScreen pairingScreen("Sparovat zarizeni?", onPairResult);
 
 // ── Song list screens ─────────────────────────────────────────────────
 
@@ -245,10 +245,10 @@ static void powerCallback(ui::MenuItem* item, void* userData) {
 
 static void firmwareCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
-    std::snprintf(fwLine0, sizeof(fwLine0), "Build: %s",  git::revision.c_str());
-    std::snprintf(fwLine1, sizeof(fwLine1), "Branch: %s", git::branch.c_str());
-    std::snprintf(fwLine2, sizeof(fwLine2), "Date: %s",   git::build_date.c_str());
-    std::snprintf(fwLine3, sizeof(fwLine3), "Time: %s",   git::build_time.c_str());
+    std::snprintf(fwLine0, sizeof(fwLine0), "Revize: %s", git::revision.c_str());
+    std::snprintf(fwLine1, sizeof(fwLine1), "Vetev: %s",  git::branch.c_str());
+    std::snprintf(fwLine2, sizeof(fwLine2), "Datum: %s",  git::build_date.c_str());
+    std::snprintf(fwLine3, sizeof(fwLine3), "Cas: %s",    git::build_time.c_str());
     nav.push(&firmwareScreen);
 }
 
@@ -267,24 +267,24 @@ static void midiRoleCallback(ui::MenuItem* item, void* userData) {
 static void displayCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
 
-    const char* led = "OFF";
+    const char* led = "vyp";
     switch (display::getLed()) {
-        case display::ledColor::RED:    led = "RED";    break;
-        case display::ledColor::GREEN:  led = "GREEN";  break;
-        case display::ledColor::BLUE:   led = "BLUE";   break;
-        case display::ledColor::YELLOW: led = "YELLOW"; break;
-        case display::ledColor::OFF:    led = "OFF";    break;
+        case display::ledColor::RED:    led = "cervena"; break;
+        case display::ledColor::GREEN:  led = "zelena";  break;
+        case display::ledColor::BLUE:   led = "modra";   break;
+        case display::ledColor::YELLOW: led = "zluta";   break;
+        case display::ledColor::OFF:    led = "vyp";     break;
     }
 
-    std::snprintf(dispLine0, sizeof(dispLine0), "Connected: %s",
-                  display::isConnected() ? "true" : "false");
+    std::snprintf(dispLine0, sizeof(dispLine0), "Pripojen: %s",
+                  display::isConnected() ? "ano" : "ne");
     char song[5];
     char verse[3];
     display::formatSong(song);
     display::formatVerse(verse);
-    std::snprintf(dispLine1, sizeof(dispLine1), "Song: [%s]", song);
-    std::snprintf(dispLine2, sizeof(dispLine2), "Verse: [%s]", verse);
-    std::snprintf(dispLine3, sizeof(dispLine3), "Letter: %c",
+    std::snprintf(dispLine1, sizeof(dispLine1), "Pisen: [%s]", song);
+    std::snprintf(dispLine2, sizeof(dispLine2), "Sloka: [%s]", verse);
+    std::snprintf(dispLine3, sizeof(dispLine3), "Pismeno: %c",
                   display::getLetter());
     std::snprintf(dispLine4, sizeof(dispLine4), "LED: %s", led);
 
