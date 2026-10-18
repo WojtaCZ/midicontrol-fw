@@ -120,7 +120,7 @@ namespace base{
 
 		#define FW_ADDR    0x1FFF0000
 		SCB->VTOR = FW_ADDR & 0xFFFF;
-		__asm__ volatile("msr msp, %0"::"g"(*(volatile uint32_t *)FW_ADDR));
+		__asm__ volatile("msr msp, %0"::"r"(*(volatile uint32_t *)FW_ADDR));
 		(*(void (**)())(FW_ADDR + 4))();
 	}
 
