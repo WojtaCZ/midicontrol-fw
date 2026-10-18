@@ -398,7 +398,7 @@ namespace Bluetooth{
 		//          Prompt "CMD> " zůstává zapnutý, automat na něj čeká.
 		// SS,C0: Device Information + UART Transparent.
 		// R,1: restart, aby se změny projevily; po %REBOOT% je modul v datovém režimu.
-		static const char *const commands[] = {"SN,MIDIControl Base", "SA,2", "SR,0000", "SS,C0", "R,1"};
+		static const char *const commands[] = {"SN,MIDIControlBase", "SA,2", "SR,0000", "SS,C0", "R,1"};
 		return _queueJob(commands, sizeof(commands) / sizeof(commands[0])) ? 0 : 1;
 	}
 
