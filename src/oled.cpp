@@ -9,6 +9,7 @@
 
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
+#include "stmcpp/systick.hpp"
 
 //Scheduler used to time oled sleep
 stmcpp::scheduler::Scheduler oledSleepScheduler(OLED_SLEEP_INTERVAL, &Oled::sleepCallback, false, true);
@@ -41,7 +42,7 @@ namespace Oled{
     };
 
     // Seznam bloků rámce; další blok startuje přerušení DMA po dokončení předchozího
-    constexpr int MAX_CHUNKS = 16;
+    constexpr int MAX_CHUNKS = 17; // 8 × (adresa + stránka) + zapnutí displeje
     const uint8_t * chunkPtr[MAX_CHUNKS];
     uint16_t chunkLen[MAX_CHUNKS];
     uint8_t chunkCount;
@@ -49,6 +50,10 @@ namespace Oled{
     // Rámec na sběrnici; nový se spustí až po dokončení (process()), nikdy uprostřed přenosu
     volatile bool busy;
     bool framePending;
+
+    // Zapnutí displeje, připojené za první rámec po inicializaci
+    const uint8_t displayOnCmd[] = {OLED_MEM_CMD, 0xaf};
+    bool displayOn = false;
 
     const uint8_t initBuffer[] = {
         //CMD type
@@ -100,9 +105,9 @@ namespace Oled{
         0x20, 
         //Set DC-DC enable
         0x8d, 
-        0x14, 
-        //Turn on oled
-        0xaf
+        0x14
+        // Displej zůstává vypnutý: RAM OLED přežije reset MCU (poslední obrazovka), zapne se
+        // až na konci prvního rámce
     };
 
     void init(){
@@ -222,6 +227,11 @@ namespace Oled{
             chunkLen[count++] = STRIDE;
         }
         fullFrame = false;
+        if(!displayOn){
+            chunkPtr[count]   = displayOnCmd;
+            chunkLen[count++] = sizeof(displayOnCmd);
+            displayOn = true;
+        }
         if(count == 0) return;
 
         chunkCount = count;
@@ -233,6 +243,13 @@ namespace Oled{
     void update(){
         framePending = true;
         process();
+    }
+
+    void flush(uint32_t timeoutMs){
+        uint32_t start = stmcpp::systick::getTicks();
+        while((!isInitialized() || busy || framePending) && (stmcpp::systick::getTicks() - start) < timeoutMs){
+            process();
+        }
     }
 
     extern "C" void DMA1_Channel3_IRQHandler(void){

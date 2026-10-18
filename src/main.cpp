@@ -144,6 +144,10 @@ extern "C" int main(void) {
 	GUI::setStopCallback(onUserStopPlayback);
 	GUI::setRequestSongListCallback(onRequestSongList);
 	GUI::setPlaySongCallback(onPlaySongSelected);
+
+	// Splash hned na displej (před blokující inicializací BLE); 3 s se počítají od jeho zobrazení
+	GUI::render();
+	Oled::flush(500);
 	splashDismissScheduler.start();
 	midi::init();
 

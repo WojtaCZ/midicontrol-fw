@@ -70,7 +70,7 @@ Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-gene
 - **C++ dialect**: C++23, `-fno-exceptions`, `-fno-threadsafe-statics`, `-fno-use-cxa-atexit`; FPU flags `-mfpu=fpv4-sp-d16 -mfloat-abi=hard`
 - **Warnings as errors**: `-Werror=switch`, `-Werror=return-type`, `-Werror=parentheses`, `-Wfatal-errors`
 - **Language**: Comments and readme are in Czech
-- **UI language**: all user-visible text (OLED menus, screens, messages, hints) is Czech without diacritics (plain ASCII, the fonts have no Czech glyphs). Protocol, RN4870 and USB strings stay as they are. Keep each string within the display (128 px; 7x10 font = 18 chars, 11x18 font = 11 chars) and its `snprintf` buffer. The `ConfirmScreen` "Yes"/"No" labels are hard-coded in the `lib/ui` submodule and must be changed there
+- **UI language**: all user-visible text (OLED menus, screens, messages, hints) is Czech without diacritics (plain ASCII, the fonts have no Czech glyphs). Names stay English: `MIDIControl` and the splash device type `BASE` (`base::DEVICE_TYPE`). Text longer than its line scrolls (`ui::TextScroll`) instead of being cut off. Protocol, RN4870 and USB strings stay as they are. Keep each string within the display (128 px; 7x10 font = 18 chars, 11x18 font = 11 chars) and its `snprintf` buffer. The `ConfirmScreen` "Yes"/"No" labels are hard-coded in the `lib/ui` submodule and must be changed there
 
 ## Hardware Pin Map (key pins)
 

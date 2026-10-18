@@ -105,8 +105,6 @@ static ui::MenuScreen mainScreen("Hlavni menu", mainItems, 4);
 
 // ── Splash screen ─────────────────────────────────────────────────────
 
-static char splashComment[32];
-
 static ui::SplashScreen splashScreen("", "", "");
 
 // ── Paragraph screens (firmware / display info) ───────────────────────
@@ -304,17 +302,14 @@ void init() {
     initTheme();
     nav.setTheme(theme);
 
-    // Build splash comment string
-    std::snprintf(splashComment, sizeof(splashComment), "%s (%s)",
-                  git::revision.c_str(), git::branch.c_str());
-
-    // Re-create splash with dismiss callback
+    // Splash: revize a větev na samostatných řádcích (dlouhá větev roluje)
     splashScreen = ui::SplashScreen(
         base::DEVICE_NAME.c_str(),
         base::DEVICE_TYPE.c_str(),
-        splashComment,
+        git::revision.c_str(),
         onSplashDismiss
     );
+    splashScreen.setComment2(git::branch.c_str());
 
     // Synchronizace checkboxů z uložených nastavení
     settingsItems[0].setChecked(settings::ledMasterEnable());
