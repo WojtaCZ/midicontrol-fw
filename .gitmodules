@@ -24,4 +24,4 @@
 	url = git@github.com:STMicroelectronics/cmsis-device-g4.git
 [submodule "lib/bootloader"]
 	path = lib/bootloader
-	url = /home/vosahlov/Documents/programovani/midicontrol-bootloader
+	url = git@github.com:WojtaCZ/midicontrol-bootloader.git

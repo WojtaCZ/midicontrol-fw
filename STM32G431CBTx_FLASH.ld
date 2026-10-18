@@ -59,10 +59,13 @@ _Min_Heap_Size = 0x200;	/* required amount of heap  */
 _Min_Stack_Size = 0x400;	/* required amount of stack */
 
 /* Memories definition */
+/* Flash map: bootloader 0x08000000 (32K) | application 0x08008000 (94K) |
+   settings page 63 0x0801F800 (2K). The USB-CDC bootloader lives in the first
+   32K and jumps to the application linked at 0x08008000. */
 MEMORY
 {
   RAM	(xrw)	: ORIGIN = 0x20000000,	LENGTH = 32K
-  FLASH	(rx)	: ORIGIN = 0x8000000,	LENGTH = 126K
+  FLASH	(rx)	: ORIGIN = 0x8008000,	LENGTH = 94K
 }
 
 /* Sections */

@@ -49,6 +49,19 @@ static bool _reconnectNeeded = true;
 static duration _lastReconnectAttempt = 0_ms;
 static constexpr duration RECONNECT_INTERVAL = 5000_ms;
 
+// Firmware update: reboot into the USB bootloader on request from the PC.
+static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the bootloader
+static bool _enterBootloader = false;
+static duration _enterBootloaderAt = 0_ms;
+
+// Set the backup-register flag the bootloader checks on reset, so it stays
+// resident (USB-CDC firmware update) instead of jumping back to the app.
+static void requestBootloader() {
+	stmcpp::reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_PWREN);
+	PWR->CR1 |= PWR_CR1_DBP;          // unlock backup domain write protection
+	TAMP->BKP0R = kEnterBootMagic;
+}
+
 bool isPcAlive() {
 	return _pcEverSeen && (stmcpp::systick::getDuration() - _lastPcKeepalive) < 5000_ms;
 }
@@ -260,6 +273,15 @@ static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
 			// Potvrzení — prozatím jen ignorujeme
 			break;
 
+		case protocol::MsgType::ENTER_BOOTLOADER:
+			// Acknowledge, then reboot into the USB bootloader shortly afterwards
+			// (the delay lets the ACK reach the PC before the device re-enumerates).
+			sendAck(pkt.source, pkt.packetId, via);
+			requestBootloader();
+			_enterBootloader = true;
+			_enterBootloaderAt = stmcpp::systick::getDuration() + 250_ms;
+			break;
+
 		default:
 			sendNak(pkt.source, pkt.packetId, protocol::NakReason::UNKNOWN_MSG, via);
 			break;
@@ -376,12 +398,16 @@ stmcpp::scheduler::Scheduler pairingDelayScheduler(500_ms, [](){
 
 extern "C" void SystemInit(void) {
 
+	// The application is linked at 0x08008000 (the first 32K hold the USB
+	// bootloader). Relocate the vector table accordingly.
+	SCB->VTOR = 0x08008000;
+
 	// Enable the FPU if needed
 	#if (__FPU_PRESENT == 1) && (__FPU_USED == 1)
 		stmcpp::reg::set(std::ref(SCB->CPACR), (3UL << 20U) | (3UL << 22U));
     #endif
 
-	//Initialize io and other stuff related to the base 
+	//Initialize io and other stuff related to the base
 	base::initClock();
 	
 
@@ -443,6 +469,12 @@ extern "C" int main(void) {
 	while (1) {
 
 		tud_task();
+
+		// Pending reboot into the USB bootloader (after the ACK has been flushed).
+		if (_enterBootloader && stmcpp::systick::getDuration() >= _enterBootloaderAt) {
+			tud_cdc_write_flush();
+			NVIC_SystemReset();
+		}
 
 		if(tud_midi_available()) {
 			// Read MIDI messages
