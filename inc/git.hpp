@@ -2,12 +2,12 @@
 #include<string>
 
 namespace git {
- static constexpr std::string revision = "87d06b4";
+ static constexpr std::string revision = "00e8335";
  static constexpr std::string branch = "main";
- static constexpr std::string commit_date = "2026/03/15";
- static constexpr std::string commit_time = "19:09:40";
- static constexpr int commit_timestamp = 1773598180;
- static constexpr std::string build_date = "2026/03/15";
- static constexpr std::string build_time = "18:21:38";
- static constexpr int build_timestamp = 1773598898;
+ static constexpr std::string commit_date = "2026/10/18";
+ static constexpr std::string commit_time = "10:22:29";
+ static constexpr int commit_timestamp = 1792318949;
+ static constexpr std::string build_date = "2026/10/18";
+ static constexpr std::string build_time = "12:13:37";
+ static constexpr int build_timestamp = 1792325617;
 }
