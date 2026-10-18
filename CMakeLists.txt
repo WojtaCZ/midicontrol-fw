@@ -35,6 +35,7 @@ set(SOURCES
 	${SOURCE_BASE}/usb_descriptors.c
 	${SOURCE_BASE}/debug.cpp
 	${SOURCE_BASE}/settings.cpp
+	${SOURCE_BASE}/router.cpp
 
 
 	${CMAKE_SOURCE_DIR}/lib/gfx/src/icons.cpp
@@ -155,5 +156,41 @@ add_custom_command(
 	COMMENT "Building ${HEX_FILE} and ${BIN_FILE}"
 )
 
-	
+
+# Obraz aplikace s trailerem pro bootloader (lib/bootloader/README.md, "Image format"):
+#   <name>-update.bin  pro PC updater (FW_UPDATE_*)
+#   <name>-update.hex  na 0x08008000, vyplněno 0xFF do 0x0801F800 (SWD) — starý trailer v flash
+#                      by jinak bootloader odmítl spustit aplikaci
+include(${CMAKE_SOURCE_DIR}/lib/bootloader/cmake/bootloader.cmake)
+bootlib_add_image(${PROJECT_NAME}.elf BIN ${BIN_FILE} BOARD base VERSION ${PROJECT_VERSION} APP_BASE 0x08008000 APP_END 0x0801F800)
+set(APP_UPDATE_HEX ${CMAKE_BINARY_DIR}/${PROJECT_NAME}-update.hex)
+
+# Bootloader (bootloader/, 0x08000000, 32 KB) má vlastní CMake projekt a vlastní příznaky,
+# proto se staví jako ExternalProject se stejným toolchainem. Výsledkem je i sloučený HEX
+# (bootloader + aplikace) pro jedno nahrání přes SWD.
+option(BUILD_BOOTLOADER "Build bootloader/ alongside the app and produce a merged hex" ON)
+if(BUILD_BOOTLOADER)
+	include(ExternalProject)
+	set(BOOTLOADER_BINARY_DIR ${CMAKE_BINARY_DIR}/bootloader)
+	set(BOOTLOADER_HEX ${BOOTLOADER_BINARY_DIR}/base-bootloader.hex)
+	ExternalProject_Add(bootloader
+		SOURCE_DIR ${CMAKE_SOURCE_DIR}/bootloader
+		BINARY_DIR ${BOOTLOADER_BINARY_DIR}
+		CMAKE_ARGS
+			-DCMAKE_TOOLCHAIN_FILE=${CMAKE_SOURCE_DIR}/cmake/toolchain-arm-none-eabi.cmake
+			-DCMAKE_BUILD_TYPE=Release
+		BUILD_ALWAYS ON
+		INSTALL_COMMAND ""
+		BUILD_BYPRODUCTS ${BOOTLOADER_HEX}
+	)
+
+	set(MERGED_HEX ${CMAKE_BINARY_DIR}/${PROJECT_NAME}-full.hex)
+	add_custom_target(merged_hex ALL
+		COMMAND ${CMAKE_COMMAND} -DOUTPUT=${MERGED_HEX} -DINPUT1=${BOOTLOADER_HEX} -DINPUT2=${APP_UPDATE_HEX} -P ${CMAKE_SOURCE_DIR}/cmake/merge-hex.cmake
+		BYPRODUCTS ${MERGED_HEX}
+		COMMENT "Merging bootloader + app into ${MERGED_HEX}"
+	)
+	add_dependencies(merged_hex bootloader ${PROJECT_NAME}.elf)
+endif()
+
 include(${CMAKE_SOURCE_DIR}/cmake/git.cmake)

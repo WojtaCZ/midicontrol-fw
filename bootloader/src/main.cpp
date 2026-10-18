@@ -18,46 +18,76 @@
 #include "boot/flashprog.hpp"
 #include "boot/crc32.hpp"
 #include "boot/fw_receiver.hpp"
+#include "boot/image.hpp"
 
-// Base USB bootloader. Stays resident when the application set the backup-register
-// magic before resetting; brings up USB-CDC and programs the application region
-// directly from the FW_UPDATE_* stream, then resets into the new application.
+// Base USB bootloader. Stays resident when
+//   * the application set the backup-register magic before resetting (update
+//     requested over USB, ENTER_BOOTLOADER), or
+//   * the encoder button (PB1) is held down at reset (forced entry, e.g. when the
+//     application crashes before it can handle ENTER_BOOTLOADER), or
+//   * the application region fails the boot check (blank, interrupted update,
+//     bad trailer / CRC, image for the remote).
+// It brings up USB-CDC (VID:PID ABCD:1235, the app's PID + 1) and programs the
+// application region from the FW_UPDATE_* stream, then resets into the new app.
+// The ST ROM DFU loader stays reachable through BOOT0 (jumper JP1).
 
 static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the application
 
 namespace {
 
-	// Sink that programs the incoming image straight into the internal application
-	// region. Flash is unlocked across the transfer and re-locked at finish.
+	// Sink that programs the incoming image into the internal application region.
+	//
+	// Power-loss safety: begin() erases the whole region, vector-table page first.
+	// The first page is collected in RAM and programmed only in finish(), after
+	// FwReceiver has checked the file CRC and the image trailer (board ID, size,
+	// image CRC). Until then the region has no vector table, so an interrupted or
+	// rejected update leaves a region that appValid() refuses — the bootloader
+	// keeps running and the PC can simply retry.
+	//
+	// FwReceiver delivers chunks strictly in order and without duplicates.
 	class FlashSink : public boot::FwSink {
 	public:
 		bool begin(uint32_t size, uint32_t crc) override {
 			if (size == 0 || size > boot::kAppMaxSize) return false;
 			_size = size;
 			_crc = crc;
-			_written = 0;
+			for (auto &b : _page0) b = 0xFF;
 			boot::flashprog::unlock();
-			return boot::flashprog::eraseRange(boot::kAppBase, size);
+			return boot::flashprog::eraseRange(boot::kAppBase, boot::kAppMaxSize);
 		}
 		bool write(uint32_t offset, const uint8_t *data, uint32_t len) override {
 			if (offset + len > _size) return false;
-			// Idempotent against retransmits: a chunk already programmed (its ACK was
-			// lost) must not be reprogrammed — that would be a PROGERR on already
-			// written flash. Chunks arrive strictly sequentially.
-			if (offset < _written) return true;       // duplicate
-			if (offset != _written) return false;     // unexpected gap
-			if (!boot::flashprog::program(boot::kAppBase + offset, data, len)) return false;
-			_written = offset + len;
-			return true;
+			// Doubleword programming: every chunk but the last must be a multiple of
+			// 8 bytes; the last one is padded with 0xFF by flashprog::program().
+			if ((offset % 8u) != 0 || ((len % 8u) != 0 && offset + len != _size)) return false;
+
+			// Part that falls into the vector-table page: keep it for finish().
+			while (len > 0 && offset < boot::kPageSize) {
+				_page0[offset++] = *data++;
+				--len;
+			}
+			if (len == 0) return true;
+			return boot::flashprog::program(boot::kAppBase + offset, data, len);
 		}
 		bool finish() override {
+			const uint32_t firstLen = _size < boot::kPageSize ? _size : boot::kPageSize;
+			const auto *app = reinterpret_cast<const uint8_t *>(boot::kAppBase);
+
+			// What is in flash + RAM must be what the PC sent before it becomes bootable.
+			boot::Crc32 c;
+			c.update(_page0, firstLen);
+			c.update(app + firstLen, _size - firstLen);
+			bool ok = c.value() == _crc;
+
+			// Commit: the vector table goes in last.
+			ok = ok && boot::flashprog::program(boot::kAppBase, _page0, firstLen);
 			boot::flashprog::lock();
-			return boot::crc32(reinterpret_cast<const uint8_t *>(boot::kAppBase), _size) == _crc;
+			return ok && boot::crc32(app, _size) == _crc;
 		}
 	private:
 		uint32_t _size = 0;
 		uint32_t _crc = 0;
-		uint32_t _written = 0;
+		uint8_t _page0[boot::kPageSize];
 	};
 
 	FlashSink s_sink;
@@ -81,7 +111,23 @@ namespace {
 		auto action = s_rx.handle(in, out, hasOut);
 		if (action == boot::FwReceiver::Action::None) return;
 		if (hasOut) sendPacket(out);
+		if (s_rx.takeStatus(out)) sendPacket(out); // FW_UPDATE_STATUS after the ACK/NAK
 		if (action == boot::FwReceiver::Action::Apply) s_applyRequested = true;
+	}
+
+	// Encoder push button (PB1, active low, internal pull-up) held at reset.
+	bool forcedEntry() {
+		using namespace stmcpp;
+		reg::set(std::ref(RCC->AHB2ENR), RCC_AHB2ENR_GPIOBEN);
+		gpio::pin<gpio::port::portb, 1> button(gpio::mode::input, gpio::pull::pullUp);
+		for (volatile uint32_t i = 0; i < 2000; ++i) {} // let the pull-up settle
+
+		// Must read pressed for ~20 ms in a row (debounce, ignore a glitch).
+		for (uint32_t i = 0; i < 2000; ++i) {
+			if (GPIOB->IDR & GPIO_IDR_ID1) return false;
+			for (volatile uint32_t d = 0; d < 40; ++d) {}
+		}
+		return true;
 	}
 
 	// Bring up the 48 MHz USB clock from HSI48 (core stays on the reset HSI16).
@@ -128,8 +174,9 @@ extern "C" int main(void) {
 	// reset runs the application again.
 	bool stay = (TAMP->BKP0R == kEnterBootMagic);
 	TAMP->BKP0R = 0;
+	stay = stay || forcedEntry();
 
-	if (!stay && boot::appValid(boot::kAppBase)) {
+	if (!stay && boot::appBootable(boot::image::kBoardBase)) {
 		boot::jumpToApp(boot::kAppBase);
 	}
 

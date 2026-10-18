@@ -1,6 +1,9 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-bool isPcAlive();
+#include "router.hpp"
+
+// Dostupnost PC (keepalive) — sleduje router
+using router::isPcAlive;
 
 #endif

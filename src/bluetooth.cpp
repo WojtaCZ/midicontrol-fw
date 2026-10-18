@@ -1,34 +1,26 @@
 #include "bluetooth.hpp"
-#include "menu.hpp"
 #include "debug.hpp"
 #include "led.hpp"
+#include "ringbuffer.hpp"
 
 #include <stdio.h>
 #include <string.h>
-#include <string>
-
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cstdint>
 #include <cmsis_compiler.h>
-#include <tinyusb/src/device/usbd.h>
-#include <tinyusb/src/class/midi/midi_device.h>
-
-
-
 
 /*
-USART 2 - 
+USART 2 - RN4870
 PA2 - TX
 PA3 - RX
 PA0 - MODE
 PA1 - RST
+RTS/CTS nejsou zapojené → hardwarové řízení toku musí být v modulu vypnuté (SR bez bitu 0x8000).
 */
 using namespace std;
 using namespace stmcpp::units;
-
-extern "C" void comm_decode(char * data, int len);
 
 namespace Bluetooth{
 
@@ -36,84 +28,214 @@ namespace Bluetooth{
 
 	bool _connected = false;
 	bool _bonded = false;
+	bool _streamOpen = false;
 	duration _dataReceivedTimestamp = 0_ms;
 
-	bool _processingCommand = false;
-	CommandResponse _commandResponse = CommandResponse::NONE;
-	char _commandResponseString[BUFF_SIZE];
+	// ── Příjem (ISR → hlavní smyčka), bez haldy ──────────────────────────
+	// Stavová zpráva modulu ohraničená '%'
+	struct StatusLine {
+		char text[48];
+	};
 
+	static RingBuffer<StatusLine, 8> _statusQueue;
+	static RingBuffer<uint8_t, 512> _rxRing; // ~44 ms při 115200 Bd
+	static StatusLine _rxStatus = {};
+	static uint8_t _rxStatusIndex = 0;
+	static bool _receivingStatus = false;
+	static volatile bool _rebootSeen = false;
 
-	bool _receivingStatus = false;
-	char _rxStatusBuffer[BUFF_SIZE], _rxDataBuffer[BUFF_SIZE], _txBuffer[BUFF_SIZE];
-	uint8_t _rxStatusIndex = 0, _rxDataIndex = 0;
+	// Přijaté protokolové pakety (plní process())
+	static RingBuffer<protocol::Packet, 4> _rxPackets;
+	static protocol::Parser _protocolParser;
+	static bool _inFrame = false;
 
-	std::deque<std::string> _commandTextQueue;
+	// ── Vysílání (hlavní smyčka → DMA) ───────────────────────────────────
+	static RingBuffer<uint8_t, 1024> _txRing;
+	static volatile size_t _txDmaLen = 0;
 
-	// Protokolový parser a stav
-	protocol::Parser _protocolParser;
-	volatile bool _protocolPacketReady = false;
-	bool _receivingProtocol = false;
-	protocol::Packet _protocolPacket = {};
-	uint8_t _protocolTxBuffer[protocol::MAX_FRAME_SIZE];
+	// ── Odpovědi příkazového režimu ──────────────────────────────────────
+	// Posuvné okno posledních přijatých znaků mimo protokolové rámce
+	static char _respWindow[5] = {};
+	static bool _sawPrompt = false; // "CMD> "
+	static bool _sawAok = false;
+	static bool _sawErr = false;
+	static bool _sawEnd = false;    // odpověď na "---"
 
-	
-	CommandResponse sendCommand(std::string command) {
-		string response;
-		return sendCommand(command, response, false, DEFAULT_TIMEOUT);
+	// ── Neblokující automat příkazového režimu ───────────────────────────
+	static constexpr uint8_t MAX_JOB_COMMANDS = 8;
+	static constexpr uint8_t MAX_COMMAND_LEN = 32;
+	static constexpr duration CMD_TIMEOUT = 1000_ms;
+	static constexpr duration EXIT_TIMEOUT = 500_ms;
+	static constexpr duration REBOOT_TIMEOUT = 3000_ms;
+
+	enum class EngineState : uint8_t {
+		IDLE,
+		ENTER_CMD,   // odesláno "$$$", čekáme na "CMD> "
+		SEND,        // odeslat další příkaz
+		WAIT_RESP,   // čekáme na "CMD> " (případně AOK/ERR před ním)
+		WAIT_REBOOT, // po "R,1" čekáme na %REBOOT%
+		EXIT_CMD,    // odesláno "---", čekáme na "END"
+	};
+
+	static char _jobCommands[MAX_JOB_COMMANDS][MAX_COMMAND_LEN];
+	static uint8_t _jobCount = 0;
+	static uint8_t _jobIndex = 0;
+	static EngineState _engineState = EngineState::IDLE;
+	static duration _engineTimestamp = 0_ms;
+
+	// Spustí DMA nad souvislým úsekem TX bufferu (volat se zakázaným přerušením DMA nebo z ISR)
+	static void _kickTx() {
+		if (_txDmaLen != 0) return; // DMA právě běží
+		size_t len = 0;
+		const uint8_t *data = _txRing.contiguousData(len);
+		if (len == 0) return;
+
+		stmcpp::reg::clear(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
+		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(data));
+		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), static_cast<uint32_t>(len));
+		_txDmaLen = len;
+		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
 	}
 
-	Mode setMode(Mode mode) {
-		if(mode == _mode) return mode;
+	// Zařadí celý blok do TX bufferu (vše, nebo nic) a případně spustí DMA
+	static bool _sendBytes(const uint8_t *data, size_t len) {
+		if (len == 0 || _txRing.freeSpace() < len) return false;
+		for (size_t i = 0; i < len; ++i) {
+			_txRing.push(data[i]);
+		}
 
-		duration timestamp = stmcpp::systick::getDuration();
+		uint32_t primask = __get_PRIMASK();
+		__disable_irq();
+		_kickTx();
+		__set_PRIMASK(primask);
+		return true;
+	}
 
-		if (mode == Mode::COMMAND) {
-			_send_string("$$$");
-			while(_mode != Mode::COMMAND && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT));
-			if(_mode != Mode::COMMAND) {
-				return _mode; // Failed to switch to COMMAND mode
+	static bool _sendString(const char *str) {
+		return _sendBytes(reinterpret_cast<const uint8_t *>(str), strlen(str));
+	}
+
+	// Vyhodnocení textových odpovědí modulu (AOK, ERR, CMD>, END) bez strcmp nad neukončeným bufferem
+	static void _matchResponse(uint8_t c) {
+		memmove(_respWindow, _respWindow + 1, sizeof(_respWindow) - 1);
+		_respWindow[sizeof(_respWindow) - 1] = static_cast<char>(c);
+
+		auto endsWith = [](const char *suffix, size_t len) { return memcmp(_respWindow + sizeof(_respWindow) - len, suffix, len) == 0; };
+
+		if (endsWith("CMD> ", 5)) {
+			_sawPrompt = true;
+			_mode = Mode::COMMAND;
+		} else if (endsWith("AOK", 3)) {
+			_sawAok = true;
+		} else if (endsWith("ERR", 3)) {
+			_sawErr = true;
+		} else if (endsWith("END", 3)) {
+			_sawEnd = true;
+		}
+	}
+
+	static void _clearResponseFlags() {
+		_sawPrompt = false;
+		_sawAok = false;
+		_sawErr = false;
+		_sawEnd = false;
+	}
+
+	static bool _queueJob(const char *const *commands, uint8_t count) {
+		if (_jobCount + count > MAX_JOB_COMMANDS) return false;
+		for (uint8_t i = 0; i < count; ++i) {
+			strncpy(_jobCommands[_jobCount], commands[i], MAX_COMMAND_LEN - 1);
+			_jobCommands[_jobCount][MAX_COMMAND_LEN - 1] = '\0';
+			_jobCount++;
+		}
+		return true;
+	}
+
+	static void _finishJob() {
+		_jobCount = 0;
+		_jobIndex = 0;
+		_engineState = EngineState::IDLE;
+	}
+
+	static void _runEngine() {
+		duration now = stmcpp::systick::getDuration();
+
+		switch (_engineState) {
+			case EngineState::IDLE:
+				if (_jobCount == 0) break;
+				_jobIndex = 0;
+				_clearResponseFlags();
+				if (_mode == Mode::COMMAND) {
+					_engineState = EngineState::SEND;
+				} else {
+					// "$$$" se nesmí smíchat s protokolovým rámcem — DMA musí mít prázdnou frontu
+					if (!_txRing.empty()) break;
+					_sendString("$$$");
+					_engineTimestamp = now;
+					_engineState = EngineState::ENTER_CMD;
+				}
+				break;
+
+			case EngineState::ENTER_CMD:
+				if (_sawPrompt) {
+					_engineState = EngineState::SEND;
+				} else if ((now - _engineTimestamp) > CMD_TIMEOUT) {
+					// Modul nepřešel do příkazového režimu — zahodit úlohu
+					Debug::log(Debug::Level::WARNING, "BLE: $$$ timeout");
+					_finishJob();
+				}
+				break;
+
+			case EngineState::SEND: {
+				char line[MAX_COMMAND_LEN + 1];
+				const char *cmd = _jobCommands[_jobIndex];
+				snprintf(line, sizeof(line), "%s\r", cmd);
+				_clearResponseFlags();
+				_rebootSeen = false;
+				if (!_sendString(line)) break; // TX fronta plná, zkusit příště
+				_engineTimestamp = now;
+				_engineState = (strcmp(cmd, "R,1") == 0) ? EngineState::WAIT_REBOOT : EngineState::WAIT_RESP;
+				break;
 			}
-		} else {
-			_send_string("---\r");
+
+			case EngineState::WAIT_RESP:
+				if (_sawPrompt || (now - _engineTimestamp) > CMD_TIMEOUT) {
+					if (_sawErr || !_sawPrompt) {
+						Debug::log(Debug::Level::WARNING, _jobCommands[_jobIndex]);
+					}
+					_jobIndex++;
+					if (_jobIndex < _jobCount) {
+						_engineState = EngineState::SEND;
+					} else {
+						// Návrat do datového režimu
+						_clearResponseFlags();
+						_sendString("---\r");
+						_engineTimestamp = now;
+						_engineState = EngineState::EXIT_CMD;
+					}
+				}
+				break;
+
+			case EngineState::WAIT_REBOOT:
+				// Po restartu je modul v datovém režimu; zbytek úlohy se zahazuje
+				if (_rebootSeen || (now - _engineTimestamp) > REBOOT_TIMEOUT) {
+					_mode = Mode::DATA;
+					_connected = false;
+					_streamOpen = false;
+					_finishJob();
+				}
+				break;
+
+			case EngineState::EXIT_CMD:
+				if (_sawEnd || (now - _engineTimestamp) > EXIT_TIMEOUT) {
+					_mode = Mode::DATA;
+					_finishJob();
+				}
+				break;
 		}
-		return mode;
 	}
 
-
-	CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse, stmcpp::units::duration timeout) {
-		if (setMode(Mode::COMMAND) != Mode::COMMAND) {
-			return CommandResponse::NONE;
-		}
-
-		_processingCommand = true;
-		_commandResponse = CommandResponse::NONE;
-
-		_send_string(command + "\r");
-
-		
-		duration timestamp = stmcpp::systick::getDuration();
-		while(_commandResponse == CommandResponse::NONE && stmcpp::systick::getDuration() < (timestamp + timeout)) {;}
-
-		if(_commandResponse != CommandResponse::OK) {
-			_processingCommand = false;
-			return _commandResponse;
-		} else if (awaitResponse) {
-			
-			size_t len = strnlen(_commandResponseString, BUFF_SIZE);
-			response.assign(_commandResponseString, len);
-			// clear internal state for next command
-			_rxDataIndex = 0;
-			_processingCommand = false;
-			return _commandResponse;
-		}
-		
-		_processingCommand = false;
-		return _commandResponse;
-	}
-
-	std::unique_ptr<Command> _build_command_from_string(const std::string& cmdText) {
-		// Use .c_str() to allow strcmp, strncmp, and sscanf to work
-		const char* rxCmd = cmdText.c_str(); 
+	static std::unique_ptr<Command> _build_command_from_string(const char *rxCmd) {
 
 		// --- Simple (non-parameterized) commands ---
 		if      (!strcmp(rxCmd, "ADV_TIMEOUT"))      return make_unique<Command>(Command::Type::ADV_TIMEOUT);
@@ -207,19 +329,6 @@ namespace Bluetooth{
 	}
 
 
-	uint8_t _send_string(std::string data) {
-		if(data.length() > BUFF_SIZE) return 1;
-		if(DMA1_Channel2->CCR & DMA_CCR_EN) return 1;
-
-		memcpy(_txBuffer, data.c_str(), data.length());
-
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_txBuffer[0]));
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), data.length());
-		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
-
-		return 0;
-	}
-
 	uint8_t init(){
 		// USART GPIOs
 		stmcpp::gpio::pin<stmcpp::gpio::port::porta, 2> usart_tx (stmcpp::gpio::mode::af7, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
@@ -240,20 +349,17 @@ namespace Bluetooth{
             (0b1 << DMA_CCR_MINC_Pos) | // Memory increment mode
 			(0b1 << DMA_CCR_DIR_Pos)   | // Read from memory
             (0b1 << DMA_CCR_TCIE_Pos)   // Transfer complete interrupt enable
-            
         );
 
-        // Set up the DMA memory and peripheral
-        stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_txBuffer[0]));
+        // Set up the DMA peripheral (adresa paměti se nastavuje při každém spuštění v _kickTx)
         stmcpp::reg::write(std::ref(DMA1_Channel2->CPAR), reinterpret_cast<uint32_t>(&USART2->TDR));
-        stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), 1);
         NVIC_EnableIRQ(DMA1_Channel2_IRQn);
 
-        // Set up DMAMUX routing (DMAMUX channels map to 6-11 to DMA2 1-6, thats why the offset in numbering)
+        // Set up DMAMUX routing (DMAMUX channels start from 0, DMA from 1); 27 = USART2_TX
         stmcpp::reg::write(std::ref(DMAMUX1_Channel1->CCR), (27 << DMAMUX_CxCR_DMAREQ_ID_Pos));
 
 		// Set up USART2
-		stmcpp::reg::write(std::ref(USART2->BRR), 144000000 / 115200); // Assuming 144MHz clock, set baud rate to 115200
+		stmcpp::reg::write(std::ref(USART2->BRR), 144000000 / 115200); // PCLK1 = 144 MHz, 115200 Bd
 		stmcpp::reg::write(std::ref(USART2->CR1), 
 			(0b1 << USART_CR1_TE_Pos) | // Transmitter enable
 			(0b1 << USART_CR1_RE_Pos) | // Receiver enable
@@ -274,182 +380,156 @@ namespace Bluetooth{
 		// Bring RN487x out of reset
 		rst_n.set();
 
+		// Jednorázové čekání na %REBOOT% při startu (před spuštěním hlavní smyčky)
 		duration timestamp = stmcpp::systick::getDuration();
 		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT)){;}
 
 		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
-		Bluetooth::Command::Type type = command->getType();
-
-		if(type == Bluetooth::Command::Type::REBOOT){
+		if(command && command->getType() == Bluetooth::Command::Type::REBOOT){
+			_mode = Mode::DATA;
 			return 0; // Successful init after reboot
 		}else return 1;
 	}
 
 	uint8_t configure() {
-		if (setMode(Mode::COMMAND) != Mode::COMMAND) {
-			return 1;
-		}
-
-		if (sendCommand("SN,MIDIControl Base") != CommandResponse::OK) return 1;
-		if (sendCommand("SA,1") != CommandResponse::OK) return 1;
-		if (sendCommand("SR,80000000") != CommandResponse::OK) return 1;
-		if (sendCommand("R,1") != CommandResponse::OK) return 1;
-
-		// Čekání na REBOOT status po restartu modulu (max 2s)
-		_mode = Mode::DATA;
-		duration timestamp = stmcpp::systick::getDuration();
-		while (!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + 2000_ms)) {;}
-
-		if (isCommandAvailable()) {
-			auto cmd = getCommand();
-			if (cmd->getType() != Command::Type::REBOOT) return 1;
-		} else {
-			return 1;
-		}
-
-		// Pokus o připojení k bondovanému zařízení
-		if (sendCommand("E") != CommandResponse::OK) return 1;
-		setMode(Mode::DATA);
-
-		return 0;
+		// SA,2: NoInputNoOutput (Just Works) — Base nemá klávesnici ani nezobrazuje passkey,
+		//       spárování potvrzuje uživatel dotazem na OLED (B / K,1).
+		// SR,0000: 16bit bitmapa funkcí; bez řízení toku (0x8000), RTS/CTS nejsou zapojené.
+		//          Prompt "CMD> " zůstává zapnutý, automat na něj čeká.
+		// SS,C0: Device Information + UART Transparent.
+		// R,1: restart, aby se změny projevily; po %REBOOT% je modul v datovém režimu.
+		static const char *const commands[] = {"SN,MIDIControl Base", "SA,2", "SR,0000", "SS,C0", "R,1"};
+		return _queueJob(commands, sizeof(commands) / sizeof(commands[0])) ? 0 : 1;
 	}
 
 	uint8_t reconnect() {
-		if (sendCommand("E") != CommandResponse::OK) return 1;
-		setMode(Mode::DATA);
-		return 0;
+		if (_engineState != EngineState::IDLE || _jobCount != 0) return 1;
+		// Z: zrušit případný probíhající pokus (ERR, když žádný neběží — nevadí)
+		// C: připojit se k poslednímu bondovanému zařízení (link se automaticky zabezpečí)
+		static const char *const commands[] = {"Z", "C"};
+		return _queueJob(commands, 2) ? 0 : 1;
 	}
 
+	bool queueCommand(const char *command) {
+		const char *const commands[] = {command};
+		return _queueJob(commands, 1);
+	}
+
+	void confirmPairing(bool accept) {
+		// "ano" → B: zabezpečí spojení a uloží bond; "ne" → K,1: odpojí
+		queueCommand(accept ? "B" : "K,1");
+	}
+
+	void process() {
+		uint8_t c;
+		// Dokud je místo ve frontě paketů; zbytek zůstane v RX bufferu na příště
+		while (_rxPackets.freeSpace() > 0 && _rxRing.pop(c)) {
+			if (c == protocol::FRAME_START) _inFrame = true;
+
+			if (_inFrame) {
+				if (_protocolParser.feed(c)) {
+					_rxPackets.push(_protocolParser.getPacket());
+				}
+				if (c == protocol::FRAME_END) _inFrame = false;
+			} else {
+				_matchResponse(c);
+			}
+		}
+
+		_runEngine();
+	}
+
+	bool isIdle() { return _engineState == EngineState::IDLE && _jobCount == 0 && _mode == Mode::DATA; }
+
 	bool isConnected() { return _connected; }
-	void setConnected(bool connected) { _connected = connected; }
+	void setConnected(bool connected) {
+		_connected = connected;
+		if (!connected) _streamOpen = false;
+	}
 	bool isBonded() { return _bonded; }
 	void setBonded(bool bonded) { _bonded = bonded; }
+	bool isStreamOpen() { return _streamOpen; }
+	void setStreamOpen(bool open) { _streamOpen = open; }
+
+	bool canSendData() { return _connected && _streamOpen && isIdle(); }
 
 	duration getDataReceivedTimestamp() { return _dataReceivedTimestamp; }
 
 	bool isCommandAvailable() {
-        return !_commandTextQueue.empty();
-    }
+		return !_statusQueue.empty();
+	}
 
-    std::unique_ptr<Command> getCommand() {
-        if (_commandTextQueue.empty()) {
-            return nullptr; // No command string available
-        }
-        
-        // Move the command string from the queue to a local variable
-        std::string cmdText = std::move(_commandTextQueue.front());
-        _commandTextQueue.pop_front();
-        
-        // Parse the string and return the resulting command object
-        return _build_command_from_string(cmdText);
-    }
-
-
+	std::unique_ptr<Command> getCommand() {
+		StatusLine line;
+		if (!_statusQueue.pop(line)) {
+			return nullptr; // No command string available
+		}
+		line.text[sizeof(line.text) - 1] = '\0';
+		return _build_command_from_string(line.text);
+	}
 
 	bool isProtocolPacketAvailable() {
-		return _protocolPacketReady;
+		return !_rxPackets.empty();
 	}
 
-	const protocol::Packet &getProtocolPacket() {
-		_protocolPacketReady = false;
-		return _protocolPacket;
+	bool getProtocolPacket(protocol::Packet &pkt) {
+		return _rxPackets.pop(pkt);
 	}
 
-	uint8_t sendProtocolPacket(const protocol::Packet &pkt) {
-		if (DMA1_Channel2->CCR & DMA_CCR_EN) return 1;
+	bool sendProtocolPacket(const protocol::Packet &pkt) {
+		if (!canSendData()) return false;
 
-		uint16_t len = protocol::encode(pkt, _protocolTxBuffer);
-		if (len == 0 || len > protocol::MAX_FRAME_SIZE) return 1;
-
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CMAR), reinterpret_cast<uint32_t>(&_protocolTxBuffer[0]));
-		stmcpp::reg::write(std::ref(DMA1_Channel2->CNDTR), len);
-		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
+		uint8_t frame[protocol::MAX_FRAME_SIZE];
+		uint16_t len = protocol::encode(pkt, frame);
+		if (len == 0 || len > protocol::MAX_FRAME_SIZE) return false;
+		if (!_sendBytes(frame, len)) return false;
 
 		LED::notifyActivity(LED::PIXEL_BLUETOOTH);
-
-		return 0;
+		return true;
 	}
 
 	extern "C" void DMA1_Channel2_IRQHandler(){
-		// Disable TX DMA
 		if(stmcpp::reg::read(std::ref(DMA1->ISR)) & DMA_ISR_TCIF2){
+			stmcpp::reg::set(std::ref(DMA1->IFCR), DMA_IFCR_CTCIF2);
 			stmcpp::reg::clear(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
-            stmcpp::reg::set(std::ref(DMA1->IFCR), DMA_IFCR_CTCIF2); 
+
+			// Uvolnit odeslaný úsek a pokračovat dalším
+			_txRing.consume(_txDmaLen);
+			_txDmaLen = 0;
+			_kickTx();
         }
 	}
 
 	extern "C" void USART2_IRQHandler() {
-		if(stmcpp::reg::read(std::ref(USART2->ISR)) & USART_ISR_RXNE){
+		uint32_t isr = stmcpp::reg::read(std::ref(USART2->ISR));
+
+		if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE)) {
+			stmcpp::reg::write(std::ref(USART2->ICR), USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF);
+		}
+
+		if(isr & USART_ISR_RXNE){
 			char c = static_cast<char>(USART2->RDR);
 			if (!_receivingStatus && c == STATUS_DELIMITER){
-				// Start reception of a command
+				// Začátek stavové zprávy
 				_receivingStatus = true;
 				_rxStatusIndex = 0;
-			}else if (_receivingStatus && c != STATUS_DELIMITER){
-				// Fill the command buffer with the command
-				_rxStatusBuffer[_rxStatusIndex++] = c;
 			}else if (_receivingStatus && c == STATUS_DELIMITER){
-				_rxStatusBuffer[_rxStatusIndex++] = '\0';
+				// Konec stavové zprávy → fronta (bez haldy)
+				_rxStatus.text[_rxStatusIndex] = '\0';
 				_receivingStatus = false;
-				// Push the command into command queue
-				_commandTextQueue.push_back(string(_rxStatusBuffer));
+				if (strcmp(_rxStatus.text, "REBOOT") == 0) _rebootSeen = true;
+				_statusQueue.push(_rxStatus);
 				_rxStatusIndex = 0;
-			}else if (!_receivingStatus && c != STATUS_DELIMITER){
-				_dataReceivedTimestamp = stmcpp::systick::getDuration();
-
-				// Směrování protokolových rámců do parseru
-				if (c == protocol::FRAME_START) {
-					_receivingProtocol = true;
-					_protocolParser.feed(static_cast<uint8_t>(c));
-				} else if (_receivingProtocol) {
-					if (_protocolParser.feed(static_cast<uint8_t>(c))) {
-						// Kompletní paket přijat
-						_protocolPacket = _protocolParser.getPacket();
-						_protocolPacketReady = true;
-						_receivingProtocol = false;
-					} else if (c == protocol::FRAME_END) {
-						// Neplatný rámec — parser ho zahodil
-						_receivingProtocol = false;
-					}
-				} else {
-					// Ostatní data (příkazové odpovědi apod.)
-					_rxDataBuffer[_rxDataIndex++] = c;
-
-					if(!strcmp(_rxDataBuffer + (_rxDataIndex - OK_STRING.length()), OK_STRING.c_str())){
-
-						if(_processingCommand){
-							_commandResponse = CommandResponse::OK;
-						}
-
-						_rxDataIndex = 0;
-						_rxDataBuffer[_rxDataIndex] = '\0';
-					}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - ERROR_STRING.length()), ERROR_STRING.c_str())){
-						if(_processingCommand){
-							_commandResponse = CommandResponse::ERROR;
-						}
-
-						_rxDataIndex = 0;
-						_rxDataBuffer[_rxDataIndex] = '\0';
-					}else if(!strcmp(_rxDataBuffer + (_rxDataIndex - CMD_STRING.length()), CMD_STRING.c_str())){
-						_mode = Mode::COMMAND;
-
-						if(_processingCommand){
-							_commandResponse = CommandResponse::OK;
-						} else _commandResponse = CommandResponse::NONE;
-
-						_rxDataIndex = 0;
-						_rxDataBuffer[_rxDataIndex] = '\0';
-					}else if(c == MESSAGE_DELIMITER){
-						// End of data message
-						strcpy(_commandResponseString, _rxDataBuffer);
-						_commandResponseString[_rxDataIndex] = '\0';
-						_rxDataIndex = 0;
-						_rxDataBuffer[_rxDataIndex] = '\0';
-					}
+			}else if (_receivingStatus){
+				// Příliš dlouhé zprávy (např. výsledky skenování) se zkrátí
+				if (_rxStatusIndex < sizeof(_rxStatus.text) - 1) {
+					_rxStatus.text[_rxStatusIndex++] = c;
 				}
+			}else{
+				// Data (protokolové rámce i textové odpovědi) zpracuje hlavní smyčka
+				_dataReceivedTimestamp = stmcpp::systick::getDuration();
+				_rxRing.push(static_cast<uint8_t>(c));
 			}
-
         }
 	}
 }
-

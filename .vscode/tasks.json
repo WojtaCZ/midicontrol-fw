@@ -34,7 +34,8 @@
 			"dependsOn" : "Build Debug",
 			"type": "shell",
 			//"command": "openocd -f openocd.cfg -c 'init; reset halt; program ${workspaceRoot}/build/project.elf verify; reset run; exit'",
-			"command": "arm-none-eabi-gdb -nx --batch -ex 'set mem inaccessible-by-default off' -ex 'monitor connect_rst enable'  -ex 'monitor swdp_scan' -ex 'attach 1' -ex 'load' -ex 'compare-sections' -ex 'kill' ${workspaceRoot}/build/fastic-readout-fw.elf",
+			// bootloader + aplikace (s trailerem) najednou; jen aplikace: build/midicontrol-fw-update.hex
+			"command": "openocd -f openocd.cfg -c 'program build/midicontrol-fw-full.hex verify reset exit'",
 			"options": {
 				"cwd": "${workspaceRoot}"
 			},

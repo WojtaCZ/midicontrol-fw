@@ -10,6 +10,7 @@
 #include "usb.hpp"
 #include "debug.hpp"
 #include "settings.hpp"
+#include "router.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -20,8 +21,6 @@
 #include <tinyusb/src/class/midi/midi.h>
 #include <tinyusb/src/class/cdc/cdc_device.h>
 
-#include "protocol/parser.hpp"
-#include "protocol/codec.hpp"
 #include "protocol/types.hpp"
 #include "protocol/constants.hpp"
 
@@ -30,289 +29,10 @@
 
 using namespace stmcpp::units;
 
-// Transportní rozhraní, ze kterého paket přišel
-enum class Transport : uint8_t {
-	USB_CDC,
-	BLE,
-};
-
-// USB CDC protokolový parser
-static protocol::Parser _cdcParser;
-static uint8_t _cdcPacketId = 0;
-
-// Keepalive: čas posledního paketu z PC
-static duration _lastPcKeepalive = 0_ms;
-static bool _pcEverSeen = false;
-
-// Auto-reconnect stav
+// Auto-reconnect stav (neblokující: příkazy provádí automat v Bluetooth::process)
 static bool _reconnectNeeded = true;
 static duration _lastReconnectAttempt = 0_ms;
 static constexpr duration RECONNECT_INTERVAL = 5000_ms;
-
-// Firmware update: reboot into the USB bootloader on request from the PC.
-static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the bootloader
-static bool _enterBootloader = false;
-static duration _enterBootloaderAt = 0_ms;
-
-// Set the backup-register flag the bootloader checks on reset, so it stays
-// resident (USB-CDC firmware update) instead of jumping back to the app.
-static void requestBootloader() {
-	stmcpp::reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_PWREN);
-	PWR->CR1 |= PWR_CR1_DBP;          // unlock backup domain write protection
-	TAMP->BKP0R = kEnterBootMagic;
-}
-
-bool isPcAlive() {
-	return _pcEverSeen && (stmcpp::systick::getDuration() - _lastPcKeepalive) < 5000_ms;
-}
-
-// Odeslání paketu přes USB CDC
-static void sendCdcPacket(const protocol::Packet &pkt) {
-	uint8_t buf[protocol::MAX_FRAME_SIZE];
-	uint16_t len = protocol::encode(pkt, buf);
-	if (len > 0) {
-		tud_cdc_write(buf, len);
-		tud_cdc_write_flush();
-		LED::notifyActivity(LED::PIXEL_USB);
-	}
-}
-
-// Odeslání ACK paketu
-static void sendAck(uint8_t dest, uint8_t ackedPacketId, Transport via) {
-	protocol::Packet ack = {};
-	ack.source = protocol::ADDR_BASE;
-	ack.dest = dest;
-	ack.packetId = _cdcPacketId++;
-	ack.msgType = protocol::MsgType::ACK;
-	ack.payload[0] = ackedPacketId;
-	ack.payloadLen = 1;
-
-	if (via == Transport::USB_CDC) {
-		sendCdcPacket(ack);
-	} else {
-		Bluetooth::sendProtocolPacket(ack);
-	}
-}
-
-// Odeslání NAK paketu
-static void sendNak(uint8_t dest, uint8_t ackedPacketId, protocol::NakReason reason, Transport via) {
-	protocol::Packet nak = {};
-	nak.source = protocol::ADDR_BASE;
-	nak.dest = dest;
-	nak.packetId = _cdcPacketId++;
-	nak.msgType = protocol::MsgType::NAK;
-	nak.payload[0] = ackedPacketId;
-	nak.payload[1] = static_cast<uint8_t>(reason);
-	nak.payloadLen = 2;
-
-	if (via == Transport::USB_CDC) {
-		sendCdcPacket(nak);
-	} else {
-		Bluetooth::sendProtocolPacket(nak);
-	}
-}
-
-// Zpracování lokálního paketu (určeného pro Base)
-static void handleLocalPacket(const protocol::Packet &pkt, Transport via) {
-	bool needsAck = (pkt.msgType != protocol::MsgType::ACK && pkt.msgType != protocol::MsgType::NAK
-					 && pkt.msgType != protocol::MsgType::KEEPALIVE && pkt.msgType != protocol::MsgType::KEEPALIVE_ACK
-					 && pkt.msgType != protocol::MsgType::NOW_PLAYING_INFO);
-
-	switch (pkt.msgType) {
-		case protocol::MsgType::SET_CURRENT:
-			if (pkt.payloadLen >= 1) {
-				base::current::set(static_cast<bool>(pkt.payload[0]));
-				if (needsAck) sendAck(pkt.source, pkt.packetId, via);
-			} else {
-				sendNak(pkt.source, pkt.packetId, protocol::NakReason::INVALID_PAYLOAD, via);
-			}
-			break;
-
-		case protocol::MsgType::GET_STATUS: {
-			protocol::Packet resp = {};
-			resp.source = protocol::ADDR_BASE;
-			resp.dest = pkt.source;
-			resp.packetId = _cdcPacketId++;
-			resp.msgType = protocol::MsgType::STATUS_RESP;
-			resp.payload[0] = static_cast<uint8_t>(Bluetooth::isConnected());
-			resp.payload[1] = static_cast<uint8_t>(base::current::isEnabled());
-			resp.payload[2] = static_cast<uint8_t>(display::isConnected());
-			resp.payload[3] = static_cast<uint8_t>(isPcAlive());
-			resp.payloadLen = 4;
-
-			if (via == Transport::USB_CDC) {
-				sendCdcPacket(resp);
-			} else {
-				Bluetooth::sendProtocolPacket(resp);
-			}
-			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
-			break;
-		}
-
-		case protocol::MsgType::PLAY_SONG: {
-			// Zobrazení "Now Playing" na OLED
-			if (pkt.payloadLen > 0) {
-				char songName[64] = {};
-				uint8_t len = pkt.payloadLen < sizeof(songName) - 1 ? pkt.payloadLen : sizeof(songName) - 1;
-				memcpy(songName, pkt.payload, len);
-				songName[len] = '\0';
-				GUI::showNowPlaying(songName);
-			}
-			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
-			break;
-		}
-
-		case protocol::MsgType::STOP_SONG:
-			GUI::dismissNowPlaying();
-			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
-			break;
-
-		case protocol::MsgType::NOW_PLAYING_INFO: {
-			// Payload: [song_h, song_l, verse, letter, led] — 0xFF = beze změny
-			if (pkt.payloadLen >= 5) {
-				uint8_t song_h = pkt.payload[0];
-				uint8_t song_l = pkt.payload[1];
-				uint8_t verse_bcd = pkt.payload[2];
-				uint8_t letter_raw = pkt.payload[3];
-				uint8_t led_raw = pkt.payload[4];
-
-				// Song: 2 BCD bajty → uint16_t
-				if (song_h != 0xFF && song_l != 0xFF) {
-					uint16_t d3 = (song_h >> 4) & 0x0F;
-					uint16_t d2 = song_h & 0x0F;
-					uint16_t d1 = (song_l >> 4) & 0x0F;
-					uint16_t d0 = song_l & 0x0F;
-					uint16_t song = d3 * 1000 + d2 * 100 + d1 * 10 + d0;
-					display::setSong(song, true);
-				}
-
-				// Verse: BCD
-				if (verse_bcd != 0xFF) {
-					uint8_t v1 = (verse_bcd >> 4) & 0x0F;
-					uint8_t v0 = verse_bcd & 0x0F;
-					uint8_t verse = v1 * 10 + v0;
-					display::setVerse(verse, true);
-				}
-
-				// Letter: 0xA=A .. 0xD=D, 0xF=off
-				if (letter_raw != 0xFF) {
-					if (letter_raw >= 0x0A && letter_raw <= 0x0D) {
-						display::setLetter('A' + (letter_raw - 0x0A), true);
-					} else {
-						display::setLetter(' ', false);
-					}
-				}
-
-				// LED: 1=red, 2=green, 3=blue, 4=yellow, 0xF=off
-				if (led_raw != 0xFF) {
-					switch (led_raw) {
-						case 1: display::setLed(display::ledColor::RED); break;
-						case 2: display::setLed(display::ledColor::GREEN); break;
-						case 3: display::setLed(display::ledColor::BLUE); break;
-						case 4: display::setLed(display::ledColor::YELLOW); break;
-						default: display::setLed(display::ledColor::OFF); break;
-					}
-				}
-
-				GUI::updateNowPlayingInfo();
-			}
-			// Bez ACK — časté aktualizace
-			break;
-		}
-
-		case protocol::MsgType::SONG_LIST_RESP: {
-			if (pkt.payloadLen > 1) {
-				bool hasMore = (pkt.payload[0] != 0x00);
-				// Písně začínají od payload[1]
-				char songList[protocol::MAX_PAYLOAD_SIZE];
-				uint8_t len = pkt.payloadLen - 1;
-				if (len > protocol::MAX_PAYLOAD_SIZE - 1) len = protocol::MAX_PAYLOAD_SIZE - 1;
-				memcpy(songList, &pkt.payload[1], len);
-				songList[len] = '\0';
-				GUI::handleSongListResponse(songList, len, hasMore);
-			} else if (pkt.payloadLen == 1) {
-				// Pouze has_more byte, žádné písně
-				GUI::handleSongListResponse("", 0, false);
-			}
-			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
-			break;
-		}
-
-		case protocol::MsgType::SIGNAL_PLAYING:
-		case protocol::MsgType::SIGNAL_RECORDING:
-		case protocol::MsgType::SIGNAL_STOPPED:
-		case protocol::MsgType::RECORD_SONG:
-		case protocol::MsgType::GET_SONG_LIST:
-		case protocol::MsgType::STATUS_RESP:
-			if (needsAck) sendAck(pkt.source, pkt.packetId, via);
-			break;
-
-		case protocol::MsgType::KEEPALIVE: {
-			// Odpovědět KEEPALIVE_ACK odesílateli
-			protocol::Packet ackPkt = {};
-			ackPkt.source = protocol::ADDR_BASE;
-			ackPkt.dest = pkt.source;
-			ackPkt.packetId = _cdcPacketId++;
-			ackPkt.msgType = protocol::MsgType::KEEPALIVE_ACK;
-			ackPkt.payloadLen = 0;
-
-			if (via == Transport::USB_CDC) {
-				sendCdcPacket(ackPkt);
-			} else {
-				Bluetooth::sendProtocolPacket(ackPkt);
-			}
-			break;
-		}
-
-		case protocol::MsgType::KEEPALIVE_ACK:
-			// Ignorujeme — Base nepotřebuje sledovat ACK od PC
-			break;
-
-		case protocol::MsgType::ACK:
-		case protocol::MsgType::NAK:
-			// Potvrzení — prozatím jen ignorujeme
-			break;
-
-		case protocol::MsgType::ENTER_BOOTLOADER:
-			// Acknowledge, then reboot into the USB bootloader shortly afterwards
-			// (the delay lets the ACK reach the PC before the device re-enumerates).
-			sendAck(pkt.source, pkt.packetId, via);
-			requestBootloader();
-			_enterBootloader = true;
-			_enterBootloaderAt = stmcpp::systick::getDuration() + 250_ms;
-			break;
-
-		default:
-			sendNak(pkt.source, pkt.packetId, protocol::NakReason::UNKNOWN_MSG, via);
-			break;
-	}
-}
-
-// Směrování paketu podle cílové adresy
-static void processProtocolPacket(const protocol::Packet &pkt, Transport via) {
-	// Aktualizace keepalive timestampu při každém paketu z PC
-	if (via == Transport::USB_CDC) {
-		_lastPcKeepalive = stmcpp::systick::getDuration();
-		_pcEverSeen = true;
-	}
-
-	bool forBase = (pkt.dest == protocol::ADDR_BASE || pkt.dest == protocol::ADDR_BROADCAST);
-
-	// Lokální zpracování
-	if (forBase) {
-		handleLocalPacket(pkt, via);
-	}
-
-	// Přeposlání na Remote přes BLE (pokud nepřišel z BLE)
-	if ((pkt.dest == protocol::ADDR_REMOTE || pkt.dest == protocol::ADDR_BROADCAST) && via != Transport::BLE) {
-		Bluetooth::sendProtocolPacket(pkt);
-	}
-
-	// Přeposlání na PC přes CDC (pokud nepřišel z CDC)
-	if ((pkt.dest == protocol::ADDR_PC || pkt.dest == protocol::ADDR_BROADCAST) && via != Transport::USB_CDC) {
-		sendCdcPacket(pkt);
-	}
-}
 
 extern stmcpp::scheduler::Scheduler oledSleepScheduler;
 extern stmcpp::scheduler::Scheduler keypressScheduler;
@@ -338,49 +58,40 @@ stmcpp::scheduler::Scheduler ledScheduler(50_ms, [](){
 	}
 }, true, false);
 
-// Callback: firmware požaduje seznam písní z PC (s offsetem pro paginaci)
+// Callback: OLED menu požaduje seznam písní z PC (s offsetem pro paginaci).
+// Base je jen další žadatel: posílá dest=PC, SONG_LIST_RESP přijde zpět na Base.
 static void onRequestSongList(uint8_t offset) {
 	protocol::Packet pkt = {};
-	pkt.source = protocol::ADDR_BASE;
 	pkt.dest = protocol::ADDR_PC;
-	pkt.packetId = _cdcPacketId++;
 	pkt.msgType = protocol::MsgType::GET_SONG_LIST;
 	pkt.payload[0] = offset;
 	pkt.payloadLen = 1;
-	sendCdcPacket(pkt);
+	router::sendReliable(pkt);
 }
 
-// Callback: uživatel vybral píseň ze seznamu → odešleme PLAY_SONG na PC
+// Callback: uživatel vybral píseň ze seznamu → PLAY_SONG na PC (ASCII kód bez terminátoru).
+// Obrazovku "Prehravani" otevře až SIGNAL_PLAYING od PC.
 static void onPlaySongSelected(const char* songName) {
 	protocol::Packet pkt = {};
-	pkt.source = protocol::ADDR_BASE;
 	pkt.dest = protocol::ADDR_PC;
-	pkt.packetId = _cdcPacketId++;
 	pkt.msgType = protocol::MsgType::PLAY_SONG;
 	uint8_t len = 0;
-	while (songName[len] && len < protocol::MAX_PAYLOAD_SIZE - 1) {
+	while (songName[len] && len < protocol::MAX_SONG_CODE_LEN) {
 		pkt.payload[len] = static_cast<uint8_t>(songName[len]);
 		len++;
 	}
-	pkt.payload[len] = 0;
-	pkt.payloadLen = len + 1;
-	sendCdcPacket(pkt);
+	pkt.payloadLen = len;
+	router::sendReliable(pkt);
 }
 
-// Callback: uživatel stiskl encoder na "Now Playing" → odešleme STOP_SONG
+// Callback: uživatel stiskl encoder na "Now Playing" → STOP_SONG na PC.
+// Remote se o zastavení dozví od PC (SIGNAL_STOPPED).
 static void onUserStopPlayback() {
 	protocol::Packet stopPkt = {};
-	stopPkt.source = protocol::ADDR_BASE;
 	stopPkt.dest = protocol::ADDR_PC;
-	stopPkt.packetId = _cdcPacketId++;
 	stopPkt.msgType = protocol::MsgType::STOP_SONG;
 	stopPkt.payloadLen = 0;
-	sendCdcPacket(stopPkt);
-
-	// Také na Remote přes BLE
-	stopPkt.dest = protocol::ADDR_REMOTE;
-	stopPkt.packetId = _cdcPacketId++;
-	Bluetooth::sendProtocolPacket(stopPkt);
+	router::sendReliable(stopPkt);
 }
 
 // One-shot scheduler: auto-dismiss the splash screen after 3 seconds
@@ -449,20 +160,19 @@ extern "C" int main(void) {
 
 	NVIC_EnableIRQ(USB_LP_IRQn);
 	NVIC_EnableIRQ(USB_HP_IRQn);
-	
-	CRS->CFGR &= ~CRS_CFGR_SYNCSRC;
-	CRS->CFGR |= (0b10 << CRS_CFGR_SYNCSRC_Pos);
 
-	CRS->CFGR |= CRS_CR_AUTOTRIMEN;
-	CRS->CFGR |= CRS_CR_CEN;
+	// CRS: dolaďování HSI48 podle USB SOF (registry CR/CFGR, hodiny CRS povoleny v base::initClock).
+	// Pozn.: USB běží z PLLQ (HSE 48 MHz), HSI48 je tedy jen záloha.
+	CRS->CFGR = (CRS->CFGR & ~CRS_CFGR_SYNCSRC) | (0b10 << CRS_CFGR_SYNCSRC_Pos);
+	CRS->CR |= CRS_CR_AUTOTRIMEN;
+	CRS->CR |= CRS_CR_CEN;
 
 	usb::init();
 
+	// Konfigurace RN4870 se jen zařadí; provádí ji Bluetooth::process() bez blokování smyčky
 	if(Bluetooth::configure()){
 		signalError();
 	}
-
-
 
 	uint8_t packet[4];
 
@@ -470,36 +180,23 @@ extern "C" int main(void) {
 
 		tud_task();
 
-		// Pending reboot into the USB bootloader (after the ACK has been flushed).
-		if (_enterBootloader && stmcpp::systick::getDuration() >= _enterBootloaderAt) {
-			tud_cdc_write_flush();
-			NVIC_SystemReset();
-		}
-
-		if(tud_midi_available()) {
-			// Read MIDI messages
-			tud_midi_packet_read(&packet[0]);
+		// USB → DIN (varhany)
+		while (tud_midi_available() && tud_midi_packet_read(&packet[0])) {
 			midi::send(packet);
 			LED::notifyActivity(LED::PIXEL_MIDIB);
 		}
 
-		// Čtení protokolových dat z USB CDC
-		if (tud_cdc_available()) {
-			uint8_t cdcBuf[64];
-			uint32_t count = tud_cdc_read(cdcBuf, sizeof(cdcBuf));
-			LED::notifyActivity(LED::PIXEL_USB);
-			for (uint32_t i = 0; i < count; ++i) {
-				if (_cdcParser.feed(cdcBuf[i])) {
-					processProtocolPacket(_cdcParser.getPacket(), Transport::USB_CDC);
-				}
-			}
-		}
+		// DIN → USB a SysEx ozvěna displeje (TinyUSB jen z hlavní smyčky)
+		midi::process();
 
-		// Kontrola protokolových paketů z BLE
-		if (Bluetooth::isProtocolPacketAvailable()) {
-			LED::notifyActivity(LED::PIXEL_BLUETOOTH);
-			processProtocolPacket(Bluetooth::getProtocolPacket(), Transport::BLE);
-		}
+		// Displej: nejvýše jeden rámec najednou
+		display::process();
+
+		// BLE: příjem, automat příkazového režimu
+		Bluetooth::process();
+
+		// Směrování paketů PC ↔ Remote, ACK/opakování, keepalive, odesílání CDC
+		router::process();
 
 		keypressScheduler.dispatch();
 		guiRenderScheduler.dispatch();
@@ -509,153 +206,57 @@ extern "C" int main(void) {
 		songListTimeoutScheduler.dispatch();
 		songListDelayScheduler.dispatch();
 
-		// Auto-reconnect k bondovanému Remote zařízení
-		if (_reconnectNeeded && !Bluetooth::isConnected()
+		// Auto-reconnect k bondovanému Remote zařízení (neblokující)
+		if (_reconnectNeeded && !Bluetooth::isConnected() && Bluetooth::isIdle()
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
 			_lastReconnectAttempt = stmcpp::systick::getDuration();
 			Bluetooth::reconnect();
 		}
 
-		if(Bluetooth::isCommandAvailable()){
+		while (Bluetooth::isCommandAvailable()) {
 			std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
-			Bluetooth::Command::Type type = command->getType();
-			
-			// --- WARNING: Increased buffer size ---
-			// 64 bytes is too small for commands with addresses, UUIDs, or hex strings.
-			// 256 bytes is a safer choice.
-			char packet[64]; 
+			if (!command) break;
 
-			// Use a switch for better readability
-			// Use snprintf(packet, sizeof(packet), ...) for buffer safety
-			switch (type) {
-				// --- Simple Commands ---
-				case Bluetooth::Command::Type::ADV_TIMEOUT:     snprintf(packet, sizeof(packet), "Got ble: ADV_TIMEOUT\r\n"); break;
+			switch (command->getType()) {
 				case Bluetooth::Command::Type::BONDED:
+				case Bluetooth::Command::Type::SECURED:
 					Bluetooth::setBonded(true);
 					pairingDelayScheduler.stop();
-					snprintf(packet, sizeof(packet), "Got ble: BONDED\r\n"); break;
+					break;
+
+				case Bluetooth::Command::Type::CONNECT:
+					// %CONNECT,<typ adresy 0/1>,<MAC>% — první parametr je typ adresy, ne stav spojení
+					Bluetooth::setConnected(true);
+					Bluetooth::setBonded(false);
+					_reconnectNeeded = false;
+					// Delay pairing screen — if SECURED arrives first, device is already bonded
+					pairingDelayScheduler.start();
+					GUI::renderForce();
+					break;
+
+				case Bluetooth::Command::Type::STREAM_OPEN:
+					Bluetooth::setConnected(true);
+					Bluetooth::setStreamOpen(true);
+					break;
+
 				case Bluetooth::Command::Type::DISCONNECT:
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
 					pairingDelayScheduler.stop();
 					GUI::renderForce();
-					snprintf(packet, sizeof(packet), "Got ble: DISCONNECT\r\n"); break;
-				case Bluetooth::Command::Type::ERR_CONNPARAM:   snprintf(packet, sizeof(packet), "Got ble: ERR_CONNPARAM\r\n"); break;
-				case Bluetooth::Command::Type::ERR_MEMORY:      snprintf(packet, sizeof(packet), "Got ble: ERR_MEMORY\r\n"); break;
-				case Bluetooth::Command::Type::ERR_READ:        snprintf(packet, sizeof(packet), "Got ble: ERR_READ\r\n"); break;
-				case Bluetooth::Command::Type::ERR_RMT_CMD:     snprintf(packet, sizeof(packet), "Got ble: ERR_RMT_CMD\r\n"); break;
-				case Bluetooth::Command::Type::ERR_SEC:         snprintf(packet, sizeof(packet), "Got ble: ERR_SEC\r\n"); break;
-				case Bluetooth::Command::Type::KEY_REQ:         snprintf(packet, sizeof(packet), "Got ble: KEY_REQ\r\n"); break;
-				case Bluetooth::Command::Type::PIO1H:           snprintf(packet, sizeof(packet), "Got ble: PIO1H\r\n"); break;
-				case Bluetooth::Command::Type::PIO1L:           snprintf(packet, sizeof(packet), "Got ble: PIO1L\r\n"); break;
-				case Bluetooth::Command::Type::PIO2H:           snprintf(packet, sizeof(packet), "Got ble: PIO2H\r\n"); break;
-				case Bluetooth::Command::Type::PIO2L:           snprintf(packet, sizeof(packet), "Got ble: PIO2L\r\n"); break;
-				case Bluetooth::Command::Type::PIO3H:           snprintf(packet, sizeof(packet), "Got ble: PIO3H\r\n"); break;
-				case Bluetooth::Command::Type::PIO3L:           snprintf(packet, sizeof(packet), "Got ble: PIO3L\r\n"); break;
-				case Bluetooth::Command::Type::RE_DISCV:        snprintf(packet, sizeof(packet), "Got ble: RE_DISCV\r\n"); break;
-				case Bluetooth::Command::Type::REBOOT:          snprintf(packet, sizeof(packet), "Got ble: REBOOT\r\n"); break;
-				case Bluetooth::Command::Type::RMT_CMD_OFF:     snprintf(packet, sizeof(packet), "Got ble: RMT_CMD_OFF\r\n"); break;
-				case Bluetooth::Command::Type::RMT_CMD_ON:      snprintf(packet, sizeof(packet), "Got ble: RMT_CMD_ON\r\n"); break;
-				case Bluetooth::Command::Type::SECURED:
-					Bluetooth::setBonded(true);
-					pairingDelayScheduler.stop();
-					snprintf(packet, sizeof(packet), "Got ble: SECURED\r\n"); break;
-				case Bluetooth::Command::Type::STREAM_OPEN:     snprintf(packet, sizeof(packet), "Got ble: STREAM_OPEN\r\n"); break;
-				case Bluetooth::Command::Type::TMR1:            snprintf(packet, sizeof(packet), "Got ble: TMR1\r\n"); break;
-				case Bluetooth::Command::Type::TMR2:            snprintf(packet, sizeof(packet), "Got ble: TMR2\r\n"); break;
-				case Bluetooth::Command::Type::TMR3:            snprintf(packet, sizeof(packet), "Got ble: TMR3\r\n"); break;
+					break;
 
-				// --- Parameterized Commands ---
-				case Bluetooth::Command::Type::CONN_PARAM: {
-					auto* cmd = static_cast<Bluetooth::ConnParamCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: CONN_PARAM int=%d, lat=%d, to=%d\r\n", 
-							cmd->getInterval(), cmd->getLatency(), cmd->getTimeout());
+				case Bluetooth::Command::Type::REBOOT:
+					Bluetooth::setConnected(false);
+					_reconnectNeeded = true;
 					break;
-				}
-				case Bluetooth::Command::Type::CONNECT: {
-					auto* cmd = static_cast<Bluetooth::ConnectCommand*>(command.get());
-					if (cmd->getConnected() == 1) {
-						Bluetooth::setConnected(true);
-						Bluetooth::setBonded(false);
-						_reconnectNeeded = false;
-						// Delay pairing screen — if SECURED arrives first, device is already bonded
-						pairingDelayScheduler.start();
-					} else {
-						Bluetooth::setConnected(false);
-						_reconnectNeeded = true;
-						pairingDelayScheduler.stop();
-					}
-					GUI::renderForce();
-					snprintf(packet, sizeof(packet), "Got ble: CONNECT conn=%d, addr=%s\r\n",
-							cmd->getConnected(), cmd->getAddr().c_str());
-					break;
-				}
-				case Bluetooth::Command::Type::KEY: {
-					auto* cmd = static_cast<Bluetooth::KeyCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: KEY key=%d\r\n", cmd->getKey());
-					break;
-				}
-				case Bluetooth::Command::Type::INDI: {
-					auto* cmd = static_cast<Bluetooth::IndiCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: INDI hdl=%d, hex=%s\r\n", 
-							cmd->getHandle(), cmd->getHex().c_str());
-					break;
-				}
-				case Bluetooth::Command::Type::NOTI: {
-					auto* cmd = static_cast<Bluetooth::NotiCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: NOTI hdl=%d, hex=%s\r\n", 
-							cmd->getHandle(), cmd->getHex().c_str());
-					break;
-				}
-				case Bluetooth::Command::Type::RV: {
-					auto* cmd = static_cast<Bluetooth::RvCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: RV hdl=%d, hex=%s\r\n", 
-							cmd->getHandle(), cmd->getHex().c_str());
-					break;
-				}
-				case Bluetooth::Command::Type::S_RUN: {
-					auto* cmd = static_cast<Bluetooth::SRunCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: S_RUN cmd=%s\r\n", cmd->getCmd().c_str());
-					break;
-				}
-				case Bluetooth::Command::Type::WC: {
-					auto* cmd = static_cast<Bluetooth::WcCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: WC hdl=%d, hex=%s\r\n", 
-							cmd->getHandle(), cmd->getHex().c_str());
-					break;
-				}
-				case Bluetooth::Command::Type::WV: {
-					auto* cmd = static_cast<Bluetooth::WvCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: WV hdl=%d, hex=%s\r\n", 
-							cmd->getHandle(), cmd->getHex().c_str());
-					break;
-				}
-				case Bluetooth::Command::Type::ADV_CONNECTABLE: {
-					auto* cmd = static_cast<Bluetooth::AdvConnectableCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: ADV_CONN addr=%s, conn=%d, name=%s, uuids=%s, rssi=%d\r\n",
-							cmd->getAddr().c_str(), cmd->getConnected(), cmd->getName().c_str(), 
-							cmd->getUuids().c_str(), cmd->getRssi());
-					break;
-				}
-				case Bluetooth::Command::Type::ADV_NON_CONNECTABLE: {
-					auto* cmd = static_cast<Bluetooth::AdvNonConnectableCommand*>(command.get());
-					snprintf(packet, sizeof(packet), "Got ble: ADV_NON_CONN addr=%s, conn=%d, rssi=%d, hex=%s\r\n",
-							cmd->getAddr().c_str(), cmd->getConnected(), cmd->getRssi(), cmd->getHex().c_str());
-					break;
-				}
-				
-				// --- Fallback ---
-				case Bluetooth::Command::Type::UNKNOWN:
+
 				default:
-					snprintf(packet, sizeof(packet), "Got ble: UNKNOWN (%02X)\r\n", static_cast<uint8_t>(type));
+					// Ostatní stavové zprávy jen do debug logu (nikdy do CDC — ten nese protokol)
+					Debug::log(Debug::Level::DEBUG, "BLE status");
 					break;
 			}
-
-			tud_cdc_write_str(packet);
 		}
-
-
-
 	}
 
 }

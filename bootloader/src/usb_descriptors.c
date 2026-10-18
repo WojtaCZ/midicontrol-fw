@@ -3,8 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
-// Same VID/PID as the application so the PC reconnects to the same CDC port.
-#define USB_PID   0x1234
+// Bootloader PID = application PID + 1 (app: ABCD:1234, both placeholders until a
+// real VID/PID is assigned), so the PC can tell "bootloader waiting for an image"
+// from the running application.
+#define USB_PID   0x1235
 #define USB_VID   0xABCD
 #define USB_BCD   0x0200
 

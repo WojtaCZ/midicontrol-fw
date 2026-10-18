@@ -7,12 +7,15 @@
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
-#include <tusb.h>
 
 
 namespace Debug {
     static Level _currentLevel = Level::NONE;
-    char _logBuffer[1024];
+    // Debug text se do USB-CDC neposílá: CDC nese výhradně protokolové rámce pro PC.
+    // Log se ukládá do kruhového bufferu v RAM, čitelného debuggerem (Debug::_logRing).
+    static constexpr size_t LOG_RING_SIZE = 512;
+    char _logRing[LOG_RING_SIZE];
+    size_t _logHead = 0;
 
     Level setLevel(Level level) {
         _currentLevel = level;
@@ -46,9 +49,15 @@ namespace Debug {
                     break;
             }
 
-            snprintf(_logBuffer, sizeof(_logBuffer), "[%s]: %.*s\n", levelString, len, message);
+            char line[96];
+            int n = snprintf(line, sizeof(line), "[%s]: %.*s\n", levelString, len, message);
+            if (n <= 0) return;
+            if (n >= static_cast<int>(sizeof(line))) n = sizeof(line) - 1;
 
-            tud_cdc_write_str(_logBuffer);
+            for (int i = 0; i < n; ++i) {
+                _logRing[_logHead] = line[i];
+                _logHead = (_logHead + 1) % LOG_RING_SIZE;
+            }
         }
     }
 

@@ -119,8 +119,14 @@ namespace Oled{
             (sizeof(initBuffer) << I2C_CR2_NBYTES_Pos) // Buffer size
         );
 
-        // Set up I2C timing to be 1MHz (super speed)
-        stmcpp::reg::write(std::ref(I2C1->TIMINGR), 0x0070215B);
+        // I2C1 kernel clock = PCLK1 = 144 MHz (RCC_CCIPR.I2C1SEL = 00), cíl 400 kHz (Fast mode, SH1106 max.)
+        // PRESC = 3 → t = 4 / 144 MHz = 27.8 ns
+        // SCLL = 0x35 → tLOW  = 54 × 27.8 ns = 1.50 us (min. 1.3 us)
+        // SCLH = 0x1D → tHIGH = 30 × 27.8 ns = 0.83 us (min. 0.6 us)
+        // SDADEL = 2 (56 ns), SCLDEL = 0xF (444 ns ≥ tr 300 ns + tSU;DAT 100 ns)
+        // Perioda 2.33 us + synchronizace/náběh ≈ 2.5 us → ~400 kHz
+        // (původní 0x0070215B byla hodnota pro 16 MHz → při 144 MHz ~1 MHz SCL)
+        stmcpp::reg::write(std::ref(I2C1->TIMINGR), 0x30F21D35);
         
         // Enable DMA and TX complete interrupt
         stmcpp::reg::set(std::ref(DMA1_Channel3->CCR), DMA_CCR_EN);

@@ -4,7 +4,6 @@
 
 #include <string>
 #include <stdint.h>
-#include <deque>
 #include <memory>	
 #include "stmcpp/units.hpp"
 #include "stmcpp/register.hpp"
@@ -22,9 +21,6 @@ namespace Bluetooth{
 
 	static constexpr char STATUS_DELIMITER = '%';
 	static constexpr char MESSAGE_DELIMITER = '\r';
-	static constexpr std::string OK_STRING = "AOK";
-	static constexpr std::string ERROR_STRING = "ERR";
-	static constexpr std::string CMD_STRING = "CMD> ";
 
 
     enum class AdvertisementType : uint8_t {
@@ -226,31 +222,51 @@ namespace Bluetooth{
     };
     
 
+    // Inicializace USART2/DMA a reset modulu. Blokující (max. DEFAULT_TIMEOUT), volá se jen při startu.
     uint8_t init(void);
+
+    // Zařadí konfiguraci modulu (SN, SA, SR, SS, R,1). Neblokující — provádí ji process().
     uint8_t configure();
+
+    // Zařadí pokus o připojení k poslednímu bondovanému zařízení (Z + C). Neblokující.
     uint8_t reconnect();
+
+    // Obsluha v hlavní smyčce: parsování přijatých dat, stavový automat příkazového režimu.
+    void process();
+
+    // Stavové zprávy modulu (%...%), parsované v hlavní smyčce
     bool isCommandAvailable();
     std::unique_ptr<Command> getCommand();
-    uint8_t _send_string(std::string data);
-    void _clear_rx_buffer(void);
-    Mode setMode(Mode mode);
 
-    CommandResponse sendCommand(std::string command);
-    CommandResponse sendCommand(std::string command, std::string & response, bool awaitResponse = true, stmcpp::units::duration timeout = DEFAULT_TIMEOUT);
+    // Zařadí jeden příkaz (bez \r) do příkazové fronty. Vrací false, když je fronta plná.
+    bool queueCommand(const char *command);
+
+    // Odpověď na dotaz "Spárovat?": ano → B (zabezpečení a bond), ne → K,1 (odpojení)
+    void confirmPairing(bool accept);
+
+    // true, pokud automat příkazového režimu nic neprovádí a modul je v datovém režimu
+    bool isIdle();
 
     // Connection state
     bool isConnected();
     void setConnected(bool connected);
     bool isBonded();
     void setBonded(bool bonded);
+    bool isStreamOpen();
+    void setStreamOpen(bool open);
+
+    // Lze teď odeslat datový rámec k Remote? (spojení + transparentní UART + datový režim)
+    bool canSendData();
 
     // Data receive timestamp
     stmcpp::units::duration getDataReceivedTimestamp();
 
-    // Protokolové pakety
+    // Protokolové pakety — fronta přijatých paketů (plní process())
     bool isProtocolPacketAvailable();
-    const protocol::Packet &getProtocolPacket();
-    uint8_t sendProtocolPacket(const protocol::Packet &pkt);
+    bool getProtocolPacket(protocol::Packet &pkt);
+
+    // Zařadí paket do TX fronty (DMA). Vrací false, když nelze odeslat (není spojení / plná fronta).
+    bool sendProtocolPacket(const protocol::Packet &pkt);
 
 }
 

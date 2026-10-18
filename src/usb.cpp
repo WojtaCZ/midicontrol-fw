@@ -5,12 +5,24 @@
 #include "led.hpp"
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
+#include <stm32g431xx.h>
 
 namespace usb {
     void init() {
         stmcpp::gpio::pin<stmcpp::gpio::port::porta, 11> usb_dm (stmcpp::gpio::mode::input, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
 		stmcpp::gpio::pin<stmcpp::gpio::port::porta, 12> usb_dp (stmcpp::gpio::mode::input, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
+
+        // TX FIFO CDC nesmí být přepisovatelná ani bez DTR — přepsáním by se roztrhly protokolové rámce
+        tud_cdc_configure_t cdcConfig = TUD_CDC_CONFIGURE_DEFAULT();
+        cdcConfig.tx_overwritabe_if_not_connected = false;
+        tud_cdc_configure(&cdcConfig);
+
         tusb_init();
+
+        // Deska má pevný 1k5 pull-up na D+. dcd_init() v TinyUSB (stm32_fsdev) navíc zapne interní
+        // pull-up (USB_BCDR.DPPU); dcd_connect() je tam silný symbol, takže ho jen hned vypneme.
+        // Nikde jinde se dcd_connect()/tud_connect() nevolá.
+        USB->BCDR &= ~USB_BCDR_DPPU;
     }
 
 }

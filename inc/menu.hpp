@@ -43,6 +43,12 @@ namespace GUI {
     // Aktualizace info na "Now Playing" obrazovce (song/verse/letter z display::)
     void updateNowPlayingInfo();
 
+    // Popisek sekce ze SIGNAL_ANCHOR ("Sloka 2")
+    void setNowPlayingAnchor(const char* label);
+
+    // Checkbox "Napajeni Varhan" podle skutečného stavu SSR (např. po SET_CURRENT z PC)
+    void syncPowerCheckbox();
+
     // Registrace callbacku pro zastavení přehrávání (volá se při dismiss z OLED)
     using StopCallback = void (*)();
     void setStopCallback(StopCallback cb);

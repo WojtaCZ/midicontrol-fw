@@ -7,6 +7,7 @@
 #include "display.hpp"
 #include "bluetooth.hpp"
 #include "settings.hpp"
+#include "router.hpp"
 
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
@@ -20,8 +21,7 @@ using namespace stmcpp::units;
 // External framebuffer defined in oled.cpp
 extern Oled::OledBuffer frameBuffer;
 
-// PC keepalive — definováno v main.cpp
-extern bool isPcAlive();
+using router::isPcAlive;
 
 // Schedulery — definovány na konci tohoto souboru
 extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
@@ -143,6 +143,7 @@ static ui::ParagraphScreen displayScreen(dispLines, 5, onDisplayDismiss);
 static StopCallback _stopCallback = nullptr;
 static char _nowPlayingSong[64] = "";
 static char _nowPlayingInfo[32] = "";
+static char _nowPlayingAnchor[24] = "";
 static bool _nowPlayingActive = false;
 
 // ── Song list data ──────────────────────────────────────────────────────
@@ -177,9 +178,8 @@ static ui::SplashScreen nowPlayingScreen(
 
 static void onPairResult(bool confirmed, void* userData) {
     (void)userData;
-    if (!confirmed) {
-        Bluetooth::sendCommand("K,1");
-    }
+    // Ano → B (zabezpečení a uložení bondu), Ne → K,1 (odpojení); provede se neblokujícím automatem
+    Bluetooth::confirmPairing(confirmed);
     nav.pop();
 }
 
@@ -240,6 +240,7 @@ static void powerCallback(ui::MenuItem* item, void* userData) {
     } else {
         base::current::enable();
     }
+    if (item) item->setChecked(base::current::isEnabled());
 }
 
 static void firmwareCallback(ui::MenuItem* item, void* userData) {
@@ -277,10 +278,12 @@ static void displayCallback(ui::MenuItem* item, void* userData) {
 
     std::snprintf(dispLine0, sizeof(dispLine0), "Connected: %s",
                   display::isConnected() ? "true" : "false");
-    std::snprintf(dispLine1, sizeof(dispLine1), "Song: %u",
-                  static_cast<unsigned>(display::getSong()));
-    std::snprintf(dispLine2, sizeof(dispLine2), "Verse: %u",
-                  static_cast<unsigned>(display::getVerse()));
+    char song[5];
+    char verse[3];
+    display::formatSong(song);
+    display::formatVerse(verse);
+    std::snprintf(dispLine1, sizeof(dispLine1), "Song: [%s]", song);
+    std::snprintf(dispLine2, sizeof(dispLine2), "Verse: [%s]", verse);
     std::snprintf(dispLine3, sizeof(dispLine3), "Letter: %c",
                   display::getLetter());
     std::snprintf(dispLine4, sizeof(dispLine4), "LED: %s", led);
@@ -446,36 +449,54 @@ void showNowPlaying(const char* songName) {
     nowPlayingScreen.setSubtitle(_nowPlayingSong);
     nowPlayingScreen.setComment("[STOP]");
     _nowPlayingInfo[0] = '\0';
-    _nowPlayingActive = true;
-    nav.push(&nowPlayingScreen);
+    _nowPlayingAnchor[0] = '\0';
+
+    // Opakovaný SIGNAL_PLAYING jen aktualizuje obrazovku, nepřidává ji znovu na zásobník
+    if (!_nowPlayingActive) {
+        _nowPlayingActive = true;
+        nav.push(&nowPlayingScreen);
+    }
     nav.forceRender();
 }
 
 void dismissNowPlaying() {
     if (_nowPlayingActive) {
         _nowPlayingActive = false;
-        nav.pop();
+        // Odebrat jen pokud je navrchu (nad ní může být např. dotaz na párování)
+        if (nav.current() == &nowPlayingScreen) {
+            nav.pop();
+        }
         nav.forceRender();
     }
+}
+
+void setNowPlayingAnchor(const char* label) {
+    std::strncpy(_nowPlayingAnchor, label, sizeof(_nowPlayingAnchor) - 1);
+    _nowPlayingAnchor[sizeof(_nowPlayingAnchor) - 1] = '\0';
+    updateNowPlayingInfo();
 }
 
 void updateNowPlayingInfo() {
     if (!_nowPlayingActive) return;
 
-    uint16_t song = display::getSong();
-    uint8_t verse = display::getVerse();
-    char letter = display::getLetter();
-
-    if (song > 0 || verse > 0) {
-        if (letter != ' ' && letter != '\0') {
-            std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
-                          "P:%u S:%02u %c [STOP]", song, verse, letter);
-        } else {
-            std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo),
-                          "P:%u S:%02u [STOP]", song, verse);
-        }
-        nowPlayingScreen.setComment(_nowPlayingInfo);
+    if (_nowPlayingAnchor[0] != '\0') {
+        // Sekce od PC ("Predehra", "Sloka 2")
+        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo), "%s [STOP]", _nowPlayingAnchor);
+    } else {
+        // Stav displeje po číslicích, tak jak je zobrazen v kostele (" 401", "1 ")
+        char song[5];
+        char verse[3];
+        display::formatSong(song);
+        display::formatVerse(verse);
+        char letter = display::getLetter();
+        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo), "P:%s%c S:%s [STOP]", song, letter, verse);
     }
+    nowPlayingScreen.setComment(_nowPlayingInfo);
+    nav.forceRender();
+}
+
+void syncPowerCheckbox() {
+    mainItems[2].setChecked(base::current::isEnabled());
     nav.forceRender();
 }
 
@@ -505,7 +526,6 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
 
     // Uložení aktuální pozice pro append
     int savedIndex = isFirstPage ? 0 : songListScreen.selectedIndex();
-    int startCount = isFirstPage ? 0 : _songCount;
 
     if (isFirstPage) {
         _songCount = 0;

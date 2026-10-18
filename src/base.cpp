@@ -61,6 +61,7 @@ namespace base{
 
 		// Select HSI16 for USART1, this lower clock speed is used to generate the 1200Bd
 		// Select PLLQ as 48MHz clock source
+		// I2C1SEL = 00 → I2C1 běží z PCLK1 = 144 MHz (APB1 bez děličky), viz TIMINGR v oled.cpp
 		stmcpp::reg::write(std::ref(RCC->CCIPR), 
 			(0b10 << RCC_CCIPR_USART1SEL_Pos) |
 			(0b10 << RCC_CCIPR_CLK48SEL_Pos)
@@ -75,7 +76,9 @@ namespace base{
 			RCC_AHB2ENR_GPIOEEN
 		);
 
+		// SYSCFG: bez hodin se nezapíše EXTICR a přerušení detekce displeje (PC13) zůstane na PA13
 		stmcpp::reg::set(std::ref(RCC->APB2ENR), 
+			RCC_APB2ENR_SYSCFGEN |
 			RCC_APB2ENR_USART1EN | 
 			RCC_APB2ENR_TIM1EN |
 			RCC_APB2ENR_TIM15EN |
@@ -87,6 +90,7 @@ namespace base{
 			RCC_APB1ENR1_USART2EN |
 			RCC_APB1ENR1_USART3EN |
 			RCC_APB1ENR1_USBEN |
+			RCC_APB1ENR1_CRSEN |
 			RCC_APB1ENR1_I2C1EN |
 			RCC_APB1ENR1_TIM2EN |
 			RCC_APB1ENR1_TIM4EN |
