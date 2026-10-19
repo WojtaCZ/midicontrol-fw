@@ -28,7 +28,7 @@ Build outputs in `build/`:
 - `bootloader/base-bootloader.hex` — bootloader (`bootloader/`, its own CMake project; `-DBUILD_BOOTLOADER=OFF` skips it)
 - `midicontrol-fw-full.hex` — bootloader + `-update.hex` merged
 
-Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-generated on each build via `cmake/git.cmake`. There are no unit tests in this project.
+Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-generated on each build via `cmake/git.cmake`. There are no unit tests in this project; hardware tests (USB-CDC, both ST-Links, logic analyzer) live in `tools/basetest/` (README there).
 
 ## Flash layout
 
@@ -47,7 +47,8 @@ Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-gene
 **Key modules** (each in `src/` with corresponding header in `inc/`):
 - `base` — Clock tree (HSE 48 MHz → PLL → 144 MHz SYSCLK, PLLQ 48 MHz for USB), peripheral clocks, SSR (`base::current`), encoder
 - `router` — protocol routing: forwards by destination (Remote→PC over CDC, PC→Remote over BLE), no ACK for forwarded frames, `NAK UNREACHABLE/BUSY` when it cannot forward, ACK + retry queue (3 × 500 ms, same PacketId) for packets the base originates, dedupe, keepalive to the remote every 2 s, CDC TX buffer that handles short writes. Observes forwarded `SIGNAL_*` to keep the OLED in sync
-- `bluetooth` — RN4870 over USART2: ISR only fills ring buffers; parsing and a non-blocking command-mode state machine (`$$$` … `---`) run in `process()`; TX through a DMA-fed ring buffer
+- `bluetooth` — RN4870 over USART2: ISR only fills ring buffers; parsing and a non-blocking command-mode state machine (`$$$` … `---`) run in `process()`; TX through a DMA-fed ring buffer. Module config `SN,MIDIControlBase`, `SA,2`, `SR,0000`, `SS,C0`, `R,1`. **`SA,2` (NoInputNoOutput, Just Works) on both base and remote is intentional**: base `SA,2` + remote `SA,1` ended every bond in `%ERR_SEC%` (bench 2026-10-19, DS50002466 Table 2-2); with `SA,1` on the base too the modules show a passkey and still fail. `C` and `F` answer `Trying`/`Scanning` without a `CMD> ` prompt; the engine takes those words as the answer.
+- **Pairing** (menu Nastaveni → "Sparovat ovladac", `Bluetooth::startPairing()`): `[K,1]`, `Z`, `F`; the main loop (`main.cpp`) connects only to an advertisement named `MIDIControlRemote` (`X`, `C,<type>,<addr>`), sends `B` on `%CONNECT%` without the OLED question and ends on `%SECURED%`/`%BONDED%` (`PairingState::DONE`); `PAIRING_TIMEOUT` 15 s, `%ERR_SEC%`, a disconnect or a module reboot → `FAILED`. Auto-reconnect is off while pairing. After an auto-reconnect (`C` to the last bond) the link is not secured by itself (DS50002466, `B`): the base sends `B` after `%STREAM_OPEN%` (`B` right after `%CONNECT%` made the module drop the link). The remote's RN4870 keeps its own bond table; re-pairing after `U,Z` on the base works with `SA,2`
 - `display` — church indicator over USART1 (1200 Bd, half-duplex, 9-byte frames); one frame per `NOW_PLAYING_INFO`, never aborts a frame in flight; per-digit rendering; SysEx echo of the state to the PC
 - `midi` — DIN MIDI (USART3, 31250 Bd): DIN→USB parser (running status, real-time inside SysEx) in the ISR, USB writes from the main loop
 - `oled`, `menu` — SH1106 framebuffer (I2C1 400 kHz, DMA) and the menu (`GUI::`)
