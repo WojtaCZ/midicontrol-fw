@@ -60,9 +60,11 @@ static void pairingTimeout() {
 	PS state = Bluetooth::pairingState();
 	if (!Bluetooth::isPairing() || Bluetooth::pairingElapsed() < Bluetooth::PAIRING_TIMEOUT) return;
 	// Uklidit podle toho, kde automat uvízl: X = konec skenování, Z = zrušit pokus o připojení, K,1 = odpojit
-	if (state == PS::SCANNING) Bluetooth::stopScan();
-	if (state == PS::CONNECTING) Bluetooth::queueCommand("Z");
-	if (Bluetooth::isConnected() || state == PS::BONDING) Bluetooth::queueCommand("K,1");
+	bool queued = true;
+	if (state == PS::SCANNING) queued &= Bluetooth::stopScan();
+	if (state == PS::CONNECTING) queued &= Bluetooth::queueCommand("Z");
+	if (Bluetooth::isConnected() || state == PS::BONDING) queued &= Bluetooth::queueCommand("K,1");
+	if (!queued) Debug::log(Debug::Level::WARNING, "BLE pairing: cleanup not queued");
 	Debug::log(Debug::Level::WARNING, "BLE pairing timeout");
 	pairingFinished(false, state);
 }
@@ -265,9 +267,14 @@ extern "C" int main(void) {
 					if (pairing == PS::SCANNING) {
 						auto *adv = static_cast<Bluetooth::AdvConnectableCommand *>(command.get());
 						if (adv->getName() == Bluetooth::REMOTE_NAME) {
-							Bluetooth::stopScan();
-							Bluetooth::connectTo(static_cast<uint8_t>(adv->getConnected()), adv->getAddr().c_str());
-							Bluetooth::setPairingState(PS::CONNECTING);
+							if (Bluetooth::stopScan() && Bluetooth::connectTo(static_cast<uint8_t>(adv->getConnected()), adv->getAddr().c_str())) {
+								Bluetooth::setPairingState(PS::CONNECTING);
+							} else {
+								// Plná fronta příkazů: X/C neodešly, nečekat 15 s na timeout
+								Debug::log(Debug::Level::WARNING, "BLE pairing: command queue full");
+								Bluetooth::stopScan();
+								pairingFinished(false, pairing);
+							}
 						}
 					}
 					break;
@@ -281,7 +288,7 @@ extern "C" int main(void) {
 
 				case Bluetooth::Command::Type::ERR_SEC:
 					if (pairing == PS::BONDING) {
-						Bluetooth::queueCommand("K,1");
+						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "BLE: K,1 not queued");
 						pairingFinished(false, pairing);
 					}
 					break;
@@ -295,8 +302,13 @@ extern "C" int main(void) {
 					_reconnectNeeded = false;
 					if (pairing == PS::CONNECTING) {
 						// Párování spustil uživatel z menu → zabezpečit a uložit bond hned (bez dotazu na OLED)
-						Bluetooth::queueCommand("B");
-						Bluetooth::setPairingState(PS::BONDING);
+						if (Bluetooth::queueCommand("B")) {
+							Bluetooth::setPairingState(PS::BONDING);
+						} else {
+							Debug::log(Debug::Level::WARNING, "BLE pairing: B not queued");
+							Bluetooth::queueCommand("K,1");
+							pairingFinished(false, pairing);
+						}
 					} else if (reconnected) {
 						// Spojení obnovené přes "C" se samo nezabezpečí (DS50002466, příkaz B: po ztrátě spojení je
 						// nutné znovu B; na lavici bez B žádný %SECURED% a Remote ukázal dotaz "Sparovat?").
@@ -316,7 +328,7 @@ extern "C" int main(void) {
 					if (_secureOnStreamOpen) {
 						// B s uloženým klíčem → %SECURED% za ~0,2 s, bez dotazu na OLED
 						_secureOnStreamOpen = false;
-						Bluetooth::queueCommand("B");
+						if (!Bluetooth::queueCommand("B")) Debug::log(Debug::Level::WARNING, "BLE: B not queued, link unsecured");
 					}
 					break;
 

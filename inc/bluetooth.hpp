@@ -259,9 +259,9 @@ namespace Bluetooth{
     // První spárování s ovladačem (z menu): [K,1], Z, F a stav SCANNING. Zbytek automatu (připojení, B, timeout)
     // řídí hlavní smyčka podle stavových zpráv. Vrací 1, když párování už běží nebo je fronta příkazů plná.
     uint8_t startPairing();
-    // Zastaví skenování (X)
-    void stopScan();
-    // Připojení k adrese z reklamy: C,<typ adresy 0/1>,<12 hex znaků>
+    // Zastaví skenování (X). false = fronta příkazů plná
+    bool stopScan();
+    // Připojení k adrese z reklamy: C,<typ adresy 0/1>,<12 hex znaků>. false = fronta příkazů plná
     bool connectTo(uint8_t addrType, const char *addr);
 
     PairingState pairingState();

@@ -168,6 +168,18 @@ namespace Bluetooth{
 		_engineState = EngineState::IDLE;
 	}
 
+	// Konec relace příkazového režimu: příkazy od indexu `keepFrom` (zařazené až během EXIT_CMD / WAIT_REBOOT, kdy
+	// je už automat neposílá) se posunou na začátek a provede je další relace "$$$" — nesmí se ztratit.
+	static void _finishJobKeepQueued(uint8_t keepFrom) {
+		uint8_t remaining = (keepFrom < _jobCount) ? static_cast<uint8_t>(_jobCount - keepFrom) : 0;
+		for (uint8_t i = 0; i < remaining; ++i) {
+			memcpy(_jobCommands[i], _jobCommands[keepFrom + i], MAX_COMMAND_LEN);
+		}
+		_jobCount = remaining;
+		_jobIndex = 0;
+		_engineState = EngineState::IDLE;
+	}
+
 	static void _runEngine() {
 		duration now = stmcpp::systick::getDuration();
 
@@ -236,14 +248,16 @@ namespace Bluetooth{
 					_mode = Mode::DATA;
 					_connected = false;
 					_streamOpen = false;
-					_finishJob();
+					// Zbytek této úlohy za R,1 se zahazuje; co se zařadilo až po R,1, zůstává
+					_finishJobKeepQueued(static_cast<uint8_t>(_jobIndex + 1));
 				}
 				break;
 
 			case EngineState::EXIT_CMD:
 				if (_sawEnd || (now - _engineTimestamp) > EXIT_TIMEOUT) {
 					_mode = Mode::DATA;
-					_finishJob();
+					// Příkazy zařazené během čekání na END (např. X + C po reklamě, B po %CONNECT%) → další relace
+					_finishJobKeepQueued(_jobIndex);
 				}
 				break;
 		}
@@ -478,7 +492,7 @@ namespace Bluetooth{
 		return 0;
 	}
 
-	void stopScan() { queueCommand("X"); }
+	bool stopScan() { return queueCommand("X"); }
 
 	bool connectTo(uint8_t addrType, const char *addr) {
 		char cmd[MAX_COMMAND_LEN];
