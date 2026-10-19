@@ -19,10 +19,8 @@ namespace usb {
 
         tusb_init();
 
-        // Deska má pevný 1k5 pull-up na D+. dcd_init() v TinyUSB (stm32_fsdev) navíc zapne interní
-        // pull-up (USB_BCDR.DPPU); dcd_connect() je tam silný symbol, takže ho jen hned vypneme.
-        // Nikde jinde se dcd_connect()/tud_connect() nevolá.
-        USB->BCDR &= ~USB_BCDR_DPPU;
+        // Interní pull-up D+ (USB_BCDR.DPPU, zapnutý v dcd_init()) zůstává zapnutý: pevný 1k5 (R33)
+        // na použitých deskách nefunguje, bez interního pull-upu se zařízení u hostitele neohlásí.
     }
 
 }

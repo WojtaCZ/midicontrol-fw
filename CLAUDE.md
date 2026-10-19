@@ -82,6 +82,6 @@ Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-gene
 - PB10/PB11 — USART3 DIN MIDI (31250 Bd)
 - PA15/PB7 — I2C1 SCL/SDA, OLED at 0x3C
 - PB14 (TIM15), PB5 (TIM17) — WS2812B LED data
-- PA11/PA12 — USB; the board has a fixed 1k5 D+ pull-up, so the internal DPPU is switched off after `tusb_init()`
+- PA11/PA12 — USB; the internal D+ pull-up (DPPU, enabled by `tusb_init()`) stays on: the fixed 1k5 (R33) is not effective on the boards in use (bench 2026-10-19, no enumeration without DPPU)
 - USB IDs: app `ABCD:1234`, bootloader `ABCD:1235` (placeholder VID)
 - ATtiny1607 (U14) runs its own fixed firmware that sets the MIDI port direction and MIDI OUT supply; it needs no communication, so PA5/PA6/PA7 to it are unused
