@@ -95,6 +95,10 @@ class Target:
         out = self.tcl(f"read_memory 0x{addr:08x} 8 {n}")
         return bytes(int(x, 0) for x in out.split())
 
+    def write(self, addr: int, data: bytes):
+        """Zapis do pameti bez zastaveni jadra (AHB-AP), napr. pro volatile priznak."""
+        self.tcl(f"write_memory 0x{addr:08x} 8 {{{' '.join(f'0x{b:02x}' for b in data)}}}")
+
     def core_state(self) -> dict:
         dhcsr = int(self.tcl("read_memory 0xE000EDF0 32 1").split()[0], 0)
         return {"halted": bool(dhcsr & (1 << 17)), "sleeping": bool(dhcsr & (1 << 18)), "lockup": bool(dhcsr & (1 << 19)), "dhcsr": dhcsr}

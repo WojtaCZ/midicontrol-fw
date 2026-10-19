@@ -53,7 +53,7 @@ cd tools/basetest
   packet matching `pred`; the others stay for later calls. With `keepalive=True` a background thread sends
   KEEPALIVE to the base every second (the base counts the PC dead after 6 s) and swallows the matching
   KEEPALIVE_ACKs (`keepalive_acks`); KEEPALIVEs from the base are answered. `.stray` must stay empty.
-- `dbg.Target("base"|"remote")` - `sym`, `read`, `u`, `core_state`, `gpio`, `key` (remote), `debug_log` (base).
+- `dbg.Target("base"|"remote")` - `sym`, `read`, `write`, `u`, `core_state`, `gpio`, `key` (remote), `debug_log` (base).
 - `proto.py` - copy of the remote harness codec.
 
 ## Things to know

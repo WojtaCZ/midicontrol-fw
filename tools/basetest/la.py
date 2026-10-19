@@ -74,6 +74,29 @@ def uart(sr: Path, rx: str, baud: int) -> bytes:
 	return bytes(data)
 
 
+def uart_timed(sr: Path, rx: str, baud: int, samplerate: float) -> tuple[list[tuple[float, int]], list[tuple[float, str]]]:
+	"""Jako uart(), ale s casem: vraci ([(cas_zacatku_bajtu_s, bajt)], [(cas_s, text varovani)]).
+	Varovani (rx-warnings: chyba ramce, chyba parity, ...) jsou chyby dekodovani UARTu; prazdny seznam = cisty zaznam.
+	`samplerate` musi odpovidat zachytu (cislo ve Hz, napr. 100000)."""
+	r = subprocess.run(
+		["sigrok-cli", "-i", str(sr), "-P", f"uart:rx={rx}:baudrate={baud}", "-A", "uart=rx-data:rx-warnings", "--protocol-decoder-samplenum"],
+		capture_output=True, text=True)
+	if r.returncode != 0:
+		raise CaptureError(f"dekodovani {sr} selhalo (kod {r.returncode}): {r.stderr.strip()}")
+	data, warnings = [], []
+	for line in r.stdout.splitlines():
+		head, sep, text = line.partition(" uart-1: ")
+		if not sep:
+			continue
+		t = int(head.split("-")[0]) / samplerate
+		text = text.strip()
+		if len(text) == 2 and all(c in "0123456789ABCDEFabcdef" for c in text):
+			data.append((t, int(text, 16)))
+		else:
+			warnings.append((t, text))
+	return data, warnings
+
+
 if __name__ == "__main__":
 	import sys
 
