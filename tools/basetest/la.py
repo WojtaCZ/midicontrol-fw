@@ -5,7 +5,8 @@ import tempfile
 from pathlib import Path
 
 # sigrok D0..D7 = CH1..CH8; smery overeny na lavici 2026-10-19:
-# displej D1 = MCU -> displej, D0 = displej -> MCU; BLE D3 = MCU -> RN4870, D2 = RN4870 -> MCU
+# displej D1 = MCU -> displej, D0 = displej -> MCU; BLE D3 = MCU -> RN4870, D2 = RN4870 -> MCU;
+# remote BLE (Task 5, %CONNECT%/%SECURED% modulu na D6, "$$$"/"A" MCU na D7): D7 = MCU -> RN4870, D6 = RN4870 -> MCU
 CH = {
 	"disp_tx": "D1",
 	"disp_rx": "D0",
@@ -13,8 +14,8 @@ CH = {
 	"base_ble_rx": "D2",
 	"rem_scl": "D4",
 	"rem_sda": "D5",
-	"rem_ble_tx": "D6",
-	"rem_ble_rx": "D7",
+	"rem_ble_tx": "D7",
+	"rem_ble_rx": "D6",
 }
 
 _DIR = Path(tempfile.mkdtemp(prefix="basetest-la-"))

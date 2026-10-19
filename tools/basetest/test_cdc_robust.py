@@ -69,14 +69,27 @@ def test_300_byte_garbage(quiet):
     assert len(ka_acks(quiet)) == 1
 
 
-def test_max_escaped_payload(quiet, base):
+def test_max_escaped_payload(quiet, base, request):
+    """Maximalni payload (127 B, sam escapovany) do Remote: base ho cely naparsuje a odpovi NAK UNREACHABLE.
+    Je-li remote pripojen, drzi se jeho RN4870 v resetu (PB8 pres sondu remote), aby odpoved byla NAK."""
+    from conftest import wait_until
+    remote = None
     if base.u("Bluetooth::_connected", 1):
-        pytest.skip("remote BLE link is up; needs remote RN4870 held in reset (rerun in Task 5)")
-    payload = bytes([0x01, 0x04, 0x1B, 0x24, 0x25] * 26)[:127]
-    pid = quiet.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.SIGNAL_ANCHOR, payload))
-    nak = quiet.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.NAK)
-    assert nak is not None and nak.payload == bytes([pid, NAK.UNREACHABLE])
-    assert base.core_state()["lockup"] is False
+        remote = request.getfixturevalue("remote_probe")  # preskoci, kdyz sondu drzi jiny proces
+        remote.hold_ble_reset(True)
+    try:
+        if remote:
+            wait_until(lambda: not base.u("Bluetooth::_connected", 1), 10, what="base sees the remote gone")
+            quiet.drain()
+        payload = bytes([0x01, 0x04, 0x1B, 0x24, 0x25] * 26)[:127]
+        pid = quiet.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.SIGNAL_ANCHOR, payload))
+        nak = quiet.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.NAK)
+        assert nak is not None and nak.payload == bytes([pid, NAK.UNREACHABLE])
+        assert base.core_state()["lockup"] is False
+    finally:
+        if remote:
+            remote.hold_ble_reset(False)
+            wait_until(lambda: base.u("Bluetooth::_streamOpen", 1), 15, what="base reconnected to the remote")
 
 
 def test_random_20x2k(quiet, base):

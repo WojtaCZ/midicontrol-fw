@@ -101,14 +101,16 @@ def test_wrong_dest_ignored(quiet):
 
 
 def test_debug_log_not_truncated(base):
-    """Log v RAM drzi uplne zpravy: znamy radek (neuspesny reconnect prikaz "C" pri nedostupnem remote)
-    musi byt v logu doslovne a cely. Jiny deterministicky dlouhy radek firmware neloguje."""
-    if base.u("Bluetooth::_connected", 1):
-        pytest.skip("remote connected: no failed reconnect command is logged")
+    """Log v RAM drzi uplne zpravy: znamy radek musi byt v logu doslovne a cely. Deterministicke radky:
+    "BLE cmd failed: C" (reconnect "C" bez bondu -> Err) a "BLE pairing timeout" (test_pairing.py). Od b52c8f7
+    "C" s bondem odpovida "Trying" a neloguje se, takze se spojenym remote radek nemusi vzniknout."""
+    known = ("BLE cmd failed: C", "BLE pairing timeout")
     lines = base.debug_log()
     msgs = [m.group(1) for m in (re.match(r"^\[(?:ERROR|WARNING|INFO|DEBUG)\]: (.*)$", l) for l in lines) if m]
-    assert msgs, lines
-    assert "BLE cmd failed: C" in msgs, lines
+    if not any(k in msgs for k in known):
+        if base.u("Bluetooth::_connected", 1):
+            pytest.skip("remote connected and no known line in the log yet (run after test_pairing.py)")
+        assert False, lines
     assert all(len(m) > 1 for m in msgs), lines
 
 

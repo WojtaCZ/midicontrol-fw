@@ -53,9 +53,42 @@ cd tools/basetest
   packet matching `pred`; the others stay for later calls. With `keepalive=True` a background thread sends
   KEEPALIVE to the base every second (the base counts the PC dead after 6 s) and swallows the matching
   KEEPALIVE_ACKs (`keepalive_acks`); KEEPALIVEs from the base are answered. `.stray` must stay empty.
-- `dbg.Target("base"|"remote")` - `sym`, `read`, `write`, `u`, `core_state`, `gpio`, `key` (remote), `debug_log` (base).
+- `dbg.Target("base"|"remote")` - `sym`, `read`, `write`, `u`, `read_u8`, `read_bool`, `cstr`, `core_state`, `gpio`,
+  `reset` (reset run), `call("ns::func(args)")` (gdb; the function is found by `nm` and called through a cast
+  pointer, returns int; it first stops at a main-loop safe point: base `Bluetooth::process`, remote
+  `base::Keyboard::process`), `debug_log` (base); remote: `key`, `type_code`, `goto_player`, `player_state`,
+  `player_message`, `screen_name`, `hold_ble_reset(on)` (RN4870 RST = PB8 via GPIOB->BSRR, core running).
+  `dbg.probe_holder(name)` names a foreign openocd holding a probe; the `remote_probe` fixture skips then.
+- `conftest.wait_until(pred, timeout)`, `conftest.remote_alive(base)` (router::isRemoteAlive computed from
+  `router::_lastRemoteRx`/`_remoteEverSeen` and the systick: LTO drops the unused function itself).
+- `usblink.Link.detach()` / `attach()` around a base reset (the CDC port disappears and comes back).
 - `la.uart_timed` - like `la.uart` but returns `[(time, byte)]` plus decoder warnings (frame errors).
 - `proto.py` - copy of the remote harness codec.
+
+## Remote symbols (DWARF)
+
+The remote's Release ELF has no DWARF; `key()` and the screen fields need it. Build a `-g` copy with identical code in a
+separate dir (only append `-g` to the Release flags; the build regenerates the remote's `inc/git.hpp`, restore it) and
+point `BASETEST_REMOTE_ELF` at it:
+
+```bash
+S=/path/to/scratch
+printf '%s\n' 'include(/workspace/MIDICONTROL/midicontroller-fw/cmake/toolchain-arm-none-eabi.cmake)' \
+  'set(CMAKE_C_FLAGS_RELEASE "-O2 -g" CACHE INTERNAL "")' 'set(CMAKE_CXX_FLAGS_RELEASE "-O2 -g" CACHE INTERNAL "")' \
+  'set(CMAKE_ASM_FLAGS_RELEASE "-g" CACHE INTERNAL "")' > $S/tc-g.cmake
+(cd ../../../midicontroller-fw && cmake -S . -B $S/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$S/tc-g.cmake \
+  && cmake --build $S/build; git checkout inc/git.hpp)
+# check that .text equals the flashed build: arm-none-eabi-objcopy -O binary -j .text <elf> <out>; cmp
+export BASETEST_REMOTE_ELF=$S/build/midicontroller-fw.elf
+```
+
+## Pairing and relay (`test_pairing.py`, `test_relay.py`)
+
+- Needs the remote powered and advertising, both RN4870 with `SA,2`. `test_pairing.py` clears the base's bonds
+  (`U,Z`), pairs, resets the base, holds the remote's RN4870 in reset for the timeout test and re-pairs at the end.
+  `PAIRING_LOG` (default `/tmp/basetest-pairing.log`) collects the status lines of both modules.
+- `test_relay.py` expects a paired, connected remote and its probe free (`remote_probe`).
+- LA: remote BLE D7 = MCU -> RN4870, D6 = RN4870 -> MCU (the module's `%CONNECT%` etc. are on D6).
 
 ## Things to know
 

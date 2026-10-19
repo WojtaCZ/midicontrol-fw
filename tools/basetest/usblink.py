@@ -96,6 +96,7 @@ class Link:
         self._reader = threading.Thread(target=self._guard, args=(self._read_loop,), daemon=True)
         self._reader.start()
         self._ka = None
+        self._ka_period = keepalive_period
         if keepalive:
             self._ka = threading.Thread(target=self._guard, args=(self._ka_loop, keepalive_period), daemon=True)
             self._ka.start()
@@ -229,6 +230,44 @@ class Link:
         """Ceka `seconds`; vraci vse, co za tu dobu (a driv) dorazilo - prazdny seznam = ticho."""
         time.sleep(seconds)
         return self.drain()
+
+    def detach(self):
+        """Zastavi vlakna a zavre port (pred resetem base, kdy CDC zmizi). Pak attach()."""
+        self._stop.set()
+        self._reader.join(2)
+        if self._ka:
+            self._ka.join(2)
+        try:
+            self.ser.close()
+        except Exception:
+            pass
+
+    def attach(self, timeout=15.0, settle=2.0):
+        """Po detach(): pocka na znovu vyctene CDC, otevre ho a znovu spusti vlakna (keepalive, je-li zapnuty).
+        `settle`: nejdriv pockat, nez stare CDC zmizi (reset -> bootloader -> aplikace), jinak se otevre jeste stary
+        /dev/ttyACMn a cteni pak skonci SerialException."""
+        time.sleep(settle)
+        end = time.monotonic() + timeout
+        last = None
+        while time.monotonic() < end:
+            try:
+                self.port = find_port()
+                self.ser = serial.Serial(self.port, 115200, timeout=0.05, write_timeout=2)
+                break
+            except Exception as e:  # noqa: BLE001 - port jeste neni
+                last = e
+                time.sleep(0.3)
+        else:
+            raise RuntimeError(f"CDC did not come back within {timeout} s: {last!r}")
+        self.parser = proto.FrameParser()
+        self._txparser = proto.FrameParser()
+        self._ka_track = KeepaliveTracker()
+        self._stop.clear()
+        self._reader = threading.Thread(target=self._guard, args=(self._read_loop,), daemon=True)
+        self._reader.start()
+        if self._ka:
+            self._ka = threading.Thread(target=self._guard, args=(self._ka_loop, self._ka_period), daemon=True)
+            self._ka.start()
 
     def close(self):
         self._stop.set()
