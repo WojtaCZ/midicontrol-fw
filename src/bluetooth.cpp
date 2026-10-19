@@ -60,6 +60,8 @@ namespace Bluetooth{
 	static bool _sawAok = false;
 	static bool _sawErr = false;
 	static bool _sawEnd = false;    // odpověď na "---"
+	// "Trying" (C) a "Scanning" (F): modul za ně prompt "CMD> " neposílá, jsou to celé odpovědi
+	static bool _sawProgress = false;
 
 	// ── Neblokující automat příkazového režimu ───────────────────────────
 	static constexpr uint8_t MAX_JOB_COMMANDS = 8;
@@ -131,6 +133,8 @@ namespace Bluetooth{
 			_sawErr = true;
 		} else if (endsWith("END", 3)) {
 			_sawEnd = true;
+		} else if (endsWith("rying", 5) || endsWith("nning", 5)) {
+			_sawProgress = true;
 		}
 	}
 
@@ -139,6 +143,7 @@ namespace Bluetooth{
 		_sawAok = false;
 		_sawErr = false;
 		_sawEnd = false;
+		_sawProgress = false;
 	}
 
 	static bool _queueJob(const char *const *commands, uint8_t count) {
@@ -199,8 +204,8 @@ namespace Bluetooth{
 			}
 
 			case EngineState::WAIT_RESP:
-				if (_sawPrompt || (now - _engineTimestamp) > CMD_TIMEOUT) {
-					if (_sawErr || !_sawPrompt) {
+				if (_sawPrompt || _sawProgress || (now - _engineTimestamp) > CMD_TIMEOUT) {
+					if (_sawErr || !(_sawPrompt || _sawProgress)) {
 						// Samotný příkaz ("C", "Z") by v logu nic neříkal — doplnit kontext
 						char msg[MAX_COMMAND_LEN + 16];
 						snprintf(msg, sizeof(msg), "BLE cmd failed: %s", _jobCommands[_jobIndex]);
