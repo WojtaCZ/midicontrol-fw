@@ -2,6 +2,7 @@
 Vzor: ../midicontroller-fw/tools/bletest/dbg.py. Jedna sonda = jeden openocd; dve sondy bezi soucasne."""
 
 import atexit
+import contextlib
 import functools
 import os
 import re
@@ -125,7 +126,8 @@ class Target:
         return {"halted": bool(dhcsr & (1 << 17)), "sleeping": bool(dhcsr & (1 << 18)), "lockup": bool(dhcsr & (1 << 19)), "dhcsr": dhcsr}
 
     def resume(self):
-        self.tcl("resume")
+        # samotne "resume" openocd ignoruje, kdyz o zastaveni nevi (napr. novy openocd) -> nejdriv halt
+        self.tcl("capture {halt}; capture {resume}")
 
     def pc_if_halted(self):
         return self.tcl("reg pc") if self.core_state()["halted"] else None
@@ -234,6 +236,50 @@ class Target:
         if r.returncode != 0 or errors or not val:
             raise RuntimeError(f"gdb call {expr} failed:\n" + out)
         return int(val.group(1))
+
+    def function_address(self, name: str) -> int:
+        full = self.function_symbol(name)
+        nm = subprocess.run([NM, "-C", self.elf], capture_output=True, text=True).stdout
+        for line in nm.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) == 3 and parts[2] == full:
+                return int(parts[0], 16) & ~1
+        raise KeyError(full)
+
+    @contextlib.contextmanager
+    def safe_halt(self, timeout_ms=3000):
+        """Zastavi jadro v bezpecnem miste hlavni smycky (HW breakpoint na safe_bp) pro konzistentni zapisy do RAM
+        (fronty, stav automatu); na konci vzdy pokracuje."""
+        addr = self.function_address(self.c["safe_bp"])
+        self.tcl(f"capture {{bp 0x{addr:08x} 2 hw}}")
+        try:
+            self.tcl(f"capture {{wait_halt {timeout_ms}}}")
+        finally:
+            self.tcl(f"capture {{rbp 0x{addr:08x}}}")
+        try:
+            if not self.core_state()["halted"]:
+                raise RuntimeError(f"{self.name}: safe point {self.c['safe_bp']} not reached")
+            yield
+        finally:
+            self.tcl("capture {resume}")
+            time.sleep(0.01)
+            if self.core_state()["halted"]:
+                self.resume()
+
+    def inject_status(self, *lines: str):
+        """Base: vlozi stavove zpravy RN4870 (text bez '%') do Bluetooth::_statusQueue, jako by prisly z modulu.
+        Velikost slotu z nm -S (8 slotu + head + tail)."""
+        nm = subprocess.run([NM, "-C", "-S", self.elf], capture_output=True, text=True).stdout
+        line = next(l for l in nm.splitlines() if l.endswith(" Bluetooth::_statusQueue"))
+        addr, size = int(line.split()[0], 16), int(line.split()[1], 16)
+        slot = (size - 8) // 8
+        with self.safe_halt():
+            head = int.from_bytes(self.read(addr + 8 * slot, 4), "little")
+            for text in lines:
+                data = text.encode()[: slot - 1] + b"\0"
+                self.write(addr + head * slot, data)
+                head = (head + 1) & 7
+            self.write(addr + 8 * slot, head.to_bytes(4, "little"))
 
     def hold_ble_reset(self, on: bool):
         """Remote: RN4870 RST (PB8) do nuly (on=True, modul v resetu) / zpet do jednicky. Zapis do GPIOB->BSRR

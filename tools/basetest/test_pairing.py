@@ -14,6 +14,7 @@ import la
 from conftest import remote_alive, wait_until
 
 REMOTE_ADDR = "D88039FE5996"
+SETTINGS_ADDR = 0x0801F800
 BAUD = 115200
 LOG = os.environ.get("PAIRING_LOG", os.path.join(tempfile.gettempdir(), "basetest-pairing.log"))
 
@@ -71,6 +72,8 @@ def test_pairing_finds_remote_and_bonds(base, remote):
     assert "SECURED" in base_rx or "BONDED" in base_rx, base_rx
     assert "ERR_SEC" not in base_rx, base_rx
     assert f"C,0,{REMOTE_ADDR}".encode() in base_tx
+    # adresa ovladace ulozena trvale (settings v2 na 0x0801F800: magic, verze, LED, MIDI, pad, remoteAddr[13])
+    assert base.read(SETTINGS_ADDR + 8, 13).split(b"\0")[0] == REMOTE_ADDR.encode()
     # remote: totez z druhe strany
     assert any(s.startswith("CONNECT,") for s in rem_rx), rem_rx
     assert "STREAM_OPEN" in rem_rx, rem_rx
@@ -85,6 +88,8 @@ def test_reconnect_after_base_reset_uses_bond(base, remote, link):
     link.attach()
     time.sleep(0.5)
     wait_until(lambda: base.read_bool("Bluetooth::_streamOpen"), 15, what="stream open after reset")  # "C" k bondovanemu remote
+    # adresa ovladace prezila reset (nastaveni ve flash) -> B po %STREAM_OPEN% -> %SECURED%
+    wait_until(lambda: base.read_bool("Bluetooth::_bonded"), 3, what="reconnected link secured (%SECURED%)")
     wait_until(lambda: remote_alive(base), 6, interval=0.5, what="router::isRemoteAlive()")
 
 
