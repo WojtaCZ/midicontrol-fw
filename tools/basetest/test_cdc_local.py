@@ -101,17 +101,19 @@ def test_wrong_dest_ignored(quiet):
 
 
 def test_debug_log_not_truncated(base):
-    """Log v RAM drzi uplne zpravy: znamy radek musi byt v logu doslovne a cely. Deterministicke radky:
-    "BLE cmd failed: C" (reconnect "C" bez bondu -> Err) a "BLE pairing timeout" (test_pairing.py). Od b52c8f7
-    "C" s bondem odpovida "Trying" a neloguje se, takze se spojenym remote radek nemusi vzniknout."""
-    known = ("BLE cmd failed: C", "BLE pairing timeout")
+    """Log v no-init RAM drzi uplne zpravy: znamy radek musi byt v logu doslovne a cely. Deterministicke radky:
+    "ble: cmd failed: C" (reconnect "C" bez bondu -> Err) a "ble: pairing timeout" (test_pairing.py). Od b52c8f7
+    "C" s bondem odpovida "Trying" a neloguje se, takze se spojenym remote radek nemusi vzniknout. Kazdy radek ma
+    format "[ssssss.mmm] L tag: text"; ring ma jen 1536 B, takze banner uz po jinych testech v RAM byt nemusi."""
     lines = base.debug_log()
-    msgs = [m.group(1) for m in (re.match(r"^\[(?:ERROR|WARNING|INFO|DEBUG)\]: (.*)$", l) for l in lines) if m]
-    if not any(k in msgs for k in known):
+    assert lines
+    bad = [l for l in lines if not re.match(r"^\[ *\d+\.\d{3}\] [EWID] [a-z]{1,6}: .{0,120}~?$", l)]
+    assert not bad, bad
+    msgs = [m.group(1) for m in (re.match(r"^\[ *\d+\.\d{3}\] W ble: (.*)$", l) for l in lines) if m]
+    if not any(m == "cmd failed: C" or m.startswith("pairing timeout") for m in msgs):
         if base.u("Bluetooth::_connected", 1):
             pytest.skip("remote connected and no known line in the log yet (run after test_pairing.py)")
         assert False, lines
-    assert all(len(m) > 1 for m in msgs), lines
 
 
 def test_stray_is_empty(link):

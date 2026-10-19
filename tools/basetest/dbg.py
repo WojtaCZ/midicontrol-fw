@@ -151,9 +151,32 @@ class Target:
                     self._sym[name] = int(parts[0], 16)
                     break
             else:
+                addr = self._lto_priv_sym(name)
+                if addr is not None:
+                    self._sym[name] = addr
+                    return addr
                 q = f"'{name}'" if "(anonymous namespace)" in name and not name.startswith("'") else name
                 self._sym[name] = int(re.search(r"0x[0-9a-f]+", self._static(f"&{q}")).group(0), 16)
         return self._sym[name]
+
+    def _lto_priv_sym(self, name: str):
+        """Staticke promenne, ktere LTO prejmenuje na <mangled>.lto_priv.N (nm -C je pak nedemangluje, zalezi na
+        rozdeleni LTO partition - zmena jinde ve firmware ji muze vyvolat). Hleda se demanglovany zaklad jmena."""
+        nm = subprocess.run([NM, self.elf], capture_output=True, text=True).stdout
+        cands = []
+        for line in nm.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) == 3:
+                m = re.fullmatch(r"(_Z\S+?)\.lto_priv\.\d+", parts[2])
+                if m:
+                    cands.append((int(parts[0], 16), m.group(1)))
+        if not cands:
+            return None
+        dem = subprocess.run([NM.replace("nm", "c++filt")], input="\n".join(c[1] for c in cands), capture_output=True, text=True).stdout.splitlines()
+        for (addr, _), d in zip(cands, dem):
+            if d == name:
+                return addr
+        return None
 
     def u(self, name: str, size: int = 4) -> int:
         return int.from_bytes(self.read(self.sym(name), size), "little")
@@ -356,10 +379,14 @@ class Target:
         return r.stdout
 
     def debug_log(self) -> list:
-        """Base: obsah kruhoveho bufferu Debug::_logRing jako radky, od nejstarsiho (chrono podle _logHead)."""
-        ring = self.read(self.sym("Debug::_logRing"), 512)
-        head = self.u("Debug::_logHead")
-        data = ring[head:] + ring[:head]
-        # buffer jeste nepretekl: stary konec jsou nuly
-        text = data.replace(b"\0", b"").decode(errors="replace")
-        return [l for l in text.split("\n") if l]
+        """Base: obsah logu v no-init RAM (Debug::_log = hlavicka {magic, head, tail, dropped, crc} + 1536 B ring) jako
+        radky od nejstarsiho. head/tail jsou absolutni pozice (index = pozice % 1536)."""
+        import struct
+        size = 1536
+        raw = self.read(self.sym("Debug::_log"), 20 + size)
+        magic, head, tail, _dropped, _crc = struct.unpack("<5I", raw[:20])
+        if magic != 0x4C4F4721 or (head - tail) & 0xFFFFFFFF > size:
+            return []
+        ring = raw[20:]
+        data = bytes(ring[(tail + i) % size] for i in range((head - tail) & 0xFFFFFFFF))
+        return [l.rstrip("\r") for l in data.decode(errors="replace").split("\n") if l.strip()]

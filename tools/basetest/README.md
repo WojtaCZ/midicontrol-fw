@@ -1,6 +1,7 @@
 # basetest - hardware tests of the base (STM32G431)
 
-The PC talks to the base over USB-CDC (`abcd:1234`, frames only). Two ST-Links read firmware state and inject
+The PC talks to the base over USB-CDC (`abcd:1234`, interface 00, frames only); a second CDC ("MIDIControl log",
+interface 04) carries the human-readable log. Two ST-Links read firmware state and inject
 actions; the fx2lafw logic analyzer (`la.py`) checks the UARTs. Everything here is opt-in: hardware tests carry the
 `hw` marker (`pytest.ini` runs `-m "not hw"` by default).
 
@@ -20,7 +21,7 @@ uv venv .venv && uv pip install --python .venv/bin/python pyserial pytest
 openocd -c "adapter serial 39FF71064B43353943122243" -f openocd.cfg -c "program build/midicontrol-fw-update.hex verify reset exit"
 ```
 
-Symbols of globals (`Debug::_logRing`, ...) are resolved from the ELF symbol table (`nm -C`), so the normal Release
+Symbols of globals (`Debug::_log`, ...) are resolved from the ELF symbol table (`nm -C`), so the normal Release
 build is enough. Struct fields (`ui::MenuItem` layout, remote `GUI::playerScreen.state_`) need DWARF. Do NOT pass
 `-DCMAKE_CXX_FLAGS=-g`: the toolchain file forces `CMAKE_*_FLAGS` into the cache, so that replaces its flags and
 changes the generated code. Build a `-g` copy in a SEPARATE dir with a wrapper toolchain that only appends `-g` to the
@@ -48,8 +49,8 @@ cd tools/basetest
 
 ## Modules
 
-- `usblink.Link` - finds the port (by-id, else sysfs VID:PID; creates a missing `/dev/ttyACMn` with `sudo mknod`
-  in containers without udev). Reader thread -> `FrameParser` -> queue. `recv(timeout, pred)` returns the first
+- `usblink.Link` - finds the **protocol** port: sysfs `bInterfaceNumber == 00` of `abcd:1234` (by-id `-if00`), never
+  the log CDC; creates a missing (or wrong major:minor) `/dev/ttyACMn` with `sudo mknod` in containers without udev. Reader thread -> `FrameParser` -> queue. `recv(timeout, pred)` returns the first
   packet matching `pred`; the others stay for later calls. With `keepalive=True` a background thread sends
   KEEPALIVE to the base every second (the base counts the PC dead after 6 s) and swallows the matching
   KEEPALIVE_ACKs (`keepalive_acks`); KEEPALIVEs from the base are answered. `.stray` must stay empty.
@@ -62,6 +63,11 @@ cd tools/basetest
 - `conftest.wait_until(pred, timeout)`, `conftest.remote_alive(base)` (router::isRemoteAlive computed from
   `router::_lastRemoteRx`/`_remoteEverSeen` and the systick: LTO drops the unused function itself).
 - `usblink.Link.detach()` / `attach()` around a base reset (the CDC port disappears and comes back).
+- `loglink.LogLink` - opens the log CDC (sysfs `interface` string "MIDIControl log"). Reader thread -> complete lines in
+  `.history`; `lines(timeout, pred)`, `wait_for(regex, timeout)` read from a cursor (`skip()` jumps to the end),
+  `command("level d")` returns the reply lines (lines without the log prefix). `loglink.is_log_line` = the exact
+  format `[ssssss.mmm] L tag: text`; `is_marker` = `--- log before reset ---`, `--- end of log before reset ---`,
+  `[dropped N]`.
 - `la.uart_timed` - like `la.uart` but returns `[(time, byte)]` plus decoder warnings (frame errors).
 - `proto.py` - copy of the remote harness codec.
 
@@ -92,8 +98,16 @@ export BASETEST_REMOTE_ELF=$S/build/midicontroller-fw.elf
 
 ## Things to know
 
-- `debug_log()` reads `Debug::_logRing` (512 B ring, `_logHead`); the ring is `[[gnu::used]] volatile` so LTO keeps it.
-  After a wrap the first line may be cut.
+- Log (`Debug`, `test_log.py`): ring of 1536 B in no-init RAM at 0x20007800 (`Debug::_log`, header `{magic 0x4C4F4721,
+  head, tail, dropped, crc32}`, head/tail absolute positions). It survives resets (CCM SRAM, option bit
+  CCMSRAM_RST = 1 on the bench base), not power loss. `debug_log()` reads it through the probe (whole lines, oldest
+  first). On boot the kept history is sent first between `--- log before reset ---` / `--- end of log before reset ---`.
+  Lines are written to the log CDC only while the port is open (DTR) and 200 ms after it opened (the PC flushes its
+  input on open); lines overwritten before they were sent are reported as `[dropped N]`. Commands: `level e|w|i|d`
+  (default i after every reset), `dump`, `help`, anything else `?`.
+- Both openocd's `reset run` (reset_config none = SYSRESETREQ) and `NVIC_SystemReset` set `PINRSTF|SFTRSTF` on the
+  G431 (NRST is driven by internal resets), so the banner shows `reset: SOFTWARE|PIN` for both.
+- `dbg.sym` also finds statics that LTO renamed to `<mangled>.lto_priv.N` (e.g. `GUI::mainItems`).
 - KEEPALIVE_ACK carries the base's own pid, so ACKs are matched FIFO against every KEEPALIVE the Link sent
   (background, `send`, and keepalives inside `send_raw`); only background ones are swallowed, expiry 1 s.
 - Base-originated KEEPALIVEs are auto-answered and also delivered to `recv(pred)`.

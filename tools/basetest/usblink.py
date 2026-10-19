@@ -25,30 +25,52 @@ def _read(path):
 
 
 def _sysfs_ports():
-    """[(tty jmeno, major:minor)] pro ttyACM s VID:PID abcd:1234 (bez udev, jen sysfs)."""
+    """[(tty jmeno, major:minor, bInterfaceNumber, interface retezec)] pro ttyACM s VID:PID abcd:1234
+    (bez udev, jen sysfs). Base ma dve CDC: protokol (rozhrani 00) a log ("MIDIControl log")."""
     found = []
     for tty in sorted(glob.glob("/sys/class/tty/ttyACM*")):
-        d = os.path.realpath(os.path.join(tty, "device"))
+        itf = os.path.realpath(os.path.join(tty, "device"))
+        d = itf
         while d.startswith("/sys/devices") and d != "/sys/devices":
             if _read(os.path.join(d, "idVendor")) == VID and _read(os.path.join(d, "idProduct")) == PID:
-                found.append((os.path.basename(tty), _read(os.path.join(tty, "dev"))))
+                found.append((os.path.basename(tty), _read(os.path.join(tty, "dev")), _read(os.path.join(itf, "bInterfaceNumber")),
+                              _read(os.path.join(itf, "interface"))))
                 break
             d = os.path.dirname(d)
     return found
 
 
-def find_port() -> str:
-    by_id = sorted(glob.glob("/dev/serial/by-id/*ABCD_1234*"))
-    if by_id:
-        return by_id[0]
-    for name, majmin in _sysfs_ports():
-        node = f"/dev/{name}"
-        if not os.path.exists(node) and majmin:
-            major, minor = majmin.split(":")
-            subprocess.run(["sudo", "-n", "mknod", node, "c", major, minor], check=True)
-            subprocess.run(["sudo", "-n", "chmod", "666", node], check=True)
-        return node
-    raise RuntimeError("base (abcd:1234) not found on USB")
+PROTOCOL_ITF = "00"
+LOG_ITF_NAME = "MIDIControl log"
+
+
+def _node(name, majmin) -> str:
+    """/dev/<name>; v kontejneru bez udev ho vytvori z sysfs `dev` (sudo mknod)."""
+    node = f"/dev/{name}"
+    if majmin:
+        major, minor = (int(x) for x in majmin.split(":"))
+        if os.path.exists(node):
+            st = os.stat(node)
+            if (os.major(st.st_rdev), os.minor(st.st_rdev)) == (major, minor):
+                return node
+            subprocess.run(["sudo", "-n", "rm", "-f", node], check=True)
+        subprocess.run(["sudo", "-n", "mknod", node, "c", str(major), str(minor)], check=True)
+        subprocess.run(["sudo", "-n", "chmod", "666", node], check=True)
+    return node
+
+
+def find_port(interface: str = PROTOCOL_ITF, name: str = None) -> str:
+    """Port CDC base: protokolove rozhrani (bInterfaceNumber 00), nebo s `name` rozhrani podle retezce
+    (log CDC). Nikdy nevraci jine rozhrani nez pozadovane."""
+    if name is None:
+        by_id = sorted(glob.glob(f"/dev/serial/by-id/*ABCD_1234*-if{interface}"))
+        if by_id:
+            return by_id[0]
+    for tty, majmin, ifnum, ifname in _sysfs_ports():
+        if (name is not None and ifname == name) or (name is None and ifnum == interface):
+            return _node(tty, majmin)
+    what = f'interface "{name}"' if name else f"interface {interface}"
+    raise RuntimeError(f"base (abcd:1234) {what} not found on USB")
 
 
 class KeepaliveTracker:
