@@ -20,31 +20,54 @@ CH = {
 _DIR = Path(tempfile.mkdtemp(prefix="basetest-la-"))
 
 
-def start(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M") -> tuple[subprocess.Popen, Path]:
-	"""Spusti zachyt na pozadi; vraci (proces, .sr soubor). Pockej na proces a pak dekoduj."""
+class CaptureError(RuntimeError):
+	pass
+
+
+def start(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M", driver: str = "fx2lafw") -> tuple[subprocess.Popen, Path]:
+	"""Spusti zachyt na pozadi; vraci (proces, .sr soubor). Dokonci ho pomoci finish()."""
 	out = Path(tempfile.mktemp(suffix=".sr", dir=_DIR))
 	proc = subprocess.Popen(
-		["sigrok-cli", "-d", "fx2lafw", "--channels", channels, "--config", f"samplerate={samplerate}", "--time", f"{int(seconds * 1000)}ms", "-o", str(out)],
+		["sigrok-cli", "-d", driver, "--channels", channels, "--config", f"samplerate={samplerate}", "--time", f"{int(seconds * 1000)}ms", "-o", str(out)],
 		stdout=subprocess.DEVNULL,
-		stderr=subprocess.DEVNULL,
+		stderr=subprocess.PIPE,
+		text=True,
 	)
 	return proc, out
 
 
-def capture(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M") -> Path:
-	"""Blokujici zachyt; vraci cestu k .sr souboru."""
-	proc, out = start(seconds, channels, samplerate)
-	proc.wait(seconds + 30)
+def finish(proc: subprocess.Popen, out: Path, timeout: float) -> Path:
+	"""Pocka na zachyt; pri chybe/timeoutu proces zabije a vyhodi CaptureError se stderr."""
+	try:
+		_, err = proc.communicate(timeout=timeout)
+	except subprocess.TimeoutExpired:
+		proc.kill()
+		_, err = proc.communicate()
+		raise CaptureError(f"sigrok-cli timeout po {timeout:.0f} s: {err.strip()}") from None
+	finally:
+		if proc.poll() is None:
+			proc.kill()
+			proc.communicate()
+	if proc.returncode != 0:
+		raise CaptureError(f"sigrok-cli skoncil s kodem {proc.returncode}: {err.strip()}")
+	if not out.exists() or out.stat().st_size == 0:
+		raise CaptureError(f"zachyt je prazdny nebo chybi ({out}): {err.strip()}")
 	return out
 
 
+def capture(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M", driver: str = "fx2lafw") -> Path:
+	"""Blokujici zachyt; vraci cestu k .sr souboru, pri selhani vyhodi CaptureError."""
+	proc, out = start(seconds, channels, samplerate, driver)
+	return finish(proc, out, seconds + 30)
+
+
 def uart(sr: Path, rx: str, baud: int) -> bytes:
-	"""Dekoduje bajty UART na kanalu `rx` (napr. CH["base_ble_tx"])."""
-	out = subprocess.run(
-		["sigrok-cli", "-i", str(sr), "-P", f"uart:rx={rx}:baudrate={baud}", "-A", "uart=rx-data"], capture_output=True, text=True, check=True
-	).stdout
+	"""Dekoduje bajty UART na kanalu `rx` (napr. CH["base_ble_tx"]); pri chybe sigrok-cli vyhodi CaptureError."""
+	r = subprocess.run(["sigrok-cli", "-i", str(sr), "-P", f"uart:rx={rx}:baudrate={baud}", "-A", "uart=rx-data"], capture_output=True, text=True)
+	if r.returncode != 0:
+		raise CaptureError(f"dekodovani {sr} selhalo (kod {r.returncode}): {r.stderr.strip()}")
 	data = bytearray()
-	for line in out.splitlines():
+	for line in r.stdout.splitlines():
 		tok = line.split()[-1] if line.strip() else ""
 		if len(tok) == 2:
 			data.append(int(tok, 16))
