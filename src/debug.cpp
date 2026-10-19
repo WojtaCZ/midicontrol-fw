@@ -14,7 +14,7 @@ namespace Debug {
     // Debug text se do USB-CDC neposílá: CDC nese výhradně protokolové rámce pro PC.
     // Log se ukládá do kruhového bufferu v RAM, čitelného debuggerem (Debug::_logRing).
     static constexpr size_t LOG_RING_SIZE = 512;
-    char _logRing[LOG_RING_SIZE];
+    [[gnu::used]] volatile char _logRing[LOG_RING_SIZE];
     size_t _logHead = 0;
 
     Level setLevel(Level level) {
