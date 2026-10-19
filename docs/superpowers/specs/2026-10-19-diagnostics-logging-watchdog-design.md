@@ -24,7 +24,13 @@ information** good enough to track a bug down to a function (`addr2line` on the 
 
 **Exception to the plan's constraint** "do not edit `bootloader/`, `lib/bootloader/`": the IWDG kick is the only
 bootloader change this spec allows. Shared code goes to the `midicontrol-bootloader` repo and is bumped into both
-firmwares; the per-board `bootloader/src/main.cpp` gets the kick in its main loop.
+firmwares; the per-board `bootloader/src/main.cpp` gets the kick in its main loop, and the base's
+`bootloader/STM32G431CBTx_BOOT.ld` reserves the same top-of-RAM no-init block as the app (the bootloader runs on
+every boot; its `.bss` and stack must not touch the app's no-init RAM).
+
+**No-init RAM (base):** a `NOINIT` memory region `ORIGIN = 0x20007800, LENGTH = 2K` in both the app and the
+bootloader linker scripts (their `RAM` shrinks to 30K, `_estack` = 0x20007800). It holds the log ring header +
+ring and the fault record. `sizeBudget.ram` (data+bss) becomes 29184 B so 1.5 KB stays for stack + heap.
 
 ## 1. Base logging
 
