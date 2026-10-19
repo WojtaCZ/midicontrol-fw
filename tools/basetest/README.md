@@ -54,6 +54,7 @@ cd tools/basetest
   KEEPALIVE to the base every second (the base counts the PC dead after 6 s) and swallows the matching
   KEEPALIVE_ACKs (`keepalive_acks`); KEEPALIVEs from the base are answered. `.stray` must stay empty.
 - `dbg.Target("base"|"remote")` - `sym`, `read`, `write`, `u`, `core_state`, `gpio`, `key` (remote), `debug_log` (base).
+- `la.uart_timed` - like `la.uart` but returns `[(time, byte)]` plus decoder warnings (frame errors).
 - `proto.py` - copy of the remote harness codec.
 
 ## Things to know

@@ -78,15 +78,17 @@ def display_on(base, quiet):
     a po testu vratit puvodni hodnotu a smazat indikator."""
     addr = base.sym("display::connected")
     orig = base.read(addr, 1)
-    base.write(addr, b"\x01")
-    quiet.send_msg(MT.NOW_PLAYING_INFO, b"")  # prazdny payload = vse zhasnout
-    time.sleep(0.7)
     try:
+        base.write(addr, b"\x01")
+        quiet.send_msg(MT.NOW_PLAYING_INFO, b"")  # prazdny payload = vse zhasnout
+        time.sleep(0.7)
         yield addr
     finally:
-        quiet.send_msg(MT.NOW_PLAYING_INFO, b"")
-        time.sleep(0.2)
-        base.write(addr, orig)
+        try:
+            quiet.send_msg(MT.NOW_PLAYING_INFO, b"")
+            time.sleep(0.2)
+        finally:
+            base.write(addr, orig)  # vrati se vzdy, i kdyz odeslani selze
 
 
 def npi(link, *fields):
