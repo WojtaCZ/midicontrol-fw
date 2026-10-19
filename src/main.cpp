@@ -33,6 +33,8 @@ using namespace stmcpp::units;
 static bool _reconnectNeeded = true;
 static duration _lastReconnectAttempt = 0_ms;
 static constexpr duration RECONNECT_INTERVAL = 5000_ms;
+// Po %CONNECT% z auto-reconnectu: zabezpečit (B) až po %STREAM_OPEN%
+static bool _secureOnStreamOpen = false;
 
 // ── Párování s ovladačem (spouští menu "Sparovat ovladac" → Bluetooth::startPairing) ──
 // SCANNING:   reklama se jménem REMOTE_NAME → X, C,<typ>,<adresa>, CONNECTING (ostatní zařízení se ignorují)
@@ -286,6 +288,8 @@ extern "C" int main(void) {
 
 				case Bluetooth::Command::Type::CONNECT: {
 					// %CONNECT,<typ adresy 0/1>,<MAC>% — první parametr je typ adresy, ne stav spojení
+					// Během auto-reconnectu je to výsledek našeho "C" (poslední bondované zařízení)
+					bool reconnected = _reconnectNeeded && !Bluetooth::isPairing();
 					Bluetooth::setConnected(true);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = false;
@@ -293,6 +297,11 @@ extern "C" int main(void) {
 						// Párování spustil uživatel z menu → zabezpečit a uložit bond hned (bez dotazu na OLED)
 						Bluetooth::queueCommand("B");
 						Bluetooth::setPairingState(PS::BONDING);
+					} else if (reconnected) {
+						// Spojení obnovené přes "C" se samo nezabezpečí (DS50002466, příkaz B: po ztrátě spojení je
+						// nutné znovu B; na lavici bez B žádný %SECURED% a Remote ukázal dotaz "Sparovat?").
+						// B až po %STREAM_OPEN%: B hned po %CONNECT% skončilo na lavici %DISCONNECT%.
+						_secureOnStreamOpen = true;
 					} else if (!Bluetooth::isPairing()) {
 						// Delay pairing screen — if SECURED arrives first, device is already bonded
 						pairingDelayScheduler.start();
@@ -304,9 +313,15 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::STREAM_OPEN:
 					Bluetooth::setConnected(true);
 					Bluetooth::setStreamOpen(true);
+					if (_secureOnStreamOpen) {
+						// B s uloženým klíčem → %SECURED% za ~0,2 s, bez dotazu na OLED
+						_secureOnStreamOpen = false;
+						Bluetooth::queueCommand("B");
+					}
 					break;
 
 				case Bluetooth::Command::Type::DISCONNECT:
+					_secureOnStreamOpen = false;
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
 					pairingDelayScheduler.stop();
