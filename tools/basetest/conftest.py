@@ -14,6 +14,7 @@ def link():
     import usblink
     L = usblink.Link(keepalive=True)
     yield L
+    assert L.error is None, f"usblink thread failed: {L.error!r}"
     assert L.stray == b"", f"bytes outside frames on CDC: {L.stray!r}"
     L.close()
 

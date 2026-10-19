@@ -46,4 +46,8 @@ cd tools/basetest
 
 - `debug_log()` reads `Debug::_logRing` (512 B ring, `_logHead`); the ring is `[[gnu::used]] volatile` so LTO keeps it.
   After a wrap the first line may be cut.
-- A test's own KEEPALIVE can race with a background one: the first ACK after a background send is swallowed.
+- KEEPALIVE_ACK carries the base's own pid, so ACKs are matched FIFO against every KEEPALIVE the Link sent
+  (background, `send`, and keepalives inside `send_raw`); only background ones are swallowed, expiry 1 s.
+- Base-originated KEEPALIVEs are auto-answered and also delivered to `recv(pred)`.
+- `pause_keepalive()` stops background keepalives and auto-answers (the PC goes silent); `pause_keepalive(False)` resumes.
+- Thread failures are stored in `Link.error`; `recv`/`send` re-raise, the `link` fixture teardown asserts it is None.
