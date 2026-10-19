@@ -21,8 +21,22 @@ openocd -c "adapter serial 39FF71064B43353943122243" -f openocd.cfg -c "program 
 ```
 
 Symbols of globals (`Debug::_logRing`, ...) are resolved from the ELF symbol table (`nm -C`), so the normal Release
-build is enough. Struct fields (`GUI::playerScreen.state_`, used on the remote) need DWARF: build that firmware with
-`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS=-g -DCMAKE_CXX_FLAGS=-g -DCMAKE_ASM_FLAGS=-g`.
+build is enough. Struct fields (`ui::MenuItem` layout, remote `GUI::playerScreen.state_`) need DWARF. Do NOT pass
+`-DCMAKE_CXX_FLAGS=-g`: the toolchain file forces `CMAKE_*_FLAGS` into the cache, so that replaces its flags and
+changes the generated code. Build a `-g` copy in a SEPARATE dir with a wrapper toolchain that only appends `-g` to the
+Release flags (verified: `arm-none-eabi-size` text/data/bss identical to `build/`), and leave `build/` alone:
+
+```bash
+cat > /tmp/tc-g.cmake <<EOF
+include($PWD/cmake/toolchain-arm-none-eabi.cmake)
+set(CMAKE_C_FLAGS_RELEASE "-Os -flto -g" CACHE INTERNAL "")
+set(CMAKE_CXX_FLAGS_RELEASE "-Os -flto -g" CACHE INTERNAL "")
+set(CMAKE_ASM_FLAGS_RELEASE "-g" CACHE INTERNAL "")
+EOF
+cmake -S . -B /tmp/build-g -DCMAKE_TOOLCHAIN_FILE=/tmp/tc-g.cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOTLOADER=OFF
+cmake --build /tmp/build-g -j
+arm-none-eabi-gdb -batch -ex 'print sizeof(ui::MenuItem)' -ex 'print &((ui::MenuItem*)0)->checked_' /tmp/build-g/midicontrol-fw.elf
+```
 
 ## Run
 

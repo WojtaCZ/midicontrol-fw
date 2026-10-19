@@ -9,8 +9,7 @@ from proto import MT, NAK, Packet
 
 ADDR_PC, ADDR_BASE = proto.ADDR_PC, proto.ADDR_BASE
 
-# GUI::mainItems[2] (checkbox napajeni): velikost ui::MenuItem a offset checked_ z DWARF (build s -g;
-# rozlozeni tridy nezavisi na optimalizaci). Bez DWARF nejde pole struktury cist jinak.
+# GUI::mainItems[2] (checkbox napajeni): velikost ui::MenuItem a offset checked_ z DWARF (build s -g, viz README). Bez DWARF nejde pole struktury cist jinak.
 MENUITEM_SIZE, MENUITEM_CHECKED = 24, 0x14
 
 
@@ -102,9 +101,14 @@ def test_wrong_dest_ignored(quiet):
 
 
 def test_debug_log_not_truncated(base):
-    """Radky logu v RAM nesmi mit jednoznakovou zpravu (dlouho vypadal prikaz "C" jako useknuty text)."""
+    """Log v RAM drzi uplne zpravy: znamy radek (neuspesny reconnect prikaz "C" pri nedostupnem remote)
+    musi byt v logu doslovne a cely. Jiny deterministicky dlouhy radek firmware neloguje."""
+    if base.u("Bluetooth::_connected", 1):
+        pytest.skip("remote connected: no failed reconnect command is logged")
     lines = base.debug_log()
     msgs = [m.group(1) for m in (re.match(r"^\[(?:ERROR|WARNING|INFO|DEBUG)\]: (.*)$", l) for l in lines) if m]
+    assert msgs, lines
+    assert "BLE cmd failed: C" in msgs, lines
     assert all(len(m) > 1 for m in msgs), lines
 
 
