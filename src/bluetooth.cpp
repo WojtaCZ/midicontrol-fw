@@ -5,6 +5,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -26,15 +28,19 @@ namespace Bluetooth{
 
 	Mode _mode = Mode::DATA;
 
-	bool _connected = false;
-	bool _bonded = false;
-	bool _streamOpen = false;
+	// Stav spojení; testy (tools/basetest) je čtou přes sondu podle tabulky symbolů — proto used/volatile
+	[[gnu::used]] volatile bool _connected = false;
+	[[gnu::used]] volatile bool _bonded = false;
+	[[gnu::used]] volatile bool _streamOpen = false;
+	[[gnu::used]] volatile PairingState _pairingState = PairingState::IDLE;
+	static duration _pairingStart = 0_ms;
 	duration _dataReceivedTimestamp = 0_ms;
 
 	// ── Příjem (ISR → hlavní smyčka), bez haldy ──────────────────────────
-	// Stavová zpráva modulu ohraničená '%'
+	// Stavová zpráva modulu ohraničená '%'. Výsledky skenování mají až ~80 znaků
+	// (adresa, typ, jméno, 128bit UUID, RSSI), proto 96.
 	struct StatusLine {
-		char text[48];
+		char text[96];
 	};
 
 	static RingBuffer<StatusLine, 8> _statusQueue;
@@ -318,17 +324,46 @@ namespace Bluetooth{
 				return make_unique<WvCommand>(hdl, hex);
 		}
 
-		// --- Advertisement messages ---
-		else {
-			char addr[32], name[32], uuids[64], hex[128];
-			int connected, rssi;
+		else if (!strcmp(rxCmd, "ERR_CONN")) return make_unique<Command>(Command::Type::ERR_CONN);
 
-			if (sscanf(rxCmd, "%31[^,],%d,%31[^,],%63[^,],%d", addr, &connected, name, uuids, &rssi) == 5) {
-				return make_unique<AdvConnectableCommand>(addr, connected, name, uuids, rssi);
+		// --- Výsledky skenování (F) ---
+		// Připojitelná:    <adresa 12 hex>,<typ 0/1>,<jméno>,<UUID>,<RSSI hex>   (jméno i UUID mohou být prázdné)
+		// Nepřipojitelná:  <adresa 12 hex>,<typ 0/1>,<RSSI hex>,Brcst:<data hex>
+		// Na lavici např. "D88039FE5996,0,MIDIControlRemote,,F5" a "CAD46E49E827,1,AD,Brcst:07FF4C0012020001".
+		else {
+			const char *field[5] = {};
+			size_t fieldLen[5] = {};
+			uint8_t count = 0;
+			const char *p = rxCmd;
+			while (count < 5) {
+				const char *comma = (count < 4) ? strchr(p, ',') : nullptr;
+				field[count] = p;
+				fieldLen[count] = comma ? static_cast<size_t>(comma - p) : strlen(p);
+				count++;
+				if (!comma) break;
+				p = comma + 1;
 			}
-			else if (strstr(rxCmd, ",Brcst,") != nullptr) {
-				if (sscanf(rxCmd, "%31[^,],%d,%d,Brcst,%127[^%]", addr, &connected, &rssi, hex) == 4)
-					return make_unique<AdvNonConnectableCommand>(addr, connected, rssi, hex);
+
+			auto isHex = [](const char *f, size_t len) {
+				if (len == 0) return false;
+				for (size_t i = 0; i < len; ++i) {
+					if (!isxdigit(static_cast<unsigned char>(f[i]))) return false;
+				}
+				return true;
+			};
+			auto toStr = [](const char *f, size_t len) { return std::string(f, len); };
+
+			bool addrOk = count >= 4 && fieldLen[0] == 12 && isHex(field[0], 12) && fieldLen[1] == 1 && (field[1][0] == '0' || field[1][0] == '1');
+			if (addrOk) {
+				int type = field[1][0] - '0';
+				if (count == 4 && strncmp(field[3], "Brcst:", 6) == 0 && isHex(field[2], fieldLen[2])) {
+					int rssi = static_cast<int8_t>(strtol(toStr(field[2], fieldLen[2]).c_str(), nullptr, 16));
+					return make_unique<AdvNonConnectableCommand>(toStr(field[0], 12), type, rssi, std::string(field[3] + 6));
+				}
+				if (count == 5 && isHex(field[4], fieldLen[4])) {
+					int rssi = static_cast<int8_t>(strtol(field[4], nullptr, 16));
+					return make_unique<AdvConnectableCommand>(toStr(field[0], 12), type, toStr(field[2], fieldLen[2]), toStr(field[3], fieldLen[3]), rssi);
+				}
 			}
 		}
 
@@ -418,17 +453,50 @@ namespace Bluetooth{
 		return _queueJob(commands, 2) ? 0 : 1;
 	}
 
-	bool queueCommand(const char *command) {
+	// noinline + used: testy ji volají přes gdb (Release ELF bez DWARF, symbol musí zůstat)
+	[[gnu::used, gnu::noinline]] bool queueCommand(const char *command) {
 		const char *const commands[] = {command};
 		return _queueJob(commands, 1);
 	}
+
+	bool isPairing() {
+		PairingState s = _pairingState;
+		return s == PairingState::SCANNING || s == PairingState::CONNECTING || s == PairingState::BONDING;
+	}
+
+	[[gnu::used, gnu::noinline]] uint8_t startPairing() {
+		if (isPairing()) return 1;
+		// Při spojení nejdřív odpojit (K,1) — Remote během spojení neadvertisuje.
+		// Z: zrušit probíhající pokus o připojení (auto-reconnect "C"), jinak modul nic nenaskenuje.
+		// F: skenování (výsledky chodí jako %...% i v datovém režimu, každé zařízení jednou).
+		static const char *const withDisconnect[] = {"K,1", "Z", "F"};
+		const char *const *commands = _connected ? withDisconnect : withDisconnect + 1;
+		uint8_t count = _connected ? 3 : 2;
+		if (!_queueJob(commands, count)) return 1;
+		_pairingStart = stmcpp::systick::getDuration();
+		_pairingState = PairingState::SCANNING;
+		return 0;
+	}
+
+	void stopScan() { queueCommand("X"); }
+
+	bool connectTo(uint8_t addrType, const char *addr) {
+		char cmd[MAX_COMMAND_LEN];
+		snprintf(cmd, sizeof(cmd), "C,%u,%s", static_cast<unsigned>(addrType), addr);
+		return queueCommand(cmd);
+	}
+
+	PairingState pairingState() { return _pairingState; }
+	void setPairingState(PairingState state) { _pairingState = state; }
+	duration pairingElapsed() { return stmcpp::systick::getDuration() - _pairingStart; }
 
 	void confirmPairing(bool accept) {
 		// "ano" → B: zabezpečí spojení a uloží bond; "ne" → K,1: odpojí
 		queueCommand(accept ? "B" : "K,1");
 	}
 
-	void process() {
+	// noinline: bezpečné místo hlavní smyčky pro zastavení testy (dbg.Target.call)
+	[[gnu::noinline]] void process() {
 		uint8_t c;
 		// Dokud je místo ve frontě paketů; zbytek zůstane v RX bufferu na příště
 		while (_rxPackets.freeSpace() > 0 && _rxRing.pop(c)) {

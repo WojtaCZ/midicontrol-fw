@@ -36,6 +36,9 @@ namespace GUI {
     // Show the BLE pairing confirmation dialog
     void showPairingConfirm();
 
+    // Výsledek párování z menu ("Sparovano", ...) na obrazovce "Parovani", pokud je otevřená
+    void showPairingResult(const char* text);
+
     // Zobrazení/skrytí obrazovky "Přehrávání"
     void showNowPlaying(const char* songName);
     void dismissNowPlaying();

@@ -20,6 +20,20 @@ namespace Bluetooth{
 	static constexpr int BUFF_SIZE = 256;
 
 	static constexpr char STATUS_DELIMITER = '%';
+
+	// Párování s ovladačem (Remote): připojuje se jen k zařízení s tímto jménem (SN v ../midicontroller-fw)
+	static constexpr const char *REMOTE_NAME = "MIDIControlRemote";
+	// Celková doba od startPairing() do DONE; potom X/Z/K,1 a FAILED
+	static constexpr stmcpp::units::duration PAIRING_TIMEOUT = 15000_ms;
+
+	enum class PairingState : uint8_t {
+		IDLE = 0,       // nic neprobíhá
+		SCANNING = 1,   // Z, F: čekáme na reklamu REMOTE_NAME
+		CONNECTING = 2, // X, C,<typ>,<adresa>: čekáme na %CONNECT%
+		BONDING = 3,    // B: čekáme na %SECURED% / %BONDED%
+		DONE = 4,       // spárováno
+		FAILED = 5      // timeout, odpojení nebo chyba zabezpečení
+	};
 	static constexpr char MESSAGE_DELIMITER = '\r';
 
 
@@ -78,6 +92,7 @@ namespace Bluetooth{
                 WV, // Received write request for characteristic handle
                 ADV_CONNECTABLE, // Received connectable advertisement
                 ADV_NON_CONNECTABLE, // Received non-connectable advertisement
+                ERR_CONN, // Connection attempt cancelled (Z) or failed
                 UNKNOWN // Unrecognized message
             };
 
@@ -240,6 +255,21 @@ namespace Bluetooth{
 
     // Zařadí jeden příkaz (bez \r) do příkazové fronty. Vrací false, když je fronta plná.
     bool queueCommand(const char *command);
+
+    // První spárování s ovladačem (z menu): [K,1], Z, F a stav SCANNING. Zbytek automatu (připojení, B, timeout)
+    // řídí hlavní smyčka podle stavových zpráv. Vrací 1, když párování už běží nebo je fronta příkazů plná.
+    uint8_t startPairing();
+    // Zastaví skenování (X)
+    void stopScan();
+    // Připojení k adrese z reklamy: C,<typ adresy 0/1>,<12 hex znaků>
+    bool connectTo(uint8_t addrType, const char *addr);
+
+    PairingState pairingState();
+    void setPairingState(PairingState state);
+    // Čas od startPairing()
+    stmcpp::units::duration pairingElapsed();
+    // SCANNING, CONNECTING nebo BONDING
+    bool isPairing();
 
     // Odpověď na dotaz "Spárovat?": ano → B (zabezpečení a bond), ne → K,1 (odpojení)
     void confirmPairing(bool accept);

@@ -79,6 +79,7 @@ static void firmwareCallback(ui::MenuItem* item, void* userData);
 static void displayCallback(ui::MenuItem* item, void* userData);
 static void ledMasterCallback(ui::MenuItem* item, void* userData);
 static void midiRoleCallback(ui::MenuItem* item, void* userData);
+static void pairCallback(ui::MenuItem* item, void* userData);
 
 // ── Settings menu items & screen (defined first so mainItems can reference it) ─
 
@@ -87,10 +88,11 @@ static ui::MenuItem settingsItems[] = {
     ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
     ui::MenuItem("Verze FW", firmwareCallback),
     ui::MenuItem("Displej",  displayCallback),
+    ui::MenuItem("Sparovat ovladac", pairCallback),
     ui::MenuItem::back("Zpet"),
 };
 
-static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 5);
+static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 6);
 
 // ── Main menu items & screen ──────────────────────────────────────────
 
@@ -183,6 +185,19 @@ static void onPairResult(bool confirmed, void* userData) {
 
 static ui::ConfirmScreen pairingScreen("Sparovat zarizeni?", onPairResult);
 
+// ── Párování s ovladačem z menu (průběh a výsledek) ───────────────────
+
+static bool _pairStatusShown = false;
+
+static void onPairStatusDismiss(void* userData) {
+    (void)userData;
+    // Zavře jen obrazovku; párování doběhne (nebo vyprší) samo
+    _pairStatusShown = false;
+    nav.pop();
+}
+
+static ui::SplashScreen pairStatusScreen("Parovani", "", "Hledam ovladac...", onPairStatusDismiss);
+
 // ── Song list screens ─────────────────────────────────────────────────
 
 static void onLoadingDismiss(void* userData) {
@@ -248,6 +263,17 @@ static void firmwareCallback(ui::MenuItem* item, void* userData) {
     std::snprintf(fwLine2, sizeof(fwLine2), "Datum: %s",  git::build_date.c_str());
     std::snprintf(fwLine3, sizeof(fwLine3), "Cas: %s",    git::build_time.c_str());
     nav.push(&firmwareScreen);
+}
+
+static void pairCallback(ui::MenuItem* item, void* userData) {
+    (void)item; (void)userData;
+    // Z, F → sken; připojení k MIDIControlRemote, B a timeout řídí hlavní smyčka (main.cpp)
+    if (Bluetooth::startPairing() != 0) return;
+    pairStatusScreen.setComment("Hledam ovladac...");
+    if (!_pairStatusShown) {
+        _pairStatusShown = true;
+        nav.push(&pairStatusScreen);
+    }
 }
 
 static void ledMasterCallback(ui::MenuItem* item, void* userData) {
@@ -436,6 +462,12 @@ ui::MenuItem& checkboxMidiRole() {
 
 void showPairingConfirm() {
     nav.push(&pairingScreen);
+}
+
+void showPairingResult(const char* text) {
+    if (!_pairStatusShown) return;
+    pairStatusScreen.setComment(text);
+    nav.forceRender();
 }
 
 void showNowPlaying(const char* songName) {

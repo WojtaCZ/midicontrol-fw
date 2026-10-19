@@ -46,8 +46,9 @@ namespace router {
 	// Dostupnost protistran
 	static duration _lastPcRx = 0_ms;
 	static bool _pcEverSeen = false;
-	static duration _lastRemoteRx = 0_ms;
-	static bool _remoteEverSeen = false;
+	// used: testy (tools/basetest, conftest.remote_alive) z nich počítají isRemoteAlive() přes sondu
+	[[gnu::used]] static duration _lastRemoteRx = 0_ms;
+	[[gnu::used]] static bool _remoteEverSeen = false;
 	static duration _lastKeepalive = 0_ms;
 
 	// Nepotvrzené pakety, které Base sama odeslala (čekají na ACK/NAK)

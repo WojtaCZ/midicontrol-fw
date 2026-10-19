@@ -34,6 +34,37 @@ static bool _reconnectNeeded = true;
 static duration _lastReconnectAttempt = 0_ms;
 static constexpr duration RECONNECT_INTERVAL = 5000_ms;
 
+// ── Párování s ovladačem (spouští menu "Sparovat ovladac" → Bluetooth::startPairing) ──
+// SCANNING:   reklama se jménem REMOTE_NAME → X, C,<typ>,<adresa>, CONNECTING (ostatní zařízení se ignorují)
+// CONNECTING: %CONNECT% → B (bez dotazu na OLED, párování spustil uživatel), BONDING
+// BONDING:    %SECURED% / %BONDED% → DONE
+// Timeout PAIRING_TIMEOUT v kterémkoli neukončeném stavu, odpojení nebo %ERR_SEC% → FAILED.
+// Auto-reconnect během párování neběží.
+static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
+	using PS = Bluetooth::PairingState;
+	Bluetooth::setPairingState(ok ? PS::DONE : PS::FAILED);
+	if (ok) {
+		_reconnectNeeded = false;
+		GUI::showPairingResult("Sparovano");
+	} else {
+		_reconnectNeeded = true;
+		_lastReconnectAttempt = stmcpp::systick::getDuration();
+		GUI::showPairingResult(failedIn == PS::SCANNING ? "Ovladac nenalezen" : "Parovani selhalo");
+	}
+}
+
+static void pairingTimeout() {
+	using PS = Bluetooth::PairingState;
+	PS state = Bluetooth::pairingState();
+	if (!Bluetooth::isPairing() || Bluetooth::pairingElapsed() < Bluetooth::PAIRING_TIMEOUT) return;
+	// Uklidit podle toho, kde automat uvízl: X = konec skenování, Z = zrušit pokus o připojení, K,1 = odpojit
+	if (state == PS::SCANNING) Bluetooth::stopScan();
+	if (state == PS::CONNECTING) Bluetooth::queueCommand("Z");
+	if (Bluetooth::isConnected() || state == PS::BONDING) Bluetooth::queueCommand("K,1");
+	Debug::log(Debug::Level::WARNING, "BLE pairing timeout");
+	pairingFinished(false, state);
+}
+
 extern stmcpp::scheduler::Scheduler oledSleepScheduler;
 extern stmcpp::scheduler::Scheduler keypressScheduler;
 extern stmcpp::scheduler::Scheduler guiRenderScheduler;
@@ -211,8 +242,10 @@ extern "C" int main(void) {
 		songListTimeoutScheduler.dispatch();
 		songListDelayScheduler.dispatch();
 
-		// Auto-reconnect k bondovanému Remote zařízení (neblokující)
-		if (_reconnectNeeded && !Bluetooth::isConnected() && Bluetooth::isIdle()
+		pairingTimeout();
+
+		// Auto-reconnect k bondovanému Remote zařízení (neblokující); během párování ne
+		if (_reconnectNeeded && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
 			_lastReconnectAttempt = stmcpp::systick::getDuration();
 			Bluetooth::reconnect();
@@ -222,22 +255,51 @@ extern "C" int main(void) {
 			std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
 			if (!command) break;
 
+			using PS = Bluetooth::PairingState;
+			PS pairing = Bluetooth::pairingState();
+
 			switch (command->getType()) {
+				case Bluetooth::Command::Type::ADV_CONNECTABLE:
+					if (pairing == PS::SCANNING) {
+						auto *adv = static_cast<Bluetooth::AdvConnectableCommand *>(command.get());
+						if (adv->getName() == Bluetooth::REMOTE_NAME) {
+							Bluetooth::stopScan();
+							Bluetooth::connectTo(static_cast<uint8_t>(adv->getConnected()), adv->getAddr().c_str());
+							Bluetooth::setPairingState(PS::CONNECTING);
+						}
+					}
+					break;
+
 				case Bluetooth::Command::Type::BONDED:
 				case Bluetooth::Command::Type::SECURED:
 					Bluetooth::setBonded(true);
 					pairingDelayScheduler.stop();
+					if (pairing == PS::BONDING) pairingFinished(true, pairing);
 					break;
 
-				case Bluetooth::Command::Type::CONNECT:
+				case Bluetooth::Command::Type::ERR_SEC:
+					if (pairing == PS::BONDING) {
+						Bluetooth::queueCommand("K,1");
+						pairingFinished(false, pairing);
+					}
+					break;
+
+				case Bluetooth::Command::Type::CONNECT: {
 					// %CONNECT,<typ adresy 0/1>,<MAC>% — první parametr je typ adresy, ne stav spojení
 					Bluetooth::setConnected(true);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = false;
-					// Delay pairing screen — if SECURED arrives first, device is already bonded
-					pairingDelayScheduler.start();
+					if (pairing == PS::CONNECTING) {
+						// Párování spustil uživatel z menu → zabezpečit a uložit bond hned (bez dotazu na OLED)
+						Bluetooth::queueCommand("B");
+						Bluetooth::setPairingState(PS::BONDING);
+					} else if (!Bluetooth::isPairing()) {
+						// Delay pairing screen — if SECURED arrives first, device is already bonded
+						pairingDelayScheduler.start();
+					}
 					GUI::renderForce();
 					break;
+				}
 
 				case Bluetooth::Command::Type::STREAM_OPEN:
 					Bluetooth::setConnected(true);
@@ -248,12 +310,14 @@ extern "C" int main(void) {
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
 					pairingDelayScheduler.stop();
+					if (pairing == PS::CONNECTING || pairing == PS::BONDING) pairingFinished(false, pairing);
 					GUI::renderForce();
 					break;
 
 				case Bluetooth::Command::Type::REBOOT:
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
+					if (Bluetooth::isPairing()) pairingFinished(false, pairing);
 					break;
 
 				default:
