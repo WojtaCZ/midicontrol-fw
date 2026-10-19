@@ -201,7 +201,10 @@ namespace Bluetooth{
 			case EngineState::WAIT_RESP:
 				if (_sawPrompt || (now - _engineTimestamp) > CMD_TIMEOUT) {
 					if (_sawErr || !_sawPrompt) {
-						Debug::log(Debug::Level::WARNING, _jobCommands[_jobIndex]);
+						// Samotný příkaz ("C", "Z") by v logu nic neříkal — doplnit kontext
+						char msg[MAX_COMMAND_LEN + 16];
+						snprintf(msg, sizeof(msg), "BLE cmd failed: %s", _jobCommands[_jobIndex]);
+						Debug::log(Debug::Level::WARNING, msg);
 					}
 					_jobIndex++;
 					if (_jobIndex < _jobCount) {
