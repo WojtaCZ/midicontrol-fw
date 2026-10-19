@@ -33,9 +33,6 @@ namespace GUI {
     ui::MenuItem& checkboxLedMaster();
     ui::MenuItem& checkboxMidiRole();
 
-    // Show the BLE pairing confirmation dialog
-    void showPairingConfirm();
-
     // Výsledek párování z menu ("Sparovano", ...) na obrazovce "Parovani", pokud je otevřená
     void showPairingResult(const char* text);
 

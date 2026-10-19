@@ -12,6 +12,8 @@
 #include "settings.hpp"
 #include "router.hpp"
 
+#include <cstring>
+
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
@@ -47,6 +49,11 @@ static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
 	Bluetooth::setPairingState(ok ? PS::DONE : PS::FAILED);
 	if (ok) {
 		_reconnectNeeded = false;
+		// Adresa ovladače trvale do nastavení: jen s ní se po %CONNECT% zabezpečí spojení (i po resetu base)
+		if (strcmp(settings::remoteAddr(), Bluetooth::pendingConnectAddr()) != 0) {
+			settings::setRemoteAddr(Bluetooth::pendingConnectAddr());
+			settings::save();
+		}
 		GUI::showPairingResult("Sparovano");
 	} else {
 		_reconnectNeeded = true;
@@ -132,14 +139,6 @@ static void onUserStopPlayback() {
 // One-shot scheduler: auto-dismiss the splash screen after 3 seconds
 stmcpp::scheduler::Scheduler splashDismissScheduler(3000_ms, [](){
 	GUI::keypress(ui::InputEvent::Enter);
-}, false, false);
-
-// One-shot scheduler: show pairing screen if SECURED doesn't arrive in time
-stmcpp::scheduler::Scheduler pairingDelayScheduler(500_ms, [](){
-	if (Bluetooth::isConnected() && !Bluetooth::isBonded()) {
-		GUI::showPairingConfirm();
-		GUI::renderForce();
-	}
 }, false, false);
 
 extern "C" void SystemInit(void) {
@@ -241,7 +240,6 @@ extern "C" int main(void) {
 		guiRenderScheduler.dispatch();
 		Oled::process();
 		splashDismissScheduler.dispatch();
-		pairingDelayScheduler.dispatch();
 		ledScheduler.dispatch();
 		songListTimeoutScheduler.dispatch();
 		songListDelayScheduler.dispatch();
@@ -282,7 +280,6 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::BONDED:
 				case Bluetooth::Command::Type::SECURED:
 					Bluetooth::setBonded(true);
-					pairingDelayScheduler.stop();
 					if (pairing == PS::BONDING) pairingFinished(true, pairing);
 					break;
 
@@ -295,28 +292,39 @@ extern "C" int main(void) {
 
 				case Bluetooth::Command::Type::CONNECT: {
 					// %CONNECT,<typ adresy 0/1>,<MAC>% — první parametr je typ adresy, ne stav spojení
-					// Během auto-reconnectu je to výsledek našeho "C" (poslední bondované zařízení)
-					bool reconnected = _reconnectNeeded && !Bluetooth::isPairing();
+					const std::string &addr = static_cast<Bluetooth::ConnectCommand *>(command.get())->getAddr();
 					Bluetooth::setConnected(true);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = false;
 					if (pairing == PS::CONNECTING) {
-						// Párování spustil uživatel z menu → zabezpečit a uložit bond hned (bez dotazu na OLED)
-						if (Bluetooth::queueCommand("B")) {
-							Bluetooth::setPairingState(PS::BONDING);
+						if (addr == Bluetooth::pendingConnectAddr()) {
+							// Párování spustil uživatel z menu → zabezpečit a uložit bond hned (bez dotazu na OLED)
+							if (Bluetooth::queueCommand("B")) {
+								Bluetooth::setPairingState(PS::BONDING);
+							} else {
+								Debug::log(Debug::Level::WARNING, "BLE pairing: B not queued");
+								Bluetooth::queueCommand("K,1");
+								pairingFinished(false, pairing);
+							}
 						} else {
-							Debug::log(Debug::Level::WARNING, "BLE pairing: B not queued");
+							// Během čekání na ovladač se připojil někdo jiný → odpojit, párování selhalo
+							Debug::log(Debug::Level::WARNING, "BLE pairing: foreign connect");
 							Bluetooth::queueCommand("K,1");
 							pairingFinished(false, pairing);
 						}
-					} else if (reconnected) {
-						// Spojení obnovené přes "C" se samo nezabezpečí (DS50002466, příkaz B: po ztrátě spojení je
-						// nutné znovu B; na lavici bez B žádný %SECURED% a Remote ukázal dotaz "Sparovat?").
-						// B až po %STREAM_OPEN%: B hned po %CONNECT% skončilo na lavici %DISCONNECT%.
-						_secureOnStreamOpen = true;
 					} else if (!Bluetooth::isPairing()) {
-						// Delay pairing screen — if SECURED arrives first, device is already bonded
-						pairingDelayScheduler.start();
+						const char *remote = settings::remoteAddr();
+						if (remote[0] != '\0' && addr == remote) {
+							// Spárovaný ovladač (typicky náš auto-reconnect "C"). Spojení se samo nezabezpečí
+							// (DS50002466, příkaz B: po ztrátě spojení je nutné znovu B; na lavici bez B žádný
+							// %SECURED% a Remote ukázal dotaz "Sparovat?"). B až po %STREAM_OPEN%: B hned po
+							// %CONNECT% skončilo na lavici %DISCONNECT%.
+							_secureOnStreamOpen = true;
+						} else {
+							// Cizí zařízení (telefon, PC): bond vzniká jen párováním z menu → odpojit, žádný B
+							Debug::log(Debug::Level::WARNING, "BLE: unknown device, K,1");
+							if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "BLE: K,1 not queued");
+						}
 					}
 					GUI::renderForce();
 					break;
@@ -336,7 +344,6 @@ extern "C" int main(void) {
 					_secureOnStreamOpen = false;
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
-					pairingDelayScheduler.stop();
 					if (pairing == PS::CONNECTING || pairing == PS::BONDING) pairingFinished(false, pairing);
 					GUI::renderForce();
 					break;

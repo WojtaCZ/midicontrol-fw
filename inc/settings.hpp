@@ -11,6 +11,9 @@ namespace settings {
 		bool ledMasterEnable;
 		bool midiRoleId;
 		uint8_t _pad;
+		// Verze 2: adresa spárovaného ovladače (12 hex znaků + 0, prázdná = žádný). Jen s ní base po
+		// %CONNECT% zabezpečí spojení (B); jiné zařízení odpojí.
+		char remoteAddr[13];
 	};
 
 	void init();
@@ -21,6 +24,10 @@ namespace settings {
 
 	bool midiRoleIdentifier();
 	void setMidiRoleIdentifier(bool value);
+
+	// Adresa spárovaného ovladače ("" = žádný)
+	const char *remoteAddr();
+	void setRemoteAddr(const char *addr);
 
 } // namespace settings
 

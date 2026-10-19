@@ -6,7 +6,9 @@
 namespace settings {
 
 	static constexpr uint32_t SETTINGS_MAGIC = 0xBEEFCAFE;
-	static constexpr uint8_t SETTINGS_VERSION = 1;
+	static constexpr uint8_t SETTINGS_VERSION = 2;
+	// Verze 1: jen prvních 8 bajtů (bez remoteAddr)
+	static constexpr uint32_t SETTINGS_V1_SIZE = 8;
 
 	// Poslední stránka flash (page 63) — 2KB stránky na STM32G4
 	static constexpr uint32_t SETTINGS_PAGE = 63;
@@ -20,12 +22,20 @@ namespace settings {
 		ramCopy.ledMasterEnable = true;
 		ramCopy.midiRoleId = true;
 		ramCopy._pad = 0;
+		std::memset(ramCopy.remoteAddr, 0, sizeof(ramCopy.remoteAddr));
 	}
 
 	void init() {
 		const auto *flash = reinterpret_cast<const SettingsData *>(SETTINGS_ADDR);
 		if (flash->magic == SETTINGS_MAGIC && flash->version == SETTINGS_VERSION) {
 			std::memcpy(&ramCopy, flash, sizeof(SettingsData));
+			ramCopy.remoteAddr[sizeof(ramCopy.remoteAddr) - 1] = '\0';
+		} else if (flash->magic == SETTINGS_MAGIC && flash->version == 1) {
+			// Migrace: LED/MIDI nastavení zůstanou, ovladač je třeba jednou spárovat z menu
+			loadDefaults();
+			std::memcpy(&ramCopy, flash, SETTINGS_V1_SIZE);
+			ramCopy.version = SETTINGS_VERSION;
+			std::memset(ramCopy.remoteAddr, 0, sizeof(ramCopy.remoteAddr));
 		} else {
 			loadDefaults();
 		}
@@ -110,6 +120,15 @@ namespace settings {
 
 	void setMidiRoleIdentifier(bool value) {
 		ramCopy.midiRoleId = value;
+	}
+
+	const char *remoteAddr() {
+		return ramCopy.remoteAddr;
+	}
+
+	void setRemoteAddr(const char *addr) {
+		std::strncpy(ramCopy.remoteAddr, addr, sizeof(ramCopy.remoteAddr) - 1);
+		ramCopy.remoteAddr[sizeof(ramCopy.remoteAddr) - 1] = '\0';
 	}
 
 } // namespace settings

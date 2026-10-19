@@ -263,6 +263,8 @@ namespace Bluetooth{
     bool stopScan();
     // Připojení k adrese z reklamy: C,<typ adresy 0/1>,<12 hex znaků>. false = fronta příkazů plná
     bool connectTo(uint8_t addrType, const char *addr);
+    // Adresa posledního connectTo() (12 hex znaků; "" před prvním voláním)
+    const char *pendingConnectAddr();
 
     PairingState pairingState();
     void setPairingState(PairingState state);
@@ -270,9 +272,6 @@ namespace Bluetooth{
     stmcpp::units::duration pairingElapsed();
     // SCANNING, CONNECTING nebo BONDING
     bool isPairing();
-
-    // Odpověď na dotaz "Spárovat?": ano → B (zabezpečení a bond), ne → K,1 (odpojení)
-    void confirmPairing(bool accept);
 
     // true, pokud automat příkazového režimu nic neprovádí a modul je v datovém režimu
     bool isIdle();

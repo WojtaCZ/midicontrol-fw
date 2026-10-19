@@ -494,7 +494,13 @@ namespace Bluetooth{
 
 	bool stopScan() { return queueCommand("X"); }
 
+	static char _connectAddr[13] = "";
+
+	const char *pendingConnectAddr() { return _connectAddr; }
+
 	bool connectTo(uint8_t addrType, const char *addr) {
+		strncpy(_connectAddr, addr, sizeof(_connectAddr) - 1);
+		_connectAddr[sizeof(_connectAddr) - 1] = '\0';
 		char cmd[MAX_COMMAND_LEN];
 		snprintf(cmd, sizeof(cmd), "C,%u,%s", static_cast<unsigned>(addrType), addr);
 		return queueCommand(cmd);
@@ -503,11 +509,6 @@ namespace Bluetooth{
 	PairingState pairingState() { return _pairingState; }
 	void setPairingState(PairingState state) { _pairingState = state; }
 	duration pairingElapsed() { return stmcpp::systick::getDuration() - _pairingStart; }
-
-	void confirmPairing(bool accept) {
-		// "ano" → B: zabezpečí spojení a uloží bond; "ne" → K,1: odpojí
-		queueCommand(accept ? "B" : "K,1");
-	}
 
 	// noinline: bezpečné místo hlavní smyčky pro zastavení testy (dbg.Target.call)
 	[[gnu::noinline]] void process() {

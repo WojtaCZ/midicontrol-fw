@@ -174,17 +174,6 @@ static ui::SplashScreen nowPlayingScreen(
     "Prehravani", "", "[STOP]", onNowPlayingDismiss
 );
 
-// ── Pairing confirm screen ─────────────────────────────────────────────
-
-static void onPairResult(bool confirmed, void* userData) {
-    (void)userData;
-    // Ano → B (zabezpečení a uložení bondu), Ne → K,1 (odpojení); provede se neblokujícím automatem
-    Bluetooth::confirmPairing(confirmed);
-    nav.pop();
-}
-
-static ui::ConfirmScreen pairingScreen("Sparovat zarizeni?", onPairResult);
-
 // ── Párování s ovladačem z menu (průběh a výsledek) ───────────────────
 
 static bool _pairStatusShown = false;
@@ -458,10 +447,6 @@ ui::MenuItem& checkboxLedMaster() {
 
 ui::MenuItem& checkboxMidiRole() {
     return settingsItems[1];
-}
-
-void showPairingConfirm() {
-    nav.push(&pairingScreen);
 }
 
 void showPairingResult(const char* text) {
