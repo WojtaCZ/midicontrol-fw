@@ -5,6 +5,7 @@
 #include "base.hpp"
 #include "led.hpp"
 #include "ringbuffer.hpp"
+#include "debug.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -50,6 +51,13 @@ namespace router {
 	[[gnu::used]] static duration _lastRemoteRx = 0_ms;
 	[[gnu::used]] static bool _remoteEverSeen = false;
 	static duration _lastKeepalive = 0_ms;
+
+	// Diagnostika (log): poslední hlášený stav protistran, zahozené rámce a plný CDC buffer
+	static bool _pcAliveLogged = false;
+	static bool _remoteAliveLogged = false;
+	static uint16_t _badFrames = 0;
+	static uint16_t _cdcOverflows = 0;
+	static duration _lastCountReport = 0_ms;
 
 	// Nepotvrzené pakety, které Base sama odeslala (čekají na ACK/NAK)
 	struct Pending {
@@ -111,7 +119,10 @@ namespace router {
 		uint8_t frame[protocol::MAX_FRAME_SIZE];
 		uint16_t len = protocol::encode(pkt, frame);
 		if (len == 0 || !tud_mounted()) return false;
-		if (_cdcTx.freeSpace() < len) return false; // Celý rámec, nebo nic
+		if (_cdcTx.freeSpace() < len) { // Celý rámec, nebo nic
+			if (_cdcOverflows != 0xFFFF) _cdcOverflows++;
+			return false;
+		}
 
 		for (uint16_t i = 0; i < len; ++i) {
 			_cdcTx.push(frame[i]);
@@ -168,6 +179,8 @@ namespace router {
 	}
 
 	static void sendNak(const Packet &rx, NakReason reason, Transport via) {
+		Debug::log(Debug::Level::INFO, "router", "NAK 0x%02x for type 0x%02x from 0x%02x pid %u", static_cast<unsigned>(reason), static_cast<unsigned>(rx.msgType),
+				   rx.source, rx.packetId);
 		uint8_t payload[2] = {rx.packetId, static_cast<uint8_t>(reason)};
 		sendSimple(rx.source, MsgType::NAK, payload, 2, via);
 	}
@@ -208,6 +221,8 @@ namespace router {
 			if (!p.used || (now - p.sentAt) < RETRY_TIMEOUT) continue;
 
 			if (p.retries >= protocol::MAX_RETRIES) {
+				Debug::log(Debug::Level::WARNING, "router", "retries exhausted: type 0x%02x to 0x%02x pid %u", static_cast<unsigned>(p.pkt.msgType),
+						   p.pkt.dest, p.pkt.packetId);
 				p.used = false; // Vzdáváme to; GUI má vlastní timeouty
 				continue;
 			}
@@ -351,6 +366,7 @@ namespace router {
 				// Acknowledge, then reboot into the USB bootloader shortly afterwards
 				// (the delay lets the ACK reach the PC before the device re-enumerates).
 				sendAck(pkt, via);
+				Debug::log(Debug::Level::INFO, "ota", "ENTER_BOOTLOADER from 0x%02x, reset in 250 ms", pkt.source);
 				requestBootloader();
 				_enterBootloader = true;
 				_enterBootloaderAt = stmcpp::systick::getDuration() + 250_ms;
@@ -382,6 +398,8 @@ namespace router {
 
 	static void processPacket(const Packet &pkt, Transport via) {
 		duration now = stmcpp::systick::getDuration();
+		Debug::log(Debug::Level::DEBUG, "router", "rx %s 0x%02x->0x%02x pid %u type 0x%02x len %u", via == Transport::USB_CDC ? "cdc" : "ble", pkt.source, pkt.dest,
+				   pkt.packetId, static_cast<unsigned>(pkt.msgType), pkt.payloadLen);
 		if (via == Transport::USB_CDC) {
 			_lastPcRx = now;
 			_pcEverSeen = true;
@@ -416,6 +434,28 @@ namespace router {
 		}
 	}
 
+	// Změny dostupnosti PC/Remote a souhrn zahozených rámců (nejvýše jednou za sekundu) do logu
+	static void logChanges() {
+		bool pc = isPcAlive();
+		if (pc != _pcAliveLogged) {
+			_pcAliveLogged = pc;
+			Debug::log(pc ? Debug::Level::INFO : Debug::Level::WARNING, "router", "PC %s", pc ? "alive" : "lost");
+		}
+		bool remote = isRemoteAlive();
+		if (remote != _remoteAliveLogged) {
+			_remoteAliveLogged = remote;
+			Debug::log(remote ? Debug::Level::INFO : Debug::Level::WARNING, "router", "remote %s", remote ? "alive" : "lost");
+		}
+		duration now = stmcpp::systick::getDuration();
+		if ((_badFrames || _cdcOverflows) && (now - _lastCountReport) >= 1000_ms) {
+			_lastCountReport = now;
+			if (_badFrames) Debug::log(Debug::Level::WARNING, "router", "cdc: %u bad frames dropped", static_cast<unsigned>(_badFrames));
+			if (_cdcOverflows) Debug::log(Debug::Level::WARNING, "router", "cdc: tx buffer full, %u frames dropped", static_cast<unsigned>(_cdcOverflows));
+			_badFrames = 0;
+			_cdcOverflows = 0;
+		}
+	}
+
 	void process() {
 		// Příjem z USB-CDC
 		if (tud_cdc_available()) {
@@ -425,6 +465,8 @@ namespace router {
 			for (uint32_t i = 0; i < count; ++i) {
 				if (_cdcParser.feed(buf[i])) {
 					processPacket(_cdcParser.getPacket(), Transport::USB_CDC);
+				} else if (buf[i] == protocol::FRAME_END && _badFrames != 0xFFFF) {
+					_badFrames++; // FRAME_END bez platného rámce: CRC, délka nebo neúplný rámec
 				}
 			}
 		}
@@ -439,6 +481,7 @@ namespace router {
 		retryPending();
 		sendKeepaliveToRemote();
 		flushCdc();
+		logChanges();
 
 		// Pending reboot into the USB bootloader (after the ACK has been flushed).
 		if (_enterBootloader && stmcpp::systick::getDuration() >= _enterBootloaderAt) {

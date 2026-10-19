@@ -53,8 +53,8 @@ Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-gene
 - `midi` — DIN MIDI (USART3, 31250 Bd): DIN→USB parser (running status, real-time inside SysEx) in the ISR, USB writes from the main loop
 - `oled`, `menu` — SH1106 framebuffer (I2C1 400 kHz, DMA) and the menu (`GUI::`)
 - `led` — WS2812 strips (front 4 px, rear 6 px)
-- `usb` — TinyUSB composite device (CDC + MIDI)
-- `debug` — log into a RAM ring buffer (never into the CDC stream, which carries only protocol frames)
+- `usb` — TinyUSB composite device: CDC 0 (interfaces 0/1, EP 0x81/0x02/0x82, protocol frames only), MIDI (2/3, EP 0x03/0x83), CDC 1 "MIDIControl log" (4/5, EP 0x84/0x05/0x85, text log)
+- `debug` — text log `[ssssss.mmm] L tag: text` (`Debug::log(level, tag, fmt, ...)`, main loop only; ISRs use `Debug::logFromIsr`) into a 1536 B ring in no-init RAM (0x20007800, survives resets), sent by `Debug::process()` to the log CDC while the PC has it open; boot banner with git revision and reset cause (`resetcause`); commands `level e|w|i|d`, `dump`, `help` on the log port. Never into the protocol CDC
 
 **Libraries** (`lib/`, git submodules):
 - `protocol` — shared packet codec/parser (`midicontrol-protocol`)

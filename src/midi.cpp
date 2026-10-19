@@ -10,6 +10,7 @@
 
 #include <string.h>
 #include "ringbuffer.hpp"
+#include "debug.hpp"
 #include "stmcpp/systick.hpp"
 
 #include "stmcpp/register.hpp"
@@ -104,7 +105,7 @@ namespace midi {
 
 	static void _emit(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3) {
 		UsbPacket pkt = {{cin, b1, b2, b3}};
-		_dinToUsb.push(pkt); // Při přetečení se paket zahodí
+		if (!_dinToUsb.push(pkt)) Debug::logFromIsr(Debug::ISR_MIDI_OVERFLOW); // Při přetečení se paket zahodí
 	}
 
 	static uint8_t _dataBytesFor(uint8_t status) {
@@ -208,6 +209,7 @@ namespace midi {
 		if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE)) {
 			// Chyba příjmu: smazat příznaky a zahodit rozpracovanou zprávu
 			USART3->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
+			Debug::logFromIsr(Debug::ISR_MIDI_UART_ERROR);
 			_inSysex = false;
 			_sysexIdx = 0;
 			_dataIdx = 0;

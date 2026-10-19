@@ -204,7 +204,7 @@ namespace Bluetooth{
 					_engineState = EngineState::SEND;
 				} else if ((now - _engineTimestamp) > CMD_TIMEOUT) {
 					// Modul nepřešel do příkazového režimu — zahodit úlohu
-					Debug::log(Debug::Level::WARNING, "BLE: $$$ timeout");
+					Debug::log(Debug::Level::WARNING, "ble", "$$$ timeout");
 					_finishJob();
 				}
 				break;
@@ -216,6 +216,7 @@ namespace Bluetooth{
 				_clearResponseFlags();
 				_rebootSeen = false;
 				if (!_sendString(line)) break; // TX fronta plná, zkusit příště
+				Debug::log(Debug::Level::DEBUG, "ble", "cmd %s", cmd);
 				_engineTimestamp = now;
 				_engineState = (strcmp(cmd, "R,1") == 0) ? EngineState::WAIT_REBOOT : EngineState::WAIT_RESP;
 				break;
@@ -225,9 +226,7 @@ namespace Bluetooth{
 				if (_sawPrompt || _sawProgress || (now - _engineTimestamp) > CMD_TIMEOUT) {
 					if (_sawErr || !(_sawPrompt || _sawProgress)) {
 						// Samotný příkaz ("C", "Z") by v logu nic neříkal — doplnit kontext
-						char msg[MAX_COMMAND_LEN + 16];
-						snprintf(msg, sizeof(msg), "BLE cmd failed: %s", _jobCommands[_jobIndex]);
-						Debug::log(Debug::Level::WARNING, msg);
+						Debug::log(Debug::Level::WARNING, "ble", "cmd failed: %s", _jobCommands[_jobIndex]);
 					}
 					_jobIndex++;
 					if (_jobIndex < _jobCount) {
@@ -489,6 +488,7 @@ namespace Bluetooth{
 		if (!_queueJob(commands, count)) return 1;
 		_pairingStart = stmcpp::systick::getDuration();
 		_pairingState = PairingState::SCANNING;
+		Debug::log(Debug::Level::INFO, "ble", "pairing started");
 		return 0;
 	}
 
@@ -596,6 +596,7 @@ namespace Bluetooth{
 
 		if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE)) {
 			stmcpp::reg::write(std::ref(USART2->ICR), USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF);
+			Debug::logFromIsr(Debug::ISR_BLE_UART_ERROR);
 		}
 
 		if(isr & USART_ISR_RXNE){
@@ -609,7 +610,7 @@ namespace Bluetooth{
 				_rxStatus.text[_rxStatusIndex] = '\0';
 				_receivingStatus = false;
 				if (strcmp(_rxStatus.text, "REBOOT") == 0) _rebootSeen = true;
-				_statusQueue.push(_rxStatus);
+				if (!_statusQueue.push(_rxStatus)) Debug::logFromIsr(Debug::ISR_BLE_STATUS_OVERFLOW);
 				_rxStatusIndex = 0;
 			}else if (_receivingStatus){
 				// Příliš dlouhé zprávy (např. výsledky skenování) se zkrátí
@@ -619,7 +620,7 @@ namespace Bluetooth{
 			}else{
 				// Data (protokolové rámce i textové odpovědi) zpracuje hlavní smyčka
 				_dataReceivedTimestamp = stmcpp::systick::getDuration();
-				_rxRing.push(static_cast<uint8_t>(c));
+				if (!_rxRing.push(static_cast<uint8_t>(c))) Debug::logFromIsr(Debug::ISR_BLE_RX_OVERFLOW);
 			}
         }
 	}

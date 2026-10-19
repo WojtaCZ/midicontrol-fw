@@ -48,6 +48,7 @@ static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
 	using PS = Bluetooth::PairingState;
 	Bluetooth::setPairingState(ok ? PS::DONE : PS::FAILED);
 	if (ok) {
+		Debug::log(Debug::Level::INFO, "ble", "pairing done, remote %s", Bluetooth::pendingConnectAddr());
 		_reconnectNeeded = false;
 		// Adresa ovladače trvale do nastavení: jen s ní se po %CONNECT% zabezpečí spojení (i po resetu base)
 		if (strcmp(settings::remoteAddr(), Bluetooth::pendingConnectAddr()) != 0) {
@@ -56,6 +57,7 @@ static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
 		}
 		GUI::showPairingResult("Sparovano");
 	} else {
+		Debug::log(Debug::Level::WARNING, "ble", "pairing failed in state %u", static_cast<unsigned>(failedIn));
 		_reconnectNeeded = true;
 		_lastReconnectAttempt = stmcpp::systick::getDuration();
 		GUI::showPairingResult(failedIn == PS::SCANNING ? "Ovladac nenalezen" : "Parovani selhalo");
@@ -71,8 +73,8 @@ static void pairingTimeout() {
 	if (state == PS::SCANNING) queued &= Bluetooth::stopScan();
 	if (state == PS::CONNECTING) queued &= Bluetooth::queueCommand("Z");
 	if (Bluetooth::isConnected() || state == PS::BONDING) queued &= Bluetooth::queueCommand("K,1");
-	if (!queued) Debug::log(Debug::Level::WARNING, "BLE pairing: cleanup not queued");
-	Debug::log(Debug::Level::WARNING, "BLE pairing timeout");
+	if (!queued) Debug::log(Debug::Level::WARNING, "ble", "pairing: cleanup not queued");
+	Debug::log(Debug::Level::WARNING, "ble", "pairing timeout (state %u)", static_cast<unsigned>(state));
 	pairingFinished(false, state);
 }
 
@@ -167,7 +169,8 @@ extern "C" void SysTick_Handler(void){
 extern "C" int main(void) {
 	stmcpp::systick::enable(144_MHz, 1_ms);
 
-	Debug::setLevel(Debug::Level::INFO);
+	// Log v no-init RAM: ověřit hlavičku (platná → zachovat log z doby před resetem). Výchozí úroveň I.
+	Debug::init();
 
 	// Načtení nastavení z flash (před LED a GUI)
 	settings::init();
@@ -190,6 +193,7 @@ extern "C" int main(void) {
 
 	//Initialize bluetooth
 	if(Bluetooth::init()){
+		Debug::log(Debug::Level::ERROR, "ble", "RN4870 init failed (no %%REBOOT%%)");
 		signalError();
 	}
 	
@@ -206,6 +210,9 @@ extern "C" int main(void) {
 	CRS->CR |= CRS_CR_CEN;
 
 	usb::init();
+
+	// Úvodní řádky logu: firmware, revize, příčina resetu (RCC->CSR se tím smaže)
+	Debug::banner();
 
 	// Konfigurace RN4870 se jen zařadí; provádí ji Bluetooth::process() bez blokování smyčky
 	if(Bluetooth::configure()){
@@ -236,6 +243,9 @@ extern "C" int main(void) {
 		// Směrování paketů PC ↔ Remote, ACK/opakování, keepalive, odesílání CDC
 		router::process();
 
+		// Log → CDC 1 (jen s otevřeným portem), příkazy z logovacího portu
+		Debug::process();
+
 		keypressScheduler.dispatch();
 		guiRenderScheduler.dispatch();
 		Oled::process();
@@ -250,6 +260,7 @@ extern "C" int main(void) {
 		if (_reconnectNeeded && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
 			_lastReconnectAttempt = stmcpp::systick::getDuration();
+			Debug::log(Debug::Level::DEBUG, "ble", "reconnect attempt");
 			Bluetooth::reconnect();
 		}
 
@@ -265,11 +276,12 @@ extern "C" int main(void) {
 					if (pairing == PS::SCANNING) {
 						auto *adv = static_cast<Bluetooth::AdvConnectableCommand *>(command.get());
 						if (adv->getName() == Bluetooth::REMOTE_NAME) {
+							Debug::log(Debug::Level::INFO, "ble", "pairing: remote found %s", adv->getAddr().c_str());
 							if (Bluetooth::stopScan() && Bluetooth::connectTo(static_cast<uint8_t>(adv->getConnected()), adv->getAddr().c_str())) {
 								Bluetooth::setPairingState(PS::CONNECTING);
 							} else {
 								// Plná fronta příkazů: X/C neodešly, nečekat 15 s na timeout
-								Debug::log(Debug::Level::WARNING, "BLE pairing: command queue full");
+								Debug::log(Debug::Level::WARNING, "ble", "pairing: command queue full");
 								Bluetooth::stopScan();
 								pairingFinished(false, pairing);
 							}
@@ -279,13 +291,15 @@ extern "C" int main(void) {
 
 				case Bluetooth::Command::Type::BONDED:
 				case Bluetooth::Command::Type::SECURED:
+					Debug::log(Debug::Level::INFO, "ble", "%s", command->getType() == Bluetooth::Command::Type::BONDED ? "bonded" : "secured");
 					Bluetooth::setBonded(true);
 					if (pairing == PS::BONDING) pairingFinished(true, pairing);
 					break;
 
 				case Bluetooth::Command::Type::ERR_SEC:
+					Debug::log(Debug::Level::WARNING, "ble", "ERR_SEC");
 					if (pairing == PS::BONDING) {
-						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "BLE: K,1 not queued");
+						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 						pairingFinished(false, pairing);
 					}
 					break;
@@ -293,6 +307,7 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::CONNECT: {
 					// %CONNECT,<typ adresy 0/1>,<MAC>% — první parametr je typ adresy, ne stav spojení
 					const std::string &addr = static_cast<Bluetooth::ConnectCommand *>(command.get())->getAddr();
+					Debug::log(Debug::Level::INFO, "ble", "connect %s", addr.c_str());
 					Bluetooth::setConnected(true);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = false;
@@ -302,13 +317,13 @@ extern "C" int main(void) {
 							if (Bluetooth::queueCommand("B")) {
 								Bluetooth::setPairingState(PS::BONDING);
 							} else {
-								Debug::log(Debug::Level::WARNING, "BLE pairing: B not queued");
+								Debug::log(Debug::Level::WARNING, "ble", "pairing: B not queued");
 								Bluetooth::queueCommand("K,1");
 								pairingFinished(false, pairing);
 							}
 						} else {
 							// Během čekání na ovladač se připojil někdo jiný → odpojit, párování selhalo
-							Debug::log(Debug::Level::WARNING, "BLE pairing: foreign connect");
+							Debug::log(Debug::Level::WARNING, "ble", "pairing: foreign connect %s", addr.c_str());
 							Bluetooth::queueCommand("K,1");
 							pairingFinished(false, pairing);
 						}
@@ -322,8 +337,8 @@ extern "C" int main(void) {
 							_secureOnStreamOpen = true;
 						} else {
 							// Cizí zařízení (telefon, PC): bond vzniká jen párováním z menu → odpojit, žádný B
-							Debug::log(Debug::Level::WARNING, "BLE: unknown device, K,1");
-							if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "BLE: K,1 not queued");
+							Debug::log(Debug::Level::WARNING, "ble", "unknown device %s, K,1", addr.c_str());
+							if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 						}
 					}
 					GUI::renderForce();
@@ -331,16 +346,18 @@ extern "C" int main(void) {
 				}
 
 				case Bluetooth::Command::Type::STREAM_OPEN:
+					Debug::log(Debug::Level::INFO, "ble", "stream open");
 					Bluetooth::setConnected(true);
 					Bluetooth::setStreamOpen(true);
 					if (_secureOnStreamOpen) {
 						// B s uloženým klíčem → %SECURED% za ~0,2 s, bez dotazu na OLED
 						_secureOnStreamOpen = false;
-						if (!Bluetooth::queueCommand("B")) Debug::log(Debug::Level::WARNING, "BLE: B not queued, link unsecured");
+						if (!Bluetooth::queueCommand("B")) Debug::log(Debug::Level::WARNING, "ble", "B not queued, link unsecured");
 					}
 					break;
 
 				case Bluetooth::Command::Type::DISCONNECT:
+					Debug::log(Debug::Level::INFO, "ble", "disconnect");
 					_secureOnStreamOpen = false;
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
@@ -349,6 +366,7 @@ extern "C" int main(void) {
 					break;
 
 				case Bluetooth::Command::Type::REBOOT:
+					Debug::log(Debug::Level::WARNING, "ble", "module reboot");
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
 					if (Bluetooth::isPairing()) pairingFinished(false, pairing);
@@ -356,7 +374,7 @@ extern "C" int main(void) {
 
 				default:
 					// Ostatní stavové zprávy jen do debug logu (nikdy do CDC — ten nese protokol)
-					Debug::log(Debug::Level::DEBUG, "BLE status");
+					Debug::log(Debug::Level::DEBUG, "ble", "status type %u", static_cast<unsigned>(command->getType()));
 					break;
 			}
 		}

@@ -74,6 +74,9 @@
    ITF_NUM_CDC_DATA,
    ITF_NUM_MIDI,
    ITF_NUM_MIDI_STREAMING,
+   // Log CDC až za MIDI: protokolové CDC zůstává na rozhraní 0/1 (stávající hostitelé)
+   ITF_NUM_LOG,
+   ITF_NUM_LOG_DATA,
    ITF_NUM_TOTAL
  };
  
@@ -86,15 +89,22 @@
  #define EPNUM_MIDI_OUT      0x03
  #define EPNUM_MIDI_IN       0x83
 
+ #define EPNUM_LOG_NOTIF         0x84
+ #define EPNUM_LOG_OUT           0x05
+ #define EPNUM_LOG_IN            0x85
+
  uint8_t const desc_fs_configuration[] =
  {
    // Config number, interface count, string index, total length, attribute, power in mA
    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
 
-   // CDC interface used for logging
+   // CDC 0: jen protokolové rámce
    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 
-   TUD_MIDI_DESCRIPTOR(ITF_NUM_MIDI, 5, EPNUM_MIDI_OUT, EPNUM_MIDI_IN, 64)
+   TUD_MIDI_DESCRIPTOR(ITF_NUM_MIDI, 5, EPNUM_MIDI_OUT, EPNUM_MIDI_IN, 64),
+
+   // CDC 1: textový log (Debug::process)
+   TUD_CDC_DESCRIPTOR(ITF_NUM_LOG, 6, EPNUM_LOG_NOTIF, 8, EPNUM_LOG_OUT, EPNUM_LOG_IN, 64)
  };
 
  uint8_t const desc_hs_configuration[] =
@@ -102,10 +112,11 @@
    // Config number, interface count, string index, total length, attribute, power in mA
    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
 
-   // CDC interface used for communication and logging
    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 512),
 
-   TUD_MIDI_DESCRIPTOR(ITF_NUM_MIDI, 5, EPNUM_MIDI_OUT, EPNUM_MIDI_IN, 512)
+   TUD_MIDI_DESCRIPTOR(ITF_NUM_MIDI, 5, EPNUM_MIDI_OUT, EPNUM_MIDI_IN, 512),
+
+   TUD_CDC_DESCRIPTOR(ITF_NUM_LOG, 6, EPNUM_LOG_NOTIF, 8, EPNUM_LOG_OUT, EPNUM_LOG_IN, 512)
  };
  
  // device qualifier is mostly similar to device descriptor since we don't change configuration based on speed
@@ -157,6 +168,7 @@
    NULL,                          // 3: UID (generated bellow)
    "Serial Communication",// 4: Serial Interface
    "MIDI Interface",   // 5: MIDI interface
+   "MIDIControl log",  // 6: log CDC (hledá ho PC podle tohoto řetězce)
  };
  
  static uint16_t _desc_str[32 + 1];

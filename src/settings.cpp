@@ -1,4 +1,5 @@
 #include "settings.hpp"
+#include "debug.hpp"
 #include <stm32g431xx.h>
 #include <cmsis_compiler.h>
 #include <cstring>
@@ -30,14 +31,17 @@ namespace settings {
 		if (flash->magic == SETTINGS_MAGIC && flash->version == SETTINGS_VERSION) {
 			std::memcpy(&ramCopy, flash, sizeof(SettingsData));
 			ramCopy.remoteAddr[sizeof(ramCopy.remoteAddr) - 1] = '\0';
+			Debug::log(Debug::Level::INFO, "set", "loaded v%u, remote %s", SETTINGS_VERSION, ramCopy.remoteAddr[0] ? ramCopy.remoteAddr : "-");
 		} else if (flash->magic == SETTINGS_MAGIC && flash->version == 1) {
 			// Migrace: LED/MIDI nastavení zůstanou, ovladač je třeba jednou spárovat z menu
 			loadDefaults();
 			std::memcpy(&ramCopy, flash, SETTINGS_V1_SIZE);
 			ramCopy.version = SETTINGS_VERSION;
 			std::memset(ramCopy.remoteAddr, 0, sizeof(ramCopy.remoteAddr));
+			Debug::log(Debug::Level::INFO, "set", "migrated v1 -> v%u (remote must be paired)", SETTINGS_VERSION);
 		} else {
 			loadDefaults();
+			Debug::log(Debug::Level::WARNING, "set", "no valid settings, defaults");
 		}
 	}
 
@@ -104,6 +108,7 @@ namespace settings {
 		if (!primask) {
 			__enable_irq();
 		}
+		Debug::log(Debug::Level::INFO, "set", "saved, remote %s", ramCopy.remoteAddr[0] ? ramCopy.remoteAddr : "-");
 	}
 
 	bool ledMasterEnable() {

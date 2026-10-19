@@ -1,6 +1,7 @@
 #include "display.hpp"
 #include "led.hpp"
 #include "midi.hpp"
+#include "debug.hpp"
 #include "protocol/constants.hpp"
 #include <cstring>
 #include <stm32g431xx.h>
@@ -139,6 +140,14 @@ namespace display {
 
     // Hlavní smyčka: odeslání nejvýše jednoho rámce, SysEx ozvěna (TinyUSB se nesmí volat z ISR)
     void process(){
+        // Připojení/odpojení displeje (příznak mění EXTI) do logu
+        static bool loggedConnected = false;
+        bool nowConnected = connected;
+        if (nowConnected != loggedConnected) {
+            loggedConnected = nowConnected;
+            Debug::log(Debug::Level::INFO, "disp", "display %s", nowConnected ? "connected" : "disconnected");
+        }
+
         if (rxFrameReady) {
             rxFrameReady = false;
             midiEchoPending = true;
