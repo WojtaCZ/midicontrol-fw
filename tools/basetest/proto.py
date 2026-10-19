@@ -1,6 +1,8 @@
 # Kopie ../midicontroller-fw/tools/bletest/proto.py (repozitare jsou nezavisle); drzet v souladu s lib/protocol.
+# DIAG_GET/DIAG_RESP + kodek zaznamu (protocol/diag.hpp) zrcadli lib/protocol; pri zmene upravit i bletest/proto.py.
 """midicontrol-protocol v2 codec (lib/protocol/PROTOCOL.md) for the BLE test harness."""
 
+import struct
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -39,6 +41,8 @@ class MT(IntEnum):
     FW_UPDATE_END = 0x72
     FW_UPDATE_STATUS = 0x73
     ENTER_BOOTLOADER = 0x74
+    DIAG_GET = 0x80
+    DIAG_RESP = 0x81
 
 
 class NAK(IntEnum):
@@ -49,6 +53,43 @@ class NAK(IntEnum):
     NOT_PLAYING = 0x05
     UNREACHABLE = 0x06
     NOT_FOUND = 0x07
+
+
+# Diagnostic records (protocol/diag.hpp, PROTOCOL.md "Diagnostics"): 12 B little-endian
+# seq u16, code u8, level u8, uptime_ms u32, arg u32; DIAG_RESP = [boot_id u16, next_cursor u16, n u8, n x record].
+DIAG_RECORD_SIZE = 12
+DIAG_MAX_RECORDS = 8
+DIAG_CODES = {
+    1: "BOOT", 2: "FAULT", 3: "FAULT_DETAIL", 4: "LOOP_STALL", 5: "IWDG_RESET", 6: "BLE_CONNECT",
+    7: "BLE_DISCONNECT", 8: "BLE_SECURED", 9: "LINK_LOST", 10: "RETRIES_EXHAUSTED", 11: "CRC_ERRORS",
+    12: "CHARGER_FAULT", 13: "LOW_BATTERY", 14: "OTA_RESULT", 15: "SHUTDOWN", 16: "RECORDS_LOST",
+}
+DIAG_LEVELS = {1: "ERROR", 2: "WARNING", 3: "INFO", 4: "DEBUG"}
+
+
+def diag_encode_record(seq, code, level, uptime_ms, arg) -> bytes:
+    return struct.pack("<HBBII", seq, code, level, uptime_ms, arg)
+
+
+def diag_decode_record(raw: bytes):
+    return struct.unpack("<HBBII", raw)
+
+
+def diag_encode_get(cursor: int) -> bytes:
+    return struct.pack("<H", cursor)
+
+
+def diag_encode_resp(boot_id: int, next_cursor: int, records) -> bytes:
+    assert len(records) <= DIAG_MAX_RECORDS
+    return struct.pack("<HHB", boot_id, next_cursor, len(records)) + b"".join(diag_encode_record(*r) for r in records)
+
+
+def diag_decode_resp(payload: bytes):
+    boot_id, cursor, n = struct.unpack_from("<HHB", payload)
+    if n > DIAG_MAX_RECORDS or len(payload) != 5 + n * DIAG_RECORD_SIZE:
+        raise ValueError("bad DIAG_RESP payload length")
+    recs = [diag_decode_record(payload[5 + i * DIAG_RECORD_SIZE:5 + (i + 1) * DIAG_RECORD_SIZE]) for i in range(n)]
+    return boot_id, cursor, recs
 
 
 @dataclass(frozen=True)

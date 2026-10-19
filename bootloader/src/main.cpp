@@ -19,6 +19,7 @@
 #include "boot/crc32.hpp"
 #include "boot/fw_receiver.hpp"
 #include "boot/image.hpp"
+#include "boot/wdg.hpp"
 
 // Base USB bootloader. Stays resident when
 //   * the application set the backup-register magic before resetting (update
@@ -176,6 +177,7 @@ extern "C" int main(void) {
 	TAMP->BKP0R = 0;
 	stay = stay || forcedEntry();
 
+	boot::wdg::kick();
 	if (!stay && boot::appBootable(boot::image::kBoardBase)) {
 		boot::jumpToApp(boot::kAppBase);
 	}
@@ -189,6 +191,7 @@ extern "C" int main(void) {
 	NVIC_EnableIRQ(USB_HP_IRQn);
 
 	while (1) {
+		boot::wdg::kick(); // IWDG z aplikace běží i po ENTER_BOOTLOADER a nejde zastavit
 		tud_task();
 
 		if (tud_cdc_available()) {
@@ -204,6 +207,7 @@ extern "C" int main(void) {
 		if (s_applyRequested) {
 			// Flush the final ACK, then reset into the freshly programmed app.
 			for (volatile uint32_t i = 0; i < 400000; ++i) {
+				boot::wdg::kick();
 				tud_task();
 			}
 			NVIC_SystemReset();

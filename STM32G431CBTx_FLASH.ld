@@ -64,7 +64,9 @@ _Min_Stack_Size = 0x400;	/* required amount of stack */
    32K and jumps to the application linked at 0x08008000. */
 MEMORY
 {
-  RAM	(xrw)	: ORIGIN = 0x20000000,	LENGTH = 32K
+  RAM	(xrw)	: ORIGIN = 0x20000000,	LENGTH = 30K
+  /* Blok bez inicializace: přežije reset (log, záznam chyby). Stejně v aplikaci i bootloaderu. */
+  NOINIT	(rw)	: ORIGIN = 0x20007800,	LENGTH = 2K
   FLASH	(rx)	: ORIGIN = 0x8008000,	LENGTH = 94K
 }
 
@@ -192,6 +194,15 @@ SECTIONS
   } >RAM
 
   /* Remove information from the compiler libraries */
+  /* Nenulovaná, nenačítaná data (zůstávají přes reset); startup je nesmí mazat */
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.noinit)
+    *(.noinit*)
+    . = ALIGN(4);
+  } >NOINIT
+
   /DISCARD/ :
   {
     libc.a ( * )
