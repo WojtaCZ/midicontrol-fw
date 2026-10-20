@@ -1,9 +1,10 @@
 set(GIT_PATH ${CMAKE_SOURCE_DIR}/inc/git.hpp)
 	
-add_custom_command(
-    PRE_BUILD
+# Hlavicka se musi vygenerovat PRED kompilaci (PRE_BUILD na .elf bezi az pred linkem, takze obraz nesl revizi
+# predchoziho buildu): vlastni cil, na kterem .elf zavisi.
+add_custom_target(git_header
+    BYPRODUCTS ${GIT_PATH}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    TARGET ${PROJECT_NAME}.elf
 
     COMMAND echo \'/*  This file is automatically gennerated by CMake, do not modify! */ \' > ${GIT_PATH}
     COMMAND echo \'\#include<string>\' >> ${GIT_PATH}
@@ -46,3 +47,4 @@ add_custom_command(
     COMMAND echo \'}\' >> ${GIT_PATH}
     
 )
+add_dependencies(${PROJECT_NAME}.elf git_header)
