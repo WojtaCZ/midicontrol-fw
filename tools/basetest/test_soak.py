@@ -3,6 +3,8 @@ Cyklus (~3 s): PLAY z remote (klavesy 406 + ENTER) -> harness potvrdi, SIGNAL_PL
 USB-MIDI noty na base (DIN nelze overit, bench DIN link je rozbity: jen se pozoruje, ze zapis projde a log je cisty),
 SIGNAL_STOPPED. Kazdych 10 s DIAG_GET na remote s merenim latence DIAG_GET -> DIAG_RESP (R28). Pocitadla po iteracich
 jdou do CSV (`SOAK_OUT`, default <tmp>/basetest-soak/soak.csv), na konci se vypise souhrn.
+CRC: base nema citelny pocitadlo (router::_badFrames se po hlaseni nuluje) - chyby prichazi jako W radek "cdc: N bad frames"
+(log ma kladnou kontrolu); remote: zaznamy CRC_ERRORS z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
 Pass = vsechna pocitadla chyb nulova, boot_id remote stejny, base log bez E/W (krome znamych), uptime base monotonni,
 zadne jadro nezastavene/lockup. Latence se jen hlasi (hranice 2 s se pocita, ale neni podminkou)."""
 
@@ -28,8 +30,8 @@ ADDR_PC, ADDR_BASE, ADDR_REMOTE = proto.ADDR_PC, proto.ADDR_BASE, proto.ADDR_REM
 DIAG_PERIOD = 10.0
 CYCLE = 3.0
 SLOW_S = 2.0
-# radky logu base, ktere v soaku nevadi (regex na cely radek); doplnit podle prvniho behu
-KNOWN_LOG = [r"^\[ *\d+\.\d{3}\] [EW] [a-z]{1,6}: (?!XXXXXX)NEVER$"]
+CODE_CRC_ERRORS = 11  # diag zaznam remote: CRC chyby na BLE lince
+MAX_REMOTE_AGE_MS = 3000  # base -> remote keepalive po 2 s (+ rezerva); 6000 ms je az prah ztraty spojeni
 LOG_TS = re.compile(r"^\[ *(\d+)\.(\d{3})\] ([EWID]) ([a-z]{1,6}): (.*)$")
 
 
@@ -64,15 +66,14 @@ def test_soak(paired, link, remote_probe):
     os.makedirs(out_dir, exist_ok=True)
     pr = midi.ports()
     log = loglink.LogLink()
-    c = dict(cycles=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, crc_err=0, diag_polls=0, diag_no_ack=0,
+    c = dict(cycles=0, base_reset=0, log_alive=0, remote_crc_recs=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, diag_polls=0, diag_no_ack=0,
              diag_no_resp=0, diag_nak=0, diag_slow=0, midi_err=0, halted=0, lockup=0, remote_dead=0, digits_stale=0,
              fault_recs=0, boot_changed=0, ble_disconnected=0, max_remote_age_ms=0.0)
-    lat_ack, lat_resp, play_lat = [], [], []
+    lat_ack, lat_resp = [], []
     errors = []
 
     def ack_for(mtype, payload=b""):
         pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, mtype, payload))
-        t0 = time.monotonic()
         r = link.recv(1.5, reply_to(pid))
         if r is None:
             c["ack_missed"] += 1
@@ -80,7 +81,6 @@ def test_soak(paired, link, remote_probe):
         elif r.mtype != MT.ACK:
             c["nak"] += 1
             errors.append(f"{time.monotonic() - t_start:.0f}s: NAK for {MT(mtype).name}: {r}")
-        return time.monotonic() - t0
 
     remote.goto_player()
     ack_for(MT.SIGNAL_STOPPED)
@@ -88,7 +88,16 @@ def test_soak(paired, link, remote_probe):
     if n:
         remote.key(*([dbg.BACK] * n))
     link.drain()
+    # kladna kontrola logu: bez ni by "zadne E/W" nic neznamenalo (default uroven je tiha)
+    assert log.command("level d") == ["level D"], "log CDC not answering"
+    try:
+        link.send_msg(MT.GET_STATUS)
+        assert log.lines(3.0, pred=lambda l: loglink.is_log_line(l) and " D " in l), "no D line on the log CDC at level d"
+    finally:
+        assert log.command("level i") == ["level I"]
+    c["log_alive"] = 1
     log.skip()
+    link.drain()
     fault0 = base.fault_record()  # zbytek z drivejsich testu (.noinit): nesmi se zmenit
     # pocatecni stav
     t_ack, t_resp, resp = diag_timed(link, 0xFFFF)
@@ -96,6 +105,7 @@ def test_soak(paired, link, remote_probe):
     boot_id, cur, _ = decode(resp)
     ka_sent0, ka_ack0 = link.keepalives_sent, link.keepalive_acks
     log_start = len(log.history)
+    last_ticks = base.u("stmcpp::systick::ticks_")
     t_start = time.monotonic()
     next_poll = t_start
     rows = []
@@ -108,13 +118,11 @@ def test_soak(paired, link, remote_probe):
             # --- PLAY z remote
             link.drain()
             remote.key("4", "0", "6", dbg.ENTER)
-            t_key = time.monotonic()
             pkt = link.recv(2.5, from_remote(MT.PLAY_SONG))
             if pkt is None:
                 c["play_missed"] += 1
                 errors.append(f"{now:.0f}s: PLAY_SONG missing")
             else:
-                play_lat.append(time.monotonic() - t_key)
                 pc_ack(link, pkt)
                 if pkt.payload != b"406":
                     errors.append(f"{now:.0f}s: PLAY_SONG payload {pkt.payload!r}")
@@ -156,7 +164,12 @@ def test_soak(paired, link, remote_probe):
                 c["remote_dead"] += 1
                 errors.append(f"{now:.0f}s: remote not alive")
             res = base.u("stmcpp::systick::resolution_")
-            nowt = (res * base.u("stmcpp::systick::ticks_")) & 0xFFFFFFFF
+            ticks = base.u("stmcpp::systick::ticks_")
+            if ticks < last_ticks:
+                c["base_reset"] += 1
+                errors.append(f"{now:.0f}s: base systick went back ({last_ticks} -> {ticks}): reset")
+            last_ticks = ticks
+            nowt = (res * ticks) & 0xFFFFFFFF
             age = ((nowt - base.u("router::_lastRemoteRx")) & 0xFFFFFFFF) / res
             c["max_remote_age_ms"] = max(c["max_remote_age_ms"], age)
             # --- DIAG
@@ -182,6 +195,7 @@ def test_soak(paired, link, remote_probe):
                         errors.append(f"{now:.0f}s: remote boot_id {boot_id:#06x} -> {bid:#06x}")
                     bad = [x for x in recs if x[1] in (CODE_FAULT, CODE_LOOP_STALL)]
                     c["fault_recs"] += len(bad)
+                    c["remote_crc_recs"] += sum(1 for x in recs if x[1] == CODE_CRC_ERRORS)
                     cur = max(cur, nxt)
             c["cycles"] += 1
             row.update({k: v for k, v in c.items() if k != "max_remote_age_ms"})
@@ -199,14 +213,16 @@ def test_soak(paired, link, remote_probe):
                 w.writerows(rows)
 
     # --- vyhodnoceni
-    time.sleep(1.0)
-    ka_sent, ka_ack = link.keepalives_sent - ka_sent0, link.keepalive_acks - ka_ack0
-    c["pc_keepalive_miss"] = ka_sent - ka_ack - 1  # posledni muze byt rozletany
-    c["pc_keepalive_miss"] = max(0, c["pc_keepalive_miss"])
+    ka_sent = link.keepalives_sent - ka_sent0
+    wait_end = time.monotonic() + 1.5  # posledni keepalive dostane cas na ACK
+    while time.monotonic() < wait_end and link.keepalive_acks - ka_ack0 < ka_sent:
+        time.sleep(0.05)
+    ka_ack = link.keepalive_acks - ka_ack0
+    c["pc_keepalive_miss"] = ka_sent - ka_ack
     hist = [l for _, l in log.history[log_start:]]
     log.close()
     parsed = [LOG_TS.match(l) for l in hist]
-    lines_ew = [l for l, m in zip(hist, parsed) if m and m.group(3) in "EW" and not any(re.match(k, l) for k in KNOWN_LOG)]
+    lines_ew = [l for l, m in zip(hist, parsed) if m and m.group(3) in "EW"]
     ts = [int(m.group(1)) * 1000 + int(m.group(2)) for m in parsed if m]
     markers = [l for l in hist if loglink.is_marker(l)]
     nonmono = sum(1 for a, b in zip(ts, ts[1:]) if b < a)
@@ -214,11 +230,12 @@ def test_soak(paired, link, remote_probe):
     c["log_lines"], c["log_ew"], c["log_nonmono"], c["log_markers"], c["log_banners"] = len(hist), len(lines_ew), nonmono, len(markers), len(banners)
     rec = base.fault_record()
     c["base_fault_record"] = 0 if rec == fault0 else 1  # novy/zmeneny zaznam od startu
-    bid, nxt, recs = decode(diag_timed(link, 0xFFFF)[2])
-    assert bid == boot_id
+    _, _, final = diag_timed(link, 0xFFFF)
+    assert final is not None, "no DIAG_RESP at the end"
+    assert decode(final)[0] == boot_id
     st_pc_err = link.error
     stats = {}
-    for name, v in (("diag_ack", lat_ack), ("diag_resp", lat_resp), ("play", play_lat)):
+    for name, v in (("diag_ack", lat_ack), ("diag_resp", lat_resp)):
         if v:
             s = sorted(v)
             stats[name] = dict(n=len(v), min=s[0], med=statistics.median(s), p95=s[min(len(s) - 1, int(0.95 * len(s)))], max=s[-1])
@@ -230,10 +247,11 @@ def test_soak(paired, link, remote_probe):
 
     assert st_pc_err is None
     assert link.stray == b"", f"bytes outside frames on CDC: {link.stray!r}"
-    zero = ["play_missed", "play_retrans", "ack_missed", "nak", "crc_err", "diag_no_ack", "diag_no_resp", "midi_err", "halted",
+    zero = ["play_missed", "play_retrans", "ack_missed", "nak", "base_reset", "remote_crc_recs", "diag_no_ack", "diag_no_resp", "midi_err", "halted",
             "lockup", "remote_dead", "boot_changed", "fault_recs", "log_ew", "log_nonmono", "log_markers", "log_banners",
             "base_fault_record", "pc_keepalive_miss", "ble_disconnected"]
     bad = {k: c[k] for k in zero if c[k]}
     assert not bad, f"soak counters: {bad}; errors {errors[:10]}; log {lines_ew[:10]}"
-    assert c["max_remote_age_ms"] < 6000, c["max_remote_age_ms"]
+    assert c["log_alive"]
+    assert c["max_remote_age_ms"] < MAX_REMOTE_AGE_MS, c["max_remote_age_ms"]
     assert remote_alive(base)

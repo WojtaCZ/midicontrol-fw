@@ -188,3 +188,6 @@ log CDC stays with the harness.
 SIGNAL_STOPPED) plus DIAG_GET every 10 s with DIAG_GET -> DIAG_RESP latency. Per-cycle counters go to `$SOAK_OUT/soak.csv`,
 the summary to `$SOAK_OUT/summary.txt`. DIN is not checked (bench link broken). The base log default level is quiet, so
 "log clean" means no E/W lines.
+One lost DIAG poll fails the soak by design. CRC errors: the base has no readable counter (`router::_badFrames` is zeroed
+after each report), so they show as `cdc: N bad frames dropped` W lines (the log CDC is positive-checked at start);
+remote CRC_ERRORS diag records are counted.
