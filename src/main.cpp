@@ -89,6 +89,16 @@ extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler songListDelayScheduler;
 [[noreturn]] void signalError(uint16_t code);
 
+// Start RN4870 (spec R21): chyba = jeden záznam ERROR bez resetu, další pokus po BLE_RETRY_INTERVAL
+static constexpr duration BLE_RETRY_INTERVAL = 60000_ms;
+static bool _bleInitOk = false; // Bluetooth::init() uspěl
+static bool _bleReady = false; // init i zařazení konfigurace uspěly
+static bool _bleErrorRecorded = false; // záznam ERROR jen jednou
+static duration _bleRetryAt = 0_ms;
+static void bleFailed(uint16_t code, const char *what);
+static void bleStart(bool first);
+static void bleConfigure();
+
 extern Oled::OledBuffer frameBuffer;
 
 static uint8_t ledSubCounter = 0;
@@ -214,10 +224,8 @@ extern "C" int main(void) {
 	ledScheduler.start(); // Start the LED scheduler
 
 	//Initialize bluetooth
-	if(Bluetooth::init()){
-		Debug::log(Debug::Level::ERROR, "ble", "RN4870 init failed (no %%REBOOT%%)");
-		signalError(fault::ERR_BLE_INIT);
-	}
+	// Selhání RN4870 není fatální (spec R21): base běží dál bez BLE a po 60 s zkusí init znovu
+	bleStart(true);
 	
 	//Initialize LED display
 	display::init();
@@ -234,9 +242,7 @@ extern "C" int main(void) {
 	usb::init();
 
 	// Konfigurace RN4870 se jen zařadí; provádí ji Bluetooth::process() bez blokování smyčky
-	if(Bluetooth::configure()){
-		signalError(fault::ERR_BLE_CONFIGURE);
-	}
+	if (_bleInitOk) bleConfigure();
 
 	uint8_t packet[4];
 
@@ -286,8 +292,14 @@ extern "C" int main(void) {
 
 		pairingTimeout();
 
+		// RN4870 nenaběhl: znovu zkusit init (blokuje ~1 s, s kicky watchdogu)
+		if (!_bleReady && !Bluetooth::isPairing() && (stmcpp::systick::getDuration() - _bleRetryAt) > BLE_RETRY_INTERVAL) {
+			bleStart(false);
+			if (_bleInitOk && !_bleReady) bleConfigure();
+		}
+
 		// Auto-reconnect k bondovanému Remote zařízení (neblokující); během párování ne
-		if (_reconnectNeeded && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
+		if (_bleReady && _reconnectNeeded && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
 			_lastReconnectAttempt = stmcpp::systick::getDuration();
 			Debug::log(Debug::Level::DEBUG, "ble", "reconnect attempt");
@@ -410,6 +422,35 @@ extern "C" int main(void) {
 		}
 	}
 
+}
+
+static void bleFailed(uint16_t code, const char *what) {
+	_bleRetryAt = stmcpp::systick::getDuration();
+	if (!_bleErrorRecorded) {
+		_bleErrorRecorded = true;
+		Debug::log(Debug::Level::ERROR, "ble", "RN4870 %s failed, running without BLE, retry every 60 s", what);
+		fault::recordNonFatal(code, reinterpret_cast<uint32_t>(__builtin_return_address(0)));
+	} else {
+		Debug::log(Debug::Level::WARNING, "ble", "RN4870 %s failed again", what);
+	}
+}
+
+static void bleStart(bool first) {
+	if (Bluetooth::init()) {
+		_bleInitOk = false;
+		bleFailed(fault::ERR_BLE_INIT, "init");
+		return;
+	}
+	_bleInitOk = true;
+	if (!first) Debug::log(Debug::Level::INFO, "ble", "RN4870 init ok after retry");
+}
+
+static void bleConfigure() {
+	if (Bluetooth::configure()) {
+		bleFailed(fault::ERR_BLE_CONFIGURE, "configure");
+		return;
+	}
+	_bleReady = true;
 }
 
 // Čekání se kickem watchdogu (signalError: blikání trvá déle než smyčkový watchdog)

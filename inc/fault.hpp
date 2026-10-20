@@ -46,6 +46,10 @@ namespace fault {
 	void init();
 	// Zapíše záznam (stackedFrame = 8 slov r0..xpsr, nebo nullptr) a řádek do logu; nic dalšího
 	void record(Kind kind, const uint32_t *stackedFrame, uint32_t excReturn, uint16_t errorCode = 0);
+	// Neukončující chyba za běhu (např. RN4870, spec R21): záznam ERROR + řádek logu, bez finish()/resetu, rovnou
+	// označený jako ohlášený (další boot ho nevydává za chybu minulého běhu). Starší záznam, který ještě nebyl
+	// ohlášen nebo je skutečná chyba (ne ERROR), se nepřepisuje.
+	void recordNonFatal(uint16_t errorCode, uint32_t caller);
 	// Sonda připojena → bkpt (po pokračování reset), jinak NVIC_SystemReset()
 	[[noreturn]] void finish();
 	// record + finish

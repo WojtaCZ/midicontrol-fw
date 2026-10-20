@@ -110,6 +110,14 @@ namespace fault {
 		__set_PRIMASK(primask);
 	}
 
+	void recordNonFatal(uint16_t errorCode, uint32_t caller) {
+		const Record *prev = saved();
+		if (prev && (!announced() || prev->kind != static_cast<uint8_t>(Kind::ERROR))) return; // starší záznam zůstává
+		const uint32_t frame[8] = {errorCode, 0, 0, 0, 0, caller, caller, 0x01000000};
+		record(Kind::ERROR, frame, 0, errorCode);
+		markAnnounced();
+	}
+
 	[[gnu::noinline]] void finish() {
 		__disable_irq();
 		// Sonda připojena: zastavit tady (chování na lavici); C_DEBUGEN maže jen POR nebo zápis DHCSR sondou
