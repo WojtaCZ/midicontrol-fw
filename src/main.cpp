@@ -11,6 +11,8 @@
 #include "debug.hpp"
 #include "settings.hpp"
 #include "router.hpp"
+#include "fault.hpp"
+#include "wdg.hpp"
 
 #include <cstring>
 
@@ -85,7 +87,7 @@ extern stmcpp::scheduler::Scheduler commTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler dispChangeScheduler;
 extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler songListDelayScheduler;
-extern void signalError();
+[[noreturn]] void signalError(uint16_t code);
 
 extern Oled::OledBuffer frameBuffer;
 
@@ -161,8 +163,20 @@ extern "C" void SystemInit(void) {
 
 }
 
-extern "C" void SysTick_Handler(void){
+// SysTick: tik + smyčkový watchdog. Naked obal předá rámec přerušeného kontextu (zásobník podle EXC_RETURN bit 2)
+// a EXC_RETURN; SysTick_C se vrací přes bx lr = EXC_RETURN (lr obal nemění).
+extern "C" [[gnu::used, gnu::externally_visible]] void SysTick_C(const uint32_t *frame, uint32_t excReturn) {
 	stmcpp::systick::increment();
+	wdg::onTick(frame, excReturn);
+}
+
+extern "C" [[gnu::naked]] void SysTick_Handler(void) {
+	__asm volatile("tst lr, #4\n\t"
+				   "ite eq\n\t"
+				   "mrseq r0, msp\n\t"
+				   "mrsne r0, psp\n\t"
+				   "mov r1, lr\n\t"
+				   "b SysTick_C\n\t");
 }
 
 
@@ -171,6 +185,14 @@ extern "C" int main(void) {
 
 	// Log v no-init RAM: ověřit hlavičku (platná → zachovat log z doby před resetem). Výchozí úroveň I.
 	Debug::init();
+	fault::init();
+
+	// IWDG (~2 s) + smyčkový watchdog (1000 ms) hned po hodinách, před blokující inicializací periferií
+	wdg::start();
+
+	// Úvodní řádky logu: firmware, revize, příčina resetu (RCC->CSR se tím smaže), uložený záznam o chybě.
+	// Před inicializací periferií: selhání inicializace (signalError) se tak zaloguje a zaznamená.
+	Debug::banner();
 
 	// Načtení nastavení z flash (před LED a GUI)
 	settings::init();
@@ -194,7 +216,7 @@ extern "C" int main(void) {
 	//Initialize bluetooth
 	if(Bluetooth::init()){
 		Debug::log(Debug::Level::ERROR, "ble", "RN4870 init failed (no %%REBOOT%%)");
-		signalError();
+		signalError(fault::ERR_BLE_INIT);
 	}
 	
 	//Initialize LED display
@@ -211,17 +233,25 @@ extern "C" int main(void) {
 
 	usb::init();
 
-	// Úvodní řádky logu: firmware, revize, příčina resetu (RCC->CSR se tím smaže)
-	Debug::banner();
-
 	// Konfigurace RN4870 se jen zařadí; provádí ji Bluetooth::process() bez blokování smyčky
 	if(Bluetooth::configure()){
-		signalError();
+		signalError(fault::ERR_BLE_CONFIGURE);
 	}
 
 	uint8_t packet[4];
 
 	while (1) {
+
+		// Smyčkový watchdog + IWDG: jeden kick za průchod
+		wdg::kick();
+
+		// Testovací injekce chyb (tools/basetest/test_fault.py): jedno čtení a porovnání za průchod
+		if (uint8_t inject = fault::testInject; inject != 0) {
+			fault::testInject = 0;
+			if (inject == 1) (void)*reinterpret_cast<volatile uint32_t *>(0xFFFFFFF0); // BusFault (přesná, BFAR)
+			else if (inject == 2) fault::testSpin();                                    // loop stall
+			else if (inject == 3) fault::testSpinNoIrq();                               // IWDG
+		}
 
 		tud_task();
 
@@ -382,63 +412,35 @@ extern "C" int main(void) {
 
 }
 
-void signalError() {
-	while (1) {
-		LED::frontStrip.setColor(LED::Color(255, 0, 0, 0.5)); // Set front strip to red
+// Čekání se kickem watchdogu (signalError: blikání trvá déle než smyčkový watchdog)
+static void waitKicking(uint32_t ms) {
+	uint32_t start = stmcpp::systick::getTicks();
+	while (stmcpp::systick::getTicks() - start < ms) wdg::kick();
+}
+
+// Neopravitelná chyba: záznam ERROR s kódem (+ řádek logu), ~3 s blikání červenou, pak reset (se sondou bkpt)
+[[gnu::noinline]] void signalError(uint16_t code) {
+	uint32_t caller = reinterpret_cast<uint32_t>(__builtin_return_address(0));
+	Debug::log(Debug::Level::ERROR, "sys", "error %u, reset in 3 s", static_cast<unsigned>(code));
+	// Pseudo-rámec: r0 = kód, lr = pc = místo volání
+	const uint32_t frame[8] = {code, 0, 0, 0, 0, caller, caller, 0x01000000};
+	fault::record(fault::Kind::ERROR, frame, 0, code);
+	for (int i = 0; i < 3; ++i) {
+		LED::frontStrip.setColor(LED::Color(255, 0, 0, 0.5));
 		LED::update();
-		stmcpp::systick::waitBlocking(500_ms);
-		LED::frontStrip.setColor(LED::Color(0, 0, 0, 0.0)); // Turn off front strip
+		waitKicking(500);
+		LED::frontStrip.setColor(LED::Color(0, 0, 0, 0.0));
 		LED::update();
-		stmcpp::systick::waitBlocking(500_ms);
+		waitKicking(500);
 	}
+	fault::finish();
 }
 
 void stmcpp::error::globalFaultHandler(std::uint32_t hash, std::uint32_t code) {
-	//There has been an error caused by the handler, try to figure out what happened
-	switch (hash) {
-	
-		default:
-			__ASM volatile("bkpt");
-			break;
-	}
+	// Chyba hlášená knihovnou stmcpp: r0 = hash modulu, r1 = kód chyby, lr = pc = místo volání
+	uint32_t caller = reinterpret_cast<uint32_t>(__builtin_return_address(0));
+	const uint32_t frame[8] = {hash, code, 0, 0, 0, caller, caller, 0x01000000};
+	fault::capture(fault::Kind::ERROR, frame, 0, static_cast<uint16_t>(fault::ERR_STMCPP | (code & 0x7FFF)));
 }
 
-
-
-extern "C" void HardFault_Handler(void) {
-	__disable_irq();
-
-	__asm__("bkpt");
-	
-}
-
-
-extern "C" void NMI_Handler(void) {
-	__disable_irq();
-
-	__asm__("bkpt");
-	
-}
-
-extern "C" void MemManage_Handler(void) {
-	__disable_irq();
-
-	__asm__("bkpt");
-	
-}
-
-
-extern "C" void BusFault_Handler(void) {
-	__disable_irq();
-
-	__asm__("bkpt");
-	
-}
-
-
-extern "C" void UsageFault_Handler(void) {
-	__disable_irq();
-
-	__asm__("bkpt");
-	
-}
+// HardFault/MemManage/BusFault/UsageFault/NMI: naked stuby v fault.cpp → fault::capture

@@ -1,6 +1,8 @@
 #include "debug.hpp"
 #include "resetcause.hpp"
 #include "git.hpp"
+#include "fault.hpp"
+#include "crc32.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -63,21 +65,14 @@ namespace Debug {
 	static char _reply[96];
 	static uint8_t _replyLen = 0;
 	static char _cmd[32];
+	// Výpis záznamu o chybě příkazem "dump": další řádek (fault::formatLine) až po odeslání předchozího
+	static constexpr uint8_t DUMP_NONE = 0xFF;
+	static uint8_t _dumpIdx = DUMP_NONE;
 	static uint8_t _cmdLen = 0;
 
 	// ── CRC hlavičky ──────────────────────────────────────────────────────
 
-	static uint32_t crc32(const void *data, size_t len) {
-		const uint8_t *p = static_cast<const uint8_t *>(data);
-		uint32_t crc = 0xFFFFFFFF;
-		for (size_t i = 0; i < len; ++i) {
-			crc ^= p[i];
-			for (int b = 0; b < 8; ++b) crc = (crc >> 1) ^ (0xEDB88320 & (0u - (crc & 1)));
-		}
-		return ~crc;
-	}
-
-	static uint32_t headerCrc(const Header &h) { return crc32(&h, offsetof(Header, crc)); }
+	static uint32_t headerCrc(const Header &h) { return util::crc32(&h, offsetof(Header, crc)); }
 
 	static void seal() { _log.h.crc = headerCrc(_log.h); }
 
@@ -182,6 +177,13 @@ namespace Debug {
 		va_end(ap);
 	}
 
+	void logFault(const char *fmt, ...) {
+		va_list ap;
+		va_start(ap, fmt);
+		vlog(Level::ERROR, "fault", fmt, ap);
+		va_end(ap);
+	}
+
 	void logFromIsr(uint8_t eventCode) {
 		if (eventCode >= ISR_EVENT_COUNT) return;
 		uint16_t n = _isrCounts[eventCode];
@@ -207,7 +209,16 @@ namespace Debug {
 				 git::commit_time.c_str());
 		uint32_t csr = resetcause::readAndClear();
 		logForce(Level::INFO, "sys", "reset: %s (csr 0x%08lx)", resetcause::describe(csr), static_cast<unsigned long>(csr));
-		// Task 6C: uložený záznam o chybě (fault record) se vypíše zde
+		// Uložený záznam o chybě: nový celý na úrovni E (PC ho započítá jednou), už ohlášený jen odkazem na "dump"
+		if (const fault::Record *r = fault::saved()) {
+			if (fault::announced()) {
+				logForce(Level::INFO, "fault", "last %s #%u kept (dump)", fault::kindName(r->kind), static_cast<unsigned>(r->count));
+			} else {
+				char text[MAX_TEXT + 1];
+				for (uint8_t i = 0; fault::formatLine(*r, i, text, sizeof(text)); ++i) logForce(Level::ERROR, "fault", "%s", text);
+				fault::markAnnounced();
+			}
+		}
 	}
 
 	Level getLevel() { return _level; }
@@ -218,6 +229,18 @@ namespace Debug {
 	static void reply(const char *text) {
 		int n = snprintf(_reply, sizeof(_reply), "%s\r\n", text);
 		_replyLen = (n > 0 && static_cast<size_t>(n) < sizeof(_reply)) ? static_cast<uint8_t>(n) : 0;
+	}
+
+	// Další řádek výpisu "dump" do _reply (odpovědi jsou řádky bez log prefixu)
+	static void nextDumpLine() {
+		const fault::Record *r = fault::saved();
+		char text[sizeof(_reply) - 2];
+		if (_dumpIdx == DUMP_NONE || !r || !fault::formatLine(*r, _dumpIdx, text, sizeof(text))) {
+			_dumpIdx = DUMP_NONE;
+			return;
+		}
+		_dumpIdx++;
+		reply(text);
 	}
 
 	static void handleCommand(char *cmd) {
@@ -247,14 +270,18 @@ namespace Debug {
 			snprintf(text, sizeof(text), "level %c", levelLetter(_level));
 			return reply(text);
 		}
-		if (strcmp(cmd, "dump") == 0) return reply("no fault record"); // Task 6C: výpis záznamu o chybě
+		if (strcmp(cmd, "dump") == 0) {
+			if (!fault::saved()) return reply("no fault record");
+			_dumpIdx = 0;
+			return nextDumpLine();
+		}
 		if (strcmp(cmd, "help") == 0) return reply("commands: level e|w|i|d, dump, help");
 		reply("?");
 	}
 
 	static void readInput() {
 		// Další příkaz až po odeslání odpovědi na předchozí (zbytek vstupu počká v TinyUSB FIFO)
-		while (_replyLen == 0 && tud_cdc_n_available(LOG_CDC)) {
+		while (_replyLen == 0 && _dumpIdx == DUMP_NONE && tud_cdc_n_available(LOG_CDC)) {
 			uint8_t c;
 			if (tud_cdc_n_read(LOG_CDC, &c, 1) != 1) break;
 			if (c == '\r' || c == '\n') {
@@ -310,10 +337,14 @@ namespace Debug {
 		uint32_t avail = tud_cdc_n_write_available(LOG_CDC);
 		bool wrote = false;
 
-		if (_replyLen) {
-			if (!writeWhole(_reply, _replyLen, avail)) return;
+		while (_replyLen) {
+			if (!writeWhole(_reply, _replyLen, avail)) {
+				if (wrote) tud_cdc_n_write_flush(LOG_CDC);
+				return;
+			}
 			_replyLen = 0;
 			wrote = true;
+			nextDumpLine(); // "dump": další řádek záznamu (nebo nic)
 		}
 
 		Header &h = _log.h;

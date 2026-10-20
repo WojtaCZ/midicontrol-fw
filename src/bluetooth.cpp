@@ -1,4 +1,5 @@
 #include "bluetooth.hpp"
+#include "wdg.hpp"
 #include "debug.hpp"
 #include "led.hpp"
 #include "ringbuffer.hpp"
@@ -431,6 +432,7 @@ namespace Bluetooth{
 		// Enable USART2
 		stmcpp::reg::set(std::ref(USART2->CR1), USART_CR1_UE);
 
+		wdg::kick();
 		stmcpp::systick::waitBlocking(100_ms);
 
 		// Bring RN487x out of reset
@@ -438,7 +440,8 @@ namespace Bluetooth{
 
 		// Jednorázové čekání na %REBOOT% při startu (před spuštěním hlavní smyčky)
 		duration timestamp = stmcpp::systick::getDuration();
-		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT)){;}
+		// Až ~1,1 s spolu se 100 ms výše: kick, jinak by smyčkový watchdog (1000 ms) zaznamenal LOOP_STALL
+		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT)){ wdg::kick(); }
 
 		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
 		if(command && command->getType() == Bluetooth::Command::Type::REBOOT){
@@ -447,7 +450,8 @@ namespace Bluetooth{
 		}else return 1;
 	}
 
-	uint8_t configure() {
+	// noinline + used: test_fault.py ji volá přes gdb (rekonfigurace pod watchdogem)
+	[[gnu::used, gnu::noinline]] uint8_t configure() {
 		// SA,2: NoInputNoOutput (Just Works) — Base nemá klávesnici ani nezobrazuje passkey,
 		//       spárování potvrzuje uživatel dotazem na OLED (B / K,1).
 		// SR,0000: 16bit bitmapa funkcí; bez řízení toku (0x8000), RTS/CTS nejsou zapojené.

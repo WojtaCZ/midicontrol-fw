@@ -429,7 +429,8 @@ void keypress(ui::InputEvent event) {
     nav.forceRender();
 }
 
-void renderForce() {
+// noinline + used: test_fault.py ji volá přes gdb (vynucené překreslení OLED)
+[[gnu::used, gnu::noinline]] void renderForce() {
     nav.forceRender();
 }
 

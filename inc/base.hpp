@@ -16,7 +16,6 @@ namespace base{
 
     void initClock(void);
 	void dfuCheck();
-	void wdtStart();
 
     namespace current{
 		

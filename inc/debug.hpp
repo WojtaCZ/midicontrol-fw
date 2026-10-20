@@ -26,9 +26,11 @@ namespace Debug {
 	void log(Level lvl, const char *tag, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 	// Bezpečné z ISR: jen čítač události; process() z něj udělá řádek
 	void logFromIsr(uint8_t eventCode);
+	// Jen z cesty chyby (fault::record, přerušení zakázána, následuje reset): řádek "E fault: ..." do ringu bez kontroly IPSR
+	void logFault(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 	// Ověří hlavičku ringu v .noinit; platná → ponechá obsah z doby před resetem, neplatná → vymaže
 	void init();
-	// Úvodní řádky (úroveň I, vždy): firmware, revize/datum, příčina resetu, uložený záznam o chybě (Task 6C)
+	// Úvodní řádky (úroveň I, vždy): firmware, revize/datum, příčina resetu, uložený záznam o chybě (fault::saved)
 	void banner();
 	// Hlavní smyčka: posílá ring do CDC 1, je-li port otevřený (DTR); příkazy "level x", "dump", "help". Nikdy neblokuje.
 	void process();

@@ -35,6 +35,8 @@ set(SOURCES
 	${SOURCE_BASE}/usb_descriptors.c
 	${SOURCE_BASE}/debug.cpp
 	${SOURCE_BASE}/resetcause.cpp
+	${SOURCE_BASE}/fault.cpp
+	${SOURCE_BASE}/wdg.cpp
 	${SOURCE_BASE}/settings.cpp
 	${SOURCE_BASE}/router.cpp
 

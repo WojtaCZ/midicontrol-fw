@@ -1,4 +1,5 @@
 #include "oled.hpp"
+#include "wdg.hpp"
 #include <stmcpp/scheduler.hpp>
 #include "base.hpp"
 
@@ -245,9 +246,11 @@ namespace Oled{
         process();
     }
 
-    void flush(uint32_t timeoutMs){
+    // noinline + used: test_fault.py ji volá přes gdb (celý flush pod watchdogem)
+    [[gnu::used, gnu::noinline]] void flush(uint32_t timeoutMs){
         uint32_t start = stmcpp::systick::getTicks();
         while((!isInitialized() || busy || framePending) && (stmcpp::systick::getTicks() - start) < timeoutMs){
+            wdg::kick(); // čekání až timeoutMs (start: 500 ms)
             process();
         }
     }

@@ -1,4 +1,5 @@
 #include "midi.hpp"
+#include "wdg.hpp"
 #include "base.hpp"
 #include "led.hpp"
 
@@ -80,6 +81,7 @@ namespace midi {
 
 	void send(uint8_t (&packet)[4]) {
 		uint8_t size = messageSize(packet[0] & 0x0F); // Horní nibble = číslo kabelu
+		wdg::kick(); // aktivní čekání na USART (~1 ms na zprávu); dávka z USB FIFO jich je víc za sebou
 		for (uint8_t i = 1; i <= size; ++i) {
 			// Wait until transmit data register is empty
 			while (!(USART3->ISR & USART_ISR_TXE)) {}

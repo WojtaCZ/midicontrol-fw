@@ -127,14 +127,6 @@ namespace base{
 		__asm__ volatile("msr msp, %0"::"r"(*(volatile uint32_t *)FW_ADDR));
 		(*(void (**)())(FW_ADDR + 4))();
 	}
-
-	void wdtStart(){
-		IWDG->KR = 0x5555; // Enable access to IWDG_PR and IWDG_RLR
-		IWDG->PR = 0x06; // Set prescaler to 256
-		IWDG->RLR = 2000; // Set reload value
-		IWDG->KR = 0xAAAA; // Reload the watchdog
-		IWDG->KR = 0xCCCC; // Start the watchdog
-	}
 } 
 
 namespace base::current{
