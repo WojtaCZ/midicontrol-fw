@@ -1,0 +1,202 @@
+"""Offline dry-run ridiciho toku test_soak (bez hardware): male fake link / base / remote / log / midi.
+Overuje, ze soak dobehne na stastne ceste a ze asserty mezery vzorkovani a stari remote opravdu padnou."""
+
+import time
+
+import pytest
+
+import dbg
+import proto
+import test_soak
+from proto import MT, Packet
+
+ADDR_PC, ADDR_BASE, ADDR_REMOTE = proto.ADDR_PC, proto.ADDR_BASE, proto.ADDR_REMOTE
+BOOT_ID = 0x1234
+
+
+class Clock:
+    def __init__(self):
+        self.t0 = time.monotonic()
+
+    def rel(self):
+        return time.monotonic() - self.t0
+
+
+class FakeLink:
+    """Simulovany remote za base: ACK na vse PC -> remote, DIAG_GET -> ACK + DIAG_RESP."""
+
+    def __init__(self):
+        self.q = []
+        self.pid = 0
+        self.keepalives_sent = self.keepalive_acks = 0
+        self.error = None
+        self.stray = b""
+
+    def push(self, p):
+        self.q.append(p)
+
+    def send(self, p):
+        self.pid = (self.pid + 1) & 0xFF
+        pid = self.pid
+        if p.dst == ADDR_REMOTE and p.mtype != MT.ACK:
+            self.push(Packet(ADDR_REMOTE, ADDR_PC, 0, MT.ACK, bytes([pid])))
+            if p.mtype == MT.DIAG_GET:
+                self.push(Packet(ADDR_REMOTE, ADDR_PC, 0x40, MT.DIAG_RESP, proto.diag_encode_resp(BOOT_ID, 5, [])))
+        return pid
+
+    def send_msg(self, mtype, payload=b""):
+        return self.send(Packet(ADDR_PC, ADDR_BASE, 0, mtype, payload))
+
+    def recv(self, timeout, pred=None):
+        end = time.monotonic() + timeout
+        while True:
+            for i, p in enumerate(self.q):
+                if pred is None or pred(p):
+                    return self.q.pop(i)
+            left = end - time.monotonic()
+            if left <= 0:
+                return None
+            time.sleep(min(0.02, left))
+
+    def drain(self):
+        q, self.q = self.q, []
+        return q
+
+
+class FakeBase:
+    """systick 1 ms; stari posledniho paketu od remote = age_fn(cas od startu)."""
+
+    def __init__(self, clock, age_fn):
+        self.clock, self.age_fn = clock, age_fn
+
+    def u(self, name, size=4):
+        ms = int(self.clock.rel() * 1000) + 10000
+        if name == "stmcpp::systick::resolution_":
+            return 1
+        if name == "stmcpp::systick::ticks_":
+            return ms
+        if name == "router::_lastRemoteRx":
+            return (ms - int(self.age_fn(self.clock.rel()))) & 0xFFFFFFFF
+        raise KeyError(name)
+
+    def read_bool(self, name):
+        return True
+
+    def fault_record(self):
+        return None
+
+    def core_state(self):
+        return dict(halted=False, lockup=False)
+
+
+class FakeRemote:
+    """key() trva play_s (PLAY 406+ENTER, posle PLAY_SONG) nebo back_s (BACK); stale_once: po prvnim PLAY zustanou cislice."""
+
+    def __init__(self, link, play_s=0.05, back_s=0.05, stale_once=False):
+        self.link, self.play_s, self.back_s, self.stale = link, play_s, back_s, stale_once
+        self.digits = 0
+        self.calls = []
+
+    def goto_player(self):
+        pass
+
+    def u(self, name, size=4):
+        if name == "GUI::playerScreen.digitCount_":
+            return self.digits
+        return 0
+
+    def key(self, *keys):
+        self.calls.append(keys)
+        if dbg.ENTER in keys:
+            time.sleep(self.play_s)
+            self.link.push(Packet(ADDR_REMOTE, ADDR_PC, 0x20, MT.PLAY_SONG, b"406"))
+            if self.stale:
+                self.stale, self.digits = False, 3
+        else:
+            time.sleep(self.back_s)
+            self.digits = 0
+
+    def core_state(self):
+        return dict(halted=False, lockup=False)
+
+
+class FakeLog:
+    def __init__(self):
+        self.history = []
+
+    def command(self, cmd):
+        return {"level d": ["level D"], "level i": ["level I"]}[cmd]
+
+    def lines(self, timeout, pred=None):
+        return ["[   1.000] D router: GET_STATUS"]
+
+    def skip(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class FakeWriter:
+    def __init__(self, port):
+        pass
+
+    def write(self, data):
+        pass
+
+    def close(self):
+        pass
+
+
+def happy_age(t):
+    return (t * 1000) % 2000 * 0.1  # keepalive odpovedi: stari stale male
+
+
+@pytest.fixture
+def soak_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("SOAK_SECONDS", "3")
+    monkeypatch.setenv("SOAK_OUT", str(tmp_path))
+    monkeypatch.setattr(test_soak, "CYCLE", 1.0)
+    monkeypatch.setattr(test_soak, "DIAG_PERIOD", 1.5)
+    monkeypatch.setattr(test_soak.midi, "ports", lambda: {"base": "fake"})
+    monkeypatch.setattr(test_soak.midi, "Writer", FakeWriter)
+    monkeypatch.setattr(test_soak.loglink, "LogLink", FakeLog)
+
+    def run(age_fn=happy_age, **remote_kw):
+        clock = Clock()
+        link = FakeLink()
+        remote = FakeRemote(link, **remote_kw)
+        test_soak.test_soak(FakeBase(clock, age_fn), link, remote)
+        return tmp_path, remote
+
+    return run
+
+
+def test_soak_dryrun_happy(soak_env, capsys):
+    out, remote = soak_env()
+    assert (out / "soak.csv").exists() and (out / "summary.txt").exists()
+    plays = [k for k in remote.calls if dbg.ENTER in k]
+    assert len(plays) >= 2, remote.calls
+    assert "SOAK 3 s" in capsys.readouterr().out
+
+
+def test_soak_dryrun_slow_play_key_fails_gap(soak_env):
+    with pytest.raises(AssertionError, match="age sampling gap"):
+        soak_env(play_s=1.2)
+
+
+def test_soak_dryrun_slow_first_play_key_fails_gap(soak_env, monkeypatch):
+    # jediny cyklus: pomaly je jen prvni PLAY v okne (pred nim zadny sample v cyklu)
+    monkeypatch.setenv("SOAK_SECONDS", "0.5")
+    with pytest.raises(AssertionError, match="age sampling gap"):
+        soak_env(play_s=1.2)
+
+
+def test_soak_dryrun_slow_back_key_fails_gap(soak_env):
+    with pytest.raises(AssertionError, match="age sampling gap"):
+        soak_env(back_s=1.2, stale_once=True)
+
+
+def test_soak_dryrun_remote_age_over_limit_fails(soak_env):
+    with pytest.raises(AssertionError, match="max remote age"):
+        soak_env(age_fn=lambda t: 3200.0 if 1.0 <= t < 2.0 else happy_age(t))

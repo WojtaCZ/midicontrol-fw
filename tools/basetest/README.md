@@ -192,7 +192,11 @@ One lost DIAG poll fails the soak by design. Base BLE-side CRC errors are NOT me
 CDC bad frames: `router::_badFrames` is zeroed after each report, so they show as `cdc: N bad frames dropped` W lines;
 that count covers all bad CDC frames (CRC, length, incomplete), not only CRC. Remote CRC_ERRORS diag records are counted.
 The log CDC is positive-checked at start (`level d`, then back to the default INFO). The age of the last remote packet (and the base systick)
-is sampled through `sample()`, also while waiting for replies (<= 0.2 s slices). The test asserts max age < 3000 ms,
-`max_sample_gap_ms` < 1000 (one lost 2 s keepalive is above 3000 ms for only ~1 s) and `age_samples` >= 4 x SOAK_SECONDS.
-`remote.key()` cannot be sliced (a gdb batch per call; time per call in the CSV as `key_s`): if it exceeds ~0.8 s the gap
-assert fails by design.
+is sampled through `sample()`, also while waiting for replies (<= 0.2 s slices). Measured window = the cycle loop only: it opens with one
+sample right before the first cycle and closes at loop exit (`elapsed_s`, the last cycle's overrun included); the setup before it (log check,
+first DIAG) and the final keepalive/DIAG waits after it are outside the gap window (max age is still checked on every sample, setup included).
+The test asserts max age < 3000 ms, `max_sample_gap_ms` < 1000 within the window (one lost 2 s keepalive is above 3000 ms for only ~1 s)
+and `age_samples` >= 4 x `elapsed_s`. `remote.key()` cannot be sliced (a gdb batch per call): every call in the cycle is timed
+(CSV `key_s` for PLAY, `back_key_s` for the stale-digit BACK keys, `max_key_s` overall); if one exceeds ~0.8 s the gap assert fails by design.
+`test_soak_offline.py` (no hardware) dry-runs the soak with fakes (`SOAK_SECONDS=3`): happy path passes, a 1.2 s PLAY or BACK key fails the gap
+assert, a remote age of 3200 ms for 1 s fails the age assert.

@@ -67,11 +67,67 @@ def test_soak(paired, link, remote_probe):
     os.makedirs(out_dir, exist_ok=True)
     pr = midi.ports()
     log = loglink.LogLink()
-    c = dict(cycles=0, max_key_s=0.0, max_sample_gap_ms=0.0, age_samples=0, base_reset=0, log_alive=0, remote_crc_recs=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, diag_polls=0, diag_no_ack=0,
+    c = dict(cycles=0, elapsed_s=0.0, max_key_s=0.0, max_sample_gap_ms=0.0, age_samples=0, base_reset=0, log_alive=0, remote_crc_recs=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, diag_polls=0, diag_no_ack=0,
              diag_no_resp=0, diag_nak=0, diag_slow=0, midi_err=0, halted=0, lockup=0, remote_dead=0, digits_stale=0,
              fault_recs=0, boot_changed=0, ble_disconnected=0, max_remote_age_ms=0.0)
     lat_ack, lat_resp = [], []
     errors = []
+
+    # okno mereni = smycka cyklu: t_start se prepise tesne pred ni; mezery mezi vzorky a jejich pocet se pocitaji jen v okne,
+    # stari remote a systick se kontroluji u kazdeho vzorku (i v priprave pred smyckou)
+    t_start = time.monotonic()
+    win = dict(on=False, last=None)
+    last_ticks = None
+    last_age = [0.0]
+
+    def sample():
+        """Systick (reset detekce) a stari posledniho paketu od remote; v okne se vola >= 4x/s i behem cekani cyklu."""
+        nonlocal last_ticks
+        tnow = time.monotonic()
+        if win["on"]:
+            if win["last"] is not None:
+                c["max_sample_gap_ms"] = max(c["max_sample_gap_ms"], (tnow - win["last"]) * 1000)
+            win["last"] = tnow
+            c["age_samples"] += 1
+        res = base.u("stmcpp::systick::resolution_")
+        ticks = base.u("stmcpp::systick::ticks_")
+        if last_ticks is not None and ticks < last_ticks:
+            c["base_reset"] += 1
+            errors.append(f"{time.monotonic() - t_start:.0f}s: base systick went back ({last_ticks} -> {ticks}): reset")
+        last_ticks = ticks
+        nowt = (res * ticks) & 0xFFFFFFFF
+        age = ((nowt - base.u("router::_lastRemoteRx")) & 0xFFFFFFFF) / res
+        last_age[0] = age
+        c["max_remote_age_ms"] = max(c["max_remote_age_ms"], age)
+
+    def recv_s(timeout, pred=None):
+        """link.recv po <= 0.2 s dilech, mezi nimi sample(): cekani na odpoved nezakryje ztracene keepalive."""
+        end = time.monotonic() + timeout
+        while True:
+            sample()
+            left = end - time.monotonic()
+            if left <= 0:
+                return None
+            p = link.recv(min(0.2, left), pred)
+            if p is not None:
+                return p
+
+    def nap(seconds):
+        end = time.monotonic() + seconds
+        while True:
+            sample()
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            time.sleep(min(0.2, left))
+
+    def key_timed(row, col, *keys):
+        """remote.key() je gdb batch (nejde rozdelit): kazde volani se meri (CSV sloupec col, max_key_s)."""
+        tk = time.monotonic()
+        remote.key(*keys)
+        d = time.monotonic() - tk
+        row[col] = round(d, 3)
+        c["max_key_s"] = max(c["max_key_s"], round(d, 3))
 
     def ack_for(mtype, payload=b""):
         pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, mtype, payload))
@@ -108,53 +164,12 @@ def test_soak(paired, link, remote_probe):
     boot_id, cur, _ = decode(resp)
     ka_sent0, ka_ack0 = link.keepalives_sent, link.keepalive_acks
     log_start = len(log.history)
-    last_ticks = base.u("stmcpp::systick::ticks_")
+    rows = []
+    writer_ctx = midi.Writer(pr["base"])
     t_start = time.monotonic()
     next_poll = t_start
-    rows = []
-    last_age = [0.0]
-    last_sample_t = [None]
-
-    def recv_s(timeout, pred=None):
-        """link.recv po <= 0.2 s dilech, mezi nimi sample(): cekani na odpoved nezakryje ztracene keepalive."""
-        end = time.monotonic() + timeout
-        while True:
-            sample()
-            left = end - time.monotonic()
-            if left <= 0:
-                return None
-            p = link.recv(min(0.2, left), pred)
-            if p is not None:
-                return p
-
-    def sample():
-        """Systick (reset detekce) a stari posledniho paketu od remote; vola se >= 4x/s i behem cekani cyklu."""
-        nonlocal last_ticks
-        tnow = time.monotonic()
-        if last_sample_t[0] is not None:
-            c["max_sample_gap_ms"] = max(c["max_sample_gap_ms"], (tnow - last_sample_t[0]) * 1000)
-        last_sample_t[0] = tnow
-        res = base.u("stmcpp::systick::resolution_")
-        ticks = base.u("stmcpp::systick::ticks_")
-        if ticks < last_ticks:
-            c["base_reset"] += 1
-            errors.append(f"{time.monotonic() - t_start:.0f}s: base systick went back ({last_ticks} -> {ticks}): reset")
-        last_ticks = ticks
-        nowt = (res * ticks) & 0xFFFFFFFF
-        age = ((nowt - base.u("router::_lastRemoteRx")) & 0xFFFFFFFF) / res
-        last_age[0] = age
-        c["age_samples"] += 1
-        c["max_remote_age_ms"] = max(c["max_remote_age_ms"], age)
-
-    def nap(seconds):
-        end = time.monotonic() + seconds
-        while True:
-            sample()
-            left = end - time.monotonic()
-            if left <= 0:
-                return
-            time.sleep(min(0.2, left))
-    writer_ctx = midi.Writer(pr["base"])
+    win["on"] = True
+    sample()  # prvni vzorek okna: i prvni remote.key() je mezi dvema vzorky
     try:
         while time.monotonic() - t_start < duration:
             t_cycle = time.monotonic()
@@ -162,10 +177,7 @@ def test_soak(paired, link, remote_probe):
             row = dict(t=round(now, 1), cycle=c["cycles"])
             # --- PLAY z remote
             link.drain()
-            tk = time.monotonic()
-            remote.key("4", "0", "6", dbg.ENTER)
-            row["key_s"] = round(time.monotonic() - tk, 3)
-            c["max_key_s"] = max(c["max_key_s"], row["key_s"])
+            key_timed(row, "key_s", "4", "0", "6", dbg.ENTER)
             pkt = recv_s(2.5, from_remote(MT.PLAY_SONG))
             if pkt is None:
                 c["play_missed"] += 1
@@ -196,7 +208,7 @@ def test_soak(paired, link, remote_probe):
             n = remote.u("GUI::playerScreen.digitCount_", 1)
             if n:
                 c["digits_stale"] += 1
-                remote.key(*([dbg.BACK] * n))
+                key_timed(row, "back_key_s", *([dbg.BACK] * n))
             # --- zdravi: jadra, spojeni
             for name, tgt in (("base", base), ("remote", remote)):
                 st = tgt.core_state()
@@ -244,6 +256,8 @@ def test_soak(paired, link, remote_probe):
             rows.append(row)
             nap(max(0.0, CYCLE - (time.monotonic() - t_cycle)))
     finally:
+        c["elapsed_s"] = round(time.monotonic() - t_start, 2)  # posledni nap() konci vzorkem
+        win["on"] = False
         writer_ctx.close()
         time.sleep(0.5)
         if rows:
@@ -295,6 +309,6 @@ def test_soak(paired, link, remote_probe):
     assert not bad, f"soak counters: {bad}; errors {errors[:10]}; log {lines_ew[:10]}"
     assert c["log_alive"]
     assert c["max_sample_gap_ms"] < 1000, f"age sampling gap {c['max_sample_gap_ms']:.0f} ms (remote.key max {c['max_key_s']} s): a lost keepalive could hide"
-    assert c["age_samples"] >= 4 * duration, f"{c['age_samples']} age samples in {duration:.0f} s (< 4 Hz)"
-    assert c["max_remote_age_ms"] < MAX_REMOTE_AGE_MS, c["max_remote_age_ms"]
+    assert c["age_samples"] >= 4 * c["elapsed_s"], f"{c['age_samples']} age samples in {c['elapsed_s']} s of loop (< 4 Hz)"
+    assert c["max_remote_age_ms"] < MAX_REMOTE_AGE_MS, f"max remote age {c['max_remote_age_ms']:.0f} ms >= {MAX_REMOTE_AGE_MS}"
     assert remote_alive(base)
