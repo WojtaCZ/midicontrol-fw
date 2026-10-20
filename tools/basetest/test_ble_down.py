@@ -12,6 +12,7 @@ import pytest
 
 import dbg
 from conftest import remote_alive, wait_until
+from proto import MT
 from test_fault import boot, reboot
 from test_log import BANNER_RE, keepalive_rtt, log  # noqa: F401 - fixture log
 
@@ -53,16 +54,28 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
         _, lines = boot(log)
         lines += log.lines(3.0)
         t0 = ticks(base)
-        for _ in range(5):  # 15 s: USB zije, zadny dalsi boot
-            lines += log.lines(3.0)
-            keepalive_rtt(link)
+        # >= 70 s s drzenym RST: pokryje aspon jeden 60s retry (restart modulu musi byt neblokujici). KEEPALIVE
+        # odpovida router::process() z hlavni smycky, takze RTT = perioda smycky (zadne zmrazeni USB/protokolu).
+        rtts, missed = [], 0
+        t_end = time.monotonic() + 72.0
+        while time.monotonic() < t_end:
+            t = time.monotonic()
+            link.send_msg(MT.KEEPALIVE)
+            if link.recv(1.0, lambda p: p.mtype == MT.KEEPALIVE_ACK) is None:
+                missed += 1
+            else:
+                rtts.append(time.monotonic() - t)
+            lines += log.lines(0.05)
+        assert missed == 0, f"{missed} KEEPALIVE without answer"
+        assert max(rtts) < 0.2, f"max KEEPALIVE RTT {max(rtts) * 1000:.0f} ms over {len(rtts)} samples"
         t1 = ticks(base)
         assert holder.error is None, holder.error
-        assert t1 - t0 >= 15000, f"uptime did not grow ({t0} -> {t1}): base reset?"
+        assert t1 - t0 >= 70000, f"uptime did not grow ({t0} -> {t1}): base reset?"
         assert sum(bool(re.search(BANNER_RE, l)) for l in lines) == 1, "second boot (reset loop)"
         ble_e = [l for l in lines if re.search(r" E ble:", l)]
         assert len(ble_e) == 1, ble_e
         assert "RN4870 init failed" in ble_e[0]
+        assert any("RN4870 init failed again" in l for l in lines), "no 60 s retry seen"
 
         # Zaznam ERROR/ERR_BLE_INIT, jednou, uz oznameny (dalsi banner ho nevydava za chybu minuleho behu)
         rec = base.fault_record()
@@ -82,6 +95,44 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
         wait_until(lambda: base.read_bool("Bluetooth::_bonded"), 5, what="link secured")
         wait_until(lambda: remote_alive(base), 8, interval=0.5, what="remote alive")
         keepalive_rtt(link)
+    finally:
+        holder.release()
+        try:
+            base.hold_ble_reset(False)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def test_wedged_module_detected_and_restarted(base, link, log):  # noqa: F811
+    """B: modul, ktery uz pracoval a pak mlci (RST dole), se pozna podle 3 po sobe jdoucich timeoutu `$$$` -> BLE down (E ble:
+    jednou), po uvolneni RST ho 60s retry restartuje a nakonfiguruje (remote se znovu pripoji)."""
+    base.write(base.sym("fault::_record"), bytes(dbg.FAULT_RECORD_SIZE))
+    log, _ = reboot(link, log, base.reset, gone_within=3.0)
+    boot(log)
+    wait_until(lambda: base.read_bool("Bluetooth::_bonded") and remote_alive(base), 25, interval=0.5, what="base up and linked after reset")
+    holder = Holder(base)
+    try:
+        holder.start()
+        time.sleep(0.5)
+        lines = []
+        # Tri po sobe jdouci timeouty `$$$` (modul v resetu neodpovi); kazdy trva ~1 s
+        for _ in range(4):
+            base.call('Bluetooth::queueCommand("Z")')
+            lines += log.lines(2.5)
+        lines += log.lines(2.0)
+        ble_e = [l for l in lines if " E ble:" in l]
+        assert len(ble_e) == 1 and "not responding" in ble_e[0], (ble_e, [l for l in lines if "ble:" in l])
+        assert len([l for l in lines if "$$$ timeout" in l]) >= 3
+        assert not base.core_state()["halted"]
+        keepalive_rtt(link)  # USB bezi dal bez BLE
+
+        holder.release()
+        base.hold_ble_reset(False)
+        retry = log.lines(75.0, pred=lambda l: "RN4870 init ok after retry" in l)
+        assert retry and "RN4870 init ok after retry" in retry[-1], retry[-3:]
+        wait_until(lambda: base.read_bool("Bluetooth::_streamOpen"), 25, what="base reconnected to the remote")
+        wait_until(lambda: base.read_bool("Bluetooth::_bonded"), 8, what="link secured")
+        wait_until(lambda: remote_alive(base), 8, interval=0.5, what="remote alive")
     finally:
         holder.release()
         try:
