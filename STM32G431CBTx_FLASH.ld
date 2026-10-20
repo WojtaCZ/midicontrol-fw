@@ -198,6 +198,9 @@ SECTIONS
   .noinit (NOLOAD) :
   {
     . = ALIGN(4);
+    /* Pevné pořadí (tools/basetest/dbg.py, fault.cpp, debug.cpp): fault záznam první, pak log */
+    KEEP(*(.noinit.fault))
+    KEEP(*(.noinit.log))
     *(.noinit)
     *(.noinit*)
     . = ALIGN(4);

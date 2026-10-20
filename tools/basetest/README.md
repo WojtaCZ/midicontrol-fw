@@ -98,7 +98,7 @@ export BASETEST_REMOTE_ELF=$S/build/midicontroller-fw.elf
 
 ## Things to know
 
-- Log (`Debug`, `test_log.py`): ring of 1536 B in no-init RAM at 0x20007800 (`Debug::_log`, header `{magic 0x4C4F4721,
+- Log (`Debug`, `test_log.py`): ring of 1536 B in no-init RAM at 0x20007860 (after the 0x60 B fault block at 0x20007800; order pinned in the linker script) (`Debug::_log`, header `{magic 0x4C4F4721,
   head, tail, dropped, crc32}`, head/tail absolute positions). It survives resets (CCM SRAM, option bit
   CCMSRAM_RST = 1 on the bench base), not power loss. `debug_log()` reads it through the probe (whole lines, oldest
   first). On boot the kept history is sent first between `--- log before reset ---` / `--- end of log before reset ---`.
