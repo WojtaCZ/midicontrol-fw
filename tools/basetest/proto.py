@@ -59,6 +59,7 @@ class NAK(IntEnum):
 # seq u16, code u8, level u8, uptime_ms u32, arg u32; DIAG_RESP = [boot_id u16, next_cursor u16, n u8, n x record].
 DIAG_RECORD_SIZE = 12
 DIAG_MAX_RECORDS = 8
+DIAG_RESP_MAX_PAYLOAD = 5 + DIAG_MAX_RECORDS * DIAG_RECORD_SIZE  # 101
 DIAG_CODES = {
     1: "BOOT", 2: "FAULT", 3: "FAULT_DETAIL", 4: "LOOP_STALL", 5: "IWDG_RESET", 6: "BLE_CONNECT",
     7: "BLE_DISCONNECT", 8: "BLE_SECURED", 9: "LINK_LOST", 10: "RETRIES_EXHAUSTED", 11: "CRC_ERRORS",
