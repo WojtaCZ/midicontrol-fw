@@ -237,8 +237,25 @@ namespace Bluetooth{
     };
     
 
-    // Inicializace USART2/DMA a reset modulu. Blokující (max. DEFAULT_TIMEOUT), volá se jen při startu.
+    // Inicializace USART2/DMA a reset modulu. Blokující (max. DEFAULT_TIMEOUT), volá se jen při startu
+    // (před USB). Pozdější restarty modulu dělá neblokující restart().
     uint8_t init(void);
+
+    // Neblokující restart modulu přes RST (RST dole 100 ms, nahoru, čekání na %REBOOT% ≤ DEFAULT_TIMEOUT),
+    // provádí ho process(). Výsledek: restartState() SUCCEEDED/FAILED, potvrdit restartAck().
+    enum class RestartState : uint8_t { IDLE, RUNNING, SUCCEEDED, FAILED };
+    void restart();
+    RestartState restartState();
+    void restartAck();
+
+    // Stav konfigurace zařazené configure(): DONE až s %REBOOT% po "R,1"; FAILED při timeoutu "$$$" / chybějícím %REBOOT%
+    enum class ConfigState : uint8_t { NONE, PENDING, DONE, FAILED };
+    ConfigState configState();
+    // Modul mlčí: 3 po sobě jdoucí timeouty "$$$"
+    bool wedged();
+    // Hlavní smyčka hlásí, zda je BLE použitelné (menu: párování při výpadku BLE)
+    bool isUp();
+    void setUp(bool up);
 
     // Zařadí konfiguraci modulu (SN, SA, SR, SS, R,1). Neblokující — provádí ji process().
     uint8_t configure();

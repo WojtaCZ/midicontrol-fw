@@ -257,8 +257,10 @@ static void firmwareCallback(ui::MenuItem* item, void* userData) {
 static void pairCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
     // Z, F → sken; připojení k MIDIControlRemote, B a timeout řídí hlavní smyčka (main.cpp)
-    if (Bluetooth::startPairing() != 0) return;
-    pairStatusScreen.setComment("Hledam ovladac...");
+    // RN4870 nefunguje (běh bez BLE, spec R21): okamžitá zpráva místo čekání na timeout
+    bool up = Bluetooth::isUp();
+    if (up && Bluetooth::startPairing() != 0) return;
+    pairStatusScreen.setComment(up ? "Hledam ovladac..." : "BLE nefunguje");
     if (!_pairStatusShown) {
         _pairStatusShown = true;
         nav.push(&pairStatusScreen);

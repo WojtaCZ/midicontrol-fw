@@ -92,6 +92,20 @@ namespace Bluetooth{
 	static EngineState _engineState = EngineState::IDLE;
 	static duration _engineTimestamp = 0_ms;
 
+	// Stav konfigurace a zdraví modulu (čte hlavní smyčka): konfigurace je hotová až s %REBOOT% po "R,1"
+	static bool _configJob = false;
+	static ConfigState _configState = ConfigState::NONE;
+	static uint8_t _dollarTimeouts = 0; // po sobě jdoucí timeouty "$$$" (modul mlčí)
+	static constexpr uint8_t WEDGED_TIMEOUTS = 3;
+
+	// Neblokující restart modulu přes RST (PA1, aktivní v nule): RST dole 100 ms → nahoru → čekání na %REBOOT% ≤ 1 s
+	static RestartState _restartState = RestartState::IDLE;
+	static duration _restartTimestamp = 0_ms;
+	static bool _restartRstHigh = false;
+	static constexpr duration RESTART_RST_LOW = 100_ms;
+	static bool _moduleUp = false;
+	static void _runRestart();
+
 	// Spustí DMA nad souvislým úsekem TX bufferu (volat se zakázaným přerušením DMA nebo z ISR)
 	static void _kickTx() {
 		if (_txDmaLen != 0) return; // DMA právě běží
@@ -202,10 +216,13 @@ namespace Bluetooth{
 
 			case EngineState::ENTER_CMD:
 				if (_sawPrompt) {
+					_dollarTimeouts = 0;
 					_engineState = EngineState::SEND;
 				} else if ((now - _engineTimestamp) > CMD_TIMEOUT) {
 					// Modul nepřešel do příkazového režimu — zahodit úlohu
 					Debug::log(Debug::Level::WARNING, "ble", "$$$ timeout");
+					if (_dollarTimeouts < 255) _dollarTimeouts++;
+					if (_configJob) { _configJob = false; _configState = ConfigState::FAILED; }
 					_finishJob();
 				}
 				break;
@@ -245,6 +262,10 @@ namespace Bluetooth{
 			case EngineState::WAIT_REBOOT:
 				// Po restartu je modul v datovém režimu; zbytek úlohy se zahazuje
 				if (_rebootSeen || (now - _engineTimestamp) > REBOOT_TIMEOUT) {
+					if (_configJob) {
+						_configJob = false;
+						_configState = _rebootSeen ? ConfigState::DONE : ConfigState::FAILED;
+					}
 					_mode = Mode::DATA;
 					_connected = false;
 					_streamOpen = false;
@@ -459,7 +480,10 @@ namespace Bluetooth{
 		// SS,C0: Device Information + UART Transparent.
 		// R,1: restart, aby se změny projevily; po %REBOOT% je modul v datovém režimu.
 		static const char *const commands[] = {"SN,MIDIControlBase", "SA,2", "SR,0000", "SS,C0", "R,1"};
-		return _queueJob(commands, sizeof(commands) / sizeof(commands[0])) ? 0 : 1;
+		if (!_queueJob(commands, sizeof(commands) / sizeof(commands[0]))) return 1;
+		_configJob = true;
+		_configState = ConfigState::PENDING;
+		return 0;
 	}
 
 	uint8_t reconnect() {
@@ -531,8 +555,48 @@ namespace Bluetooth{
 			}
 		}
 
+		_runRestart();
 		_runEngine();
 	}
+
+	static void _runRestart() {
+		if (_restartState != RestartState::RUNNING) return;
+		duration now = stmcpp::systick::getDuration();
+		if (!_restartRstHigh) {
+			if ((now - _restartTimestamp) < RESTART_RST_LOW) return;
+			GPIOA->BSRR = (1u << 1); // RST nahoru
+			_rebootSeen = false;
+			_restartRstHigh = true;
+			_restartTimestamp = now;
+		} else if (_rebootSeen) {
+			_mode = Mode::DATA;
+			_restartState = RestartState::SUCCEEDED;
+		} else if ((now - _restartTimestamp) > DEFAULT_TIMEOUT) {
+			_restartState = RestartState::FAILED;
+		}
+	}
+
+	void restart() {
+		// Zahodit rozpracované příkazy a stav spojení; USART/DMA zůstávají z init()
+		_finishJob();
+		_configJob = false;
+		_configState = ConfigState::NONE;
+		_dollarTimeouts = 0;
+		_mode = Mode::DATA;
+		_connected = false;
+		_streamOpen = false;
+		_bonded = false;
+		GPIOA->BSRR = (1u << (1 + 16)); // RST dolů
+		_restartRstHigh = false;
+		_restartTimestamp = stmcpp::systick::getDuration();
+		_restartState = RestartState::RUNNING;
+	}
+	RestartState restartState() { return _restartState; }
+	void restartAck() { _restartState = RestartState::IDLE; }
+	ConfigState configState() { return _configState; }
+	bool wedged() { return _dollarTimeouts >= WEDGED_TIMEOUTS; }
+	bool isUp() { return _moduleUp; }
+	void setUp(bool up) { _moduleUp = up; }
 
 	bool isIdle() { return _engineState == EngineState::IDLE && _jobCount == 0 && _mode == Mode::DATA; }
 
