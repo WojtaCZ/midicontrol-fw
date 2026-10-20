@@ -165,6 +165,7 @@ The PC updater is `midicontrol --cmd "update <base|remote> <file>"` from `../mid
 against the RtMidi shim (not committed; it provides RtMidiOut/RtMidiIn over ALSA seq, see the Task 6E-3 report):
 
 ```bash
+SHIM=<dir with the shim: RtMidi.h, lib/librtmidi.so, lib/rtmidi.pc>  SCRATCH=<any scratch dir>
 PKG_CONFIG_PATH=$SHIM/lib cmake -S ../midicontrolpy-sw -B $SCRATCH/pc6e3/b && cmake --build $SCRATCH/pc6e3/b -j
 ```
 

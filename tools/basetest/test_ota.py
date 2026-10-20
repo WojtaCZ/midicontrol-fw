@@ -2,7 +2,7 @@
 IWDG + smyckovy watchdog bezi na obou deskach (6C/6D): ověřuje se, ze bootloader a aplikace pri mazani/staging kopou.
 
 PC updater (../midicontrolpy-sw `midicontrol --cmd "update <base|remote> <file>"`) se zvenci sestavuje proti lavicovemu
-RtMidi shimu; cesta v $BASETEST_UPDATER (jinak scratchpad pc6e3/b/midicontrol). Updater drzi protokolovy CDC (flock/TIOCEXCL),
+RtMidi shimu; cesta v $BASETEST_UPDATER (povinne, bez defaultu). Updater drzi protokolovy CDC (flock/TIOCEXCL),
 proto se harness link na dobu updateru odpoji. Log CDC drzi harness (LogPort updateru ukazuje na neexistujici soubor).
 Remote: po OTA se restartuje; nevrati-li se do 30 s, test selze (a NEOPAKUJE se). Soubory: BASETEST_REMOTE_BIN
 (default ../midicontroller-fw/build/midicontroller-fw-update.bin), BASETEST_BASE_BIN (build/midicontrol-fw-update.bin)."""
@@ -199,20 +199,24 @@ def test_remote_ota_via_base(link, base, remote, log):
     assert "Remote accepted the image" in txt, txt[-800:]
     assert "assuming success" not in txt and "FAILED" not in txt, txt[-800:]
     # base log CDC: base remote OTA jen preposila, nesmi se resetovat ani logovat chybu
-    ota_lines = log.lines(0.5)
+    ota_lines = log.lines(1.0)
     print("base log during update:", ota_lines)
     assert not any(" E " in l[:20] or " I sys: reset: " in l for l in ota_lines), ota_lines
     assert not any(re.search(BANNER_RE, l) for l in ota_lines), "base rebooted during remote OTA"
+    # kladny dukaz: log port zustal otevreny po celou dobu (zavreni/otevreni protokoloveho portu = odpojeni/pripojeni linku harnessu)
+    assert any("usb: protocol port closed" in l for l in ota_lines) and any("usb: protocol port opened" in l for l in ota_lines), ota_lines
 
     # zpet do 30 s po konci updateru: novy boot_id v DIAG (remote se po verify restartuje), pak BLE spojeni zabezpecene.
     # Behem restartu remote DIAG nemuze odpovidat (ocekavane, pocita se); po zmene boot_id je povolen max 1 opakovany pokus.
     t0 = time.monotonic()
     boot_id1 = None
     failed_while_rebooting = 0
+    MAX_MISSES = 10
     while time.monotonic() - t0 < REMOTE_BACK_S:
         r = diag_try(link)
         if r is None:
             failed_while_rebooting += 1
+            assert failed_while_rebooting <= MAX_MISSES, f"BLOCKED: {failed_while_rebooting} DIAG_GET without answer after the OTA"
         elif r[0] != boot_id0:
             boot_id1 = r[0]
             break
@@ -220,6 +224,8 @@ def test_remote_ota_via_base(link, base, remote, log):
     back_s = time.monotonic() - t0
     print(f"DIAG attempts without answer while the remote rebooted: {failed_while_rebooting}")
     assert boot_id1 is not None, f"BLOCKED: remote did not come back with a new boot_id within {REMOTE_BACK_S} s"
+    boot_id2, _ = diag_head(link)  # potvrzeni: DIAG po restartu odpovida (max 1 opakovany pokus)
+    assert boot_id2 == boot_id1, f"boot_id changed again: {boot_id1:#06x} -> {boot_id2:#06x}"
     print(f"remote boot_id {boot_id0:#06x} -> {boot_id1:#06x} {back_s:.1f} s after the updater returned")
     try:
         wait_until(lambda: base.read_bool("Bluetooth::_streamOpen") and remote_alive(base), REMOTE_BACK_S, interval=0.5,
