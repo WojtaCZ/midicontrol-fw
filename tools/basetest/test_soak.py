@@ -3,8 +3,8 @@ Cyklus (~3 s): PLAY z remote (klavesy 406 + ENTER) -> harness potvrdi, SIGNAL_PL
 USB-MIDI noty na base (DIN nelze overit, bench DIN link je rozbity: jen se pozoruje, ze zapis projde a log je cisty),
 SIGNAL_STOPPED. Kazdych 10 s DIAG_GET na remote s merenim latence DIAG_GET -> DIAG_RESP (R28). Pocitadla po iteracich
 jdou do CSV (`SOAK_OUT`, default <tmp>/basetest-soak/soak.csv), na konci se vypise souhrn.
-CRC: base nema citelny pocitadlo (router::_badFrames se po hlaseni nuluje) - chyby prichazi jako W radek "cdc: N bad frames"
-(log ma kladnou kontrolu); remote: zaznamy CRC_ERRORS z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
+CRC: base BLE strana se NEMERI (bluetooth.cpp nema pocitadlo); CDC: router::_badFrames se po hlaseni nuluje, chyby prichazi
+jako W radek "cdc: N bad frames dropped" (CRC, delka i neuplne ramce dohromady; log ma kladnou kontrolu); remote: zaznamy CRC_ERRORS z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
 Pass = vsechna pocitadla chyb nulova, boot_id remote stejny, base log bez E/W (krome znamych), uptime base monotonni,
 zadne jadro nezastavene/lockup. Latence se jen hlasi (hranice 2 s se pocita, ale neni podminkou)."""
 
@@ -66,7 +66,7 @@ def test_soak(paired, link, remote_probe):
     os.makedirs(out_dir, exist_ok=True)
     pr = midi.ports()
     log = loglink.LogLink()
-    c = dict(cycles=0, base_reset=0, log_alive=0, remote_crc_recs=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, diag_polls=0, diag_no_ack=0,
+    c = dict(cycles=0, age_samples=0, base_reset=0, log_alive=0, remote_crc_recs=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, diag_polls=0, diag_no_ack=0,
              diag_no_resp=0, diag_nak=0, diag_slow=0, midi_err=0, halted=0, lockup=0, remote_dead=0, digits_stale=0,
              fault_recs=0, boot_changed=0, ble_disconnected=0, max_remote_age_ms=0.0)
     lat_ack, lat_resp = [], []
@@ -89,10 +89,12 @@ def test_soak(paired, link, remote_probe):
         remote.key(*([dbg.BACK] * n))
     link.drain()
     # kladna kontrola logu: bez ni by "zadne E/W" nic neznamenalo (default uroven je tiha)
-    assert log.command("level d") == ["level D"], "log CDC not answering"
+    # vychozi uroven je INFO (src/debug.cpp), po kontrole se vraci `level i`
     try:
+        assert log.command("level d") == ["level D"], "log CDC not answering"
         link.send_msg(MT.GET_STATUS)
-        assert log.lines(3.0, pred=lambda l: loglink.is_log_line(l) and " D " in l), "no D line on the log CDC at level d"
+        got = log.lines(3.0, pred=lambda l: loglink.is_log_line(l) and " D " in l)
+        assert any(loglink.is_log_line(l) and " D " in l for l in got), "no D line on the log CDC at level d"
     finally:
         assert log.command("level i") == ["level I"]
     c["log_alive"] = 1
@@ -109,6 +111,31 @@ def test_soak(paired, link, remote_probe):
     t_start = time.monotonic()
     next_poll = t_start
     rows = []
+    last_age = [0.0]
+
+    def sample():
+        """Systick (reset detekce) a stari posledniho paketu od remote; vola se >= 4x/s i behem cekani cyklu."""
+        nonlocal last_ticks
+        res = base.u("stmcpp::systick::resolution_")
+        ticks = base.u("stmcpp::systick::ticks_")
+        if ticks < last_ticks:
+            c["base_reset"] += 1
+            errors.append(f"{time.monotonic() - t_start:.0f}s: base systick went back ({last_ticks} -> {ticks}): reset")
+        last_ticks = ticks
+        nowt = (res * ticks) & 0xFFFFFFFF
+        age = ((nowt - base.u("router::_lastRemoteRx")) & 0xFFFFFFFF) / res
+        last_age[0] = age
+        c["age_samples"] += 1
+        c["max_remote_age_ms"] = max(c["max_remote_age_ms"], age)
+
+    def nap(seconds):
+        end = time.monotonic() + seconds
+        while True:
+            sample()
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            time.sleep(min(0.2, left))
     writer_ctx = midi.Writer(pr["base"])
     try:
         while time.monotonic() - t_start < duration:
@@ -136,10 +163,10 @@ def test_soak(paired, link, remote_probe):
             except OSError as e:
                 c["midi_err"] += 1
                 errors.append(f"{now:.0f}s: MIDI write {e}")
-            time.sleep(0.4)
+            nap(0.4)
             ack_for(MT.SIGNAL_STOPPED)
             # opakovane PLAY_SONG (remote nedostal ACK) a zbytek provozu, ktery se nemel objevit
-            time.sleep(0.2)
+            nap(0.2)
             extra = [p for p in link.drain() if p.src == ADDR_REMOTE and p.mtype == MT.PLAY_SONG]
             c["play_retrans"] += len(extra)
             if extra:
@@ -163,15 +190,8 @@ def test_soak(paired, link, remote_probe):
             if not remote_alive(base):
                 c["remote_dead"] += 1
                 errors.append(f"{now:.0f}s: remote not alive")
-            res = base.u("stmcpp::systick::resolution_")
-            ticks = base.u("stmcpp::systick::ticks_")
-            if ticks < last_ticks:
-                c["base_reset"] += 1
-                errors.append(f"{now:.0f}s: base systick went back ({last_ticks} -> {ticks}): reset")
-            last_ticks = ticks
-            nowt = (res * ticks) & 0xFFFFFFFF
-            age = ((nowt - base.u("router::_lastRemoteRx")) & 0xFFFFFFFF) / res
-            c["max_remote_age_ms"] = max(c["max_remote_age_ms"], age)
+            sample()
+            age = last_age[0]
             # --- DIAG
             if time.monotonic() >= next_poll:
                 next_poll += DIAG_PERIOD
@@ -201,7 +221,7 @@ def test_soak(paired, link, remote_probe):
             row.update({k: v for k, v in c.items() if k != "max_remote_age_ms"})
             row["remote_age_ms"] = round(age)
             rows.append(row)
-            time.sleep(max(0.0, CYCLE - (time.monotonic() - t_cycle)))
+            nap(max(0.0, CYCLE - (time.monotonic() - t_cycle)))
     finally:
         writer_ctx.close()
         time.sleep(0.5)

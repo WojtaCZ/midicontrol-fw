@@ -186,8 +186,10 @@ log CDC stays with the harness.
 `SOAK_SECONDS=600 BASETEST_REMOTE_ELF=<-g elf> ../../.venv/bin/python -m pytest -q -m hw -s test_soak.py` - 3 s cycles
 (PLAY from the remote by key injection, SIGNAL_PLAYING, 3x SIGNAL_ANCHOR, NOW_PLAYING_INFO, USB-MIDI notes,
 SIGNAL_STOPPED) plus DIAG_GET every 10 s with DIAG_GET -> DIAG_RESP latency. Per-cycle counters go to `$SOAK_OUT/soak.csv`,
-the summary to `$SOAK_OUT/summary.txt`. DIN is not checked (bench link broken). The base log default level is quiet, so
+the summary to `$SOAK_OUT/summary.txt`. DIN is not checked (bench link broken). At the default INFO level the base logs nothing in steady state, so
 "log clean" means no E/W lines.
-One lost DIAG poll fails the soak by design. CRC errors: the base has no readable counter (`router::_badFrames` is zeroed
-after each report), so they show as `cdc: N bad frames dropped` W lines (the log CDC is positive-checked at start);
-remote CRC_ERRORS diag records are counted.
+One lost DIAG poll fails the soak by design. Base BLE-side CRC errors are NOT measured (no counter in bluetooth.cpp).
+CDC bad frames: `router::_badFrames` is zeroed after each report, so they show as `cdc: N bad frames dropped` W lines;
+that count covers all bad CDC frames (CRC, length, incomplete), not only CRC. Remote CRC_ERRORS diag records are counted.
+The log CDC is positive-checked at start (`level d`, then back to the default INFO). The age of the last remote packet is
+sampled >= 4 Hz (`age_samples`) and must stay below 3000 ms.
