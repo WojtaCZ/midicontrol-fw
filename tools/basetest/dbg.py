@@ -39,6 +39,9 @@ PAIR_IDLE, PAIR_SCANNING, PAIR_CONNECTING, PAIR_BONDING, PAIR_DONE, PAIR_FAILED 
 # Remote RN4870 RST = PB8 (aktivni v nule); GPIOB BSRR na G071
 REMOTE_GPIOB_BSRR = 0x50000400 + 0x18
 REMOTE_BLE_RST_PIN = 8
+# Base RN4870 RST = PA1 (aktivni v nule); GPIOA BSRR na G431
+BASE_GPIOA_BSRR = 0x48000000 + 0x18
+BASE_BLE_RST_PIN = 1
 
 def probe_holder(name: str):
     """Cizi proces (openocd jine session), ktery drzi sondu `name`; None = volna nebo nase."""
@@ -55,7 +58,41 @@ def probe_holder(name: str):
 _servers = {}
 
 
+DHCSR = 0xE000EDF0
+DHCSR_RELEASE = 0xA05F0000  # DBGKEY, C_DEBUGEN = 0, C_HALT = 0
+
+
+def _raw_tcl(port: int, cmd: str) -> str:
+    with socket.create_connection(("127.0.0.1", port), 5) as s:
+        s.sendall(cmd.encode() + b"\x1a")
+        buf = b""
+        while not buf.endswith(b"\x1a"):
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+    return buf[:-1].decode(errors="replace")
+
+
+def _release_debugen(name: str):
+    """Pred ukoncenim openocd: DHCSR.C_DEBUGEN = 0 (jadro bezi dal). Jinak by skutecny fault na lavici skoncil v
+    fault::finish() na bkpt (a s DBG_IWDG_STOP viset navzdy). Zastavene jadro se nejdriv rozbehne."""
+    p = _servers.get(name)
+    if not p or p.poll() is not None:
+        return
+    port = CONFIGS[name]["tcl"]
+    try:
+        dhcsr = int(_raw_tcl(port, f"read_memory 0x{DHCSR:08x} 32 1").split()[0], 0)
+        if dhcsr & (1 << 17):
+            _raw_tcl(port, "capture {halt}; capture {resume}")
+        _raw_tcl(port, f"write_memory 0x{DHCSR:08x} 32 {{0x{DHCSR_RELEASE:08x}}}")
+    except (OSError, ValueError, IndexError):
+        pass
+
+
 def stop_all():
+    for name in list(_servers):
+        _release_debugen(name)
     for p in _servers.values():
         if p.poll() is None:
             p.terminate()
@@ -100,6 +137,7 @@ class Target:
         raise RuntimeError(f"openocd ({self.name}) did not start")
 
     def stop(self):
+        _release_debugen(self.name)
         p = _servers.pop(self.name, None)
         if p and p.poll() is None:
             p.terminate()
@@ -107,15 +145,22 @@ class Target:
 
     def tcl(self, cmd: str) -> str:
         self.start()
-        with socket.create_connection(("127.0.0.1", self.c["tcl"]), 5) as s:
-            s.sendall(cmd.encode() + b"\x1a")
-            buf = b""
-            while not buf.endswith(b"\x1a"):
-                chunk = s.recv(4096)
-                if not chunk:
-                    break
-                buf += chunk
-        return buf[:-1].decode(errors="replace")
+        return _raw_tcl(self.c["tcl"], cmd)
+
+    def dhcsr_on_attach(self) -> int:
+        """DHCSR tak, jak ho jadro melo PRED pripojenim: novy openocd (-d3) cte DHCSR jako prvni vec pri examine
+        a pak C_DEBUGEN sam nastavi. Zde se zaloguje, hodnota se vyparsuje a ladeni se zase uvolni (jadro bezi).
+        Server teto session se pred tim ukonci (stop() = uvolneni)."""
+        self.stop()
+        c = self.c
+        r = subprocess.run(["openocd", "-d3", "-c", f"adapter serial {c['serial']}", "-f", c["cfg"],
+                            "-c", f"gdb_port {c['gdb']}; tcl_port {c['tcl']}; telnet_port {c['telnet']}",
+                            "-c", "init", "-c", f"mww 0x{DHCSR:08x} 0x{DHCSR_RELEASE:08x}", "-c", "shutdown"],
+                           cwd=c["cwd"], capture_output=True, text=True, timeout=60)
+        m = re.search(r"target_read_u32\(\): address: 0xe000edf0, value: (0x[0-9a-f]+)", r.stdout + r.stderr)
+        if not m:
+            raise RuntimeError(f"DHCSR not seen in openocd log ({self.name}): {(r.stdout + r.stderr)[-300:]}")
+        return int(m.group(1), 16)
 
     def read(self, addr: int, n: int) -> bytes:
         """Cteni pameti bez zastaveni jadra (AHB-AP)."""
@@ -338,11 +383,13 @@ class Target:
             self.write(addr + 8 * slot, head.to_bytes(4, "little"))
 
     def hold_ble_reset(self, on: bool):
-        """Remote: RN4870 RST (PB8) do nuly (on=True, modul v resetu) / zpet do jednicky. Zapis do GPIOB->BSRR
-        za behu jadra; firmware PB8 jinak nastavuje jen pri (re)inicializaci modulu."""
-        assert self.name == "remote"
-        bit = REMOTE_BLE_RST_PIN + (16 if on else 0)
-        self.write32(REMOTE_GPIOB_BSRR, 1 << bit)
+        """RN4870 RST do nuly (on=True, modul v resetu) / zpet do jednicky. Zapis do GPIO->BSRR za behu jadra.
+        Remote: PB8 (firmware ho nastavuje jen pri (re)inicializaci modulu). Base: PA1; po resetu base ho bootovaci
+        init() sam shodi a po 100 ms zvedne, takze pro drzeni pres reset je treba zapis opakovat (test_ble_down.py)."""
+        if self.name == "remote":
+            self.write32(REMOTE_GPIOB_BSRR, 1 << (REMOTE_BLE_RST_PIN + (16 if on else 0)))
+        else:
+            self.write32(BASE_GPIOA_BSRR, 1 << (BASE_BLE_RST_PIN + (16 if on else 0)))
 
     # -- remote: obrazovky (pole struktur potrebuji DWARF, remote build je -g)
     def player_state(self) -> int:
