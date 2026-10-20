@@ -180,3 +180,11 @@ Environment:
 
 The updater runs with its own config (WEB off, no log port) and XDG dirs; the harness link is detached while it runs, the
 log CDC stays with the harness.
+
+## Soak
+
+`SOAK_SECONDS=600 BASETEST_REMOTE_ELF=<-g elf> ../../.venv/bin/python -m pytest -q -m hw -s test_soak.py` - 3 s cycles
+(PLAY from the remote by key injection, SIGNAL_PLAYING, 3x SIGNAL_ANCHOR, NOW_PLAYING_INFO, USB-MIDI notes,
+SIGNAL_STOPPED) plus DIAG_GET every 10 s with DIAG_GET -> DIAG_RESP latency. Per-cycle counters go to `$SOAK_OUT/soak.csv`,
+the summary to `$SOAK_OUT/summary.txt`. DIN is not checked (bench link broken). The base log default level is quiet, so
+"log clean" means no E/W lines.
