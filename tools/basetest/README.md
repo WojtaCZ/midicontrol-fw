@@ -153,3 +153,29 @@ export BASETEST_REMOTE_ELF=$S/build/midicontroller-fw.elf
   injection plus one full-size OTA staging erase (`FW_UPDATE_START`, then `FW_UPDATE_END` without data = BAD_SIZE);
   the remote's boot_id must not change. It also reads `wdg::maxGapMs` (longest gap between kicks, must be < 2000 ms)
   and `wdg::bootToLoopMs`.
+
+## OTA tests (`test_ota.py`)
+
+`test_remote_ota_via_base` performs a **real OTA of the remote** (about 45 s transfer plus a remote reboot; the remote must
+be back within 30 s, otherwise the test fails with "BLOCKED" and must not be retried blindly). `test_base_ota_over_cdc` and
+`test_base_ota_power_loss` update the base over USB (the power-loss test resets the base through the probe at mid-transfer;
+a teardown fixture flashes the base back via the updater if it is left in the bootloader `abcd:1235`).
+
+The PC updater is `midicontrol --cmd "update <base|remote> <file>"` from `../midicontrolpy-sw`. On the bench it is built
+against the RtMidi shim (not committed; it provides RtMidiOut/RtMidiIn over ALSA seq, see the Task 6E-3 report):
+
+```bash
+PKG_CONFIG_PATH=$SHIM/lib cmake -S ../midicontrolpy-sw -B $SCRATCH/pc6e3/b && cmake --build $SCRATCH/pc6e3/b -j
+```
+
+Environment:
+
+| Variable | Meaning |
+|---|---|
+| `BASETEST_UPDATER` | **required**: path of the shim-built `midicontrol` binary |
+| `BASETEST_REMOTE_BIN` | remote image, default `../midicontroller-fw/build/midicontroller-fw-update.bin` |
+| `BASETEST_BASE_BIN` | base image, default `build/midicontrol-fw-update.bin` (build it first; the test compares the banner revision with `inc/git.hpp`) |
+| `BASETEST_OUT` | directory for the updater logs `updater-*.log` (default: a temp dir per run) |
+
+The updater runs with its own config (WEB off, no log port) and XDG dirs; the harness link is detached while it runs, the
+log CDC stays with the harness.

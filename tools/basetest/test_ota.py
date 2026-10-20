@@ -17,10 +17,12 @@ import time
 import pytest
 
 import loglink
+import proto
+from proto import MT, Packet
 import usblink
 from conftest import remote_alive, wait_until
 from test_log import BANNER_RE, PRE_END, PRE_START, wait_log_port  # noqa: F401
-from test_remote_diag import ADDR_REMOTE, decode, get, head_and_boot  # noqa: F401
+from test_remote_diag import ADDR_PC, ADDR_REMOTE, decode, get  # noqa: F401
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FW = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -107,15 +109,31 @@ def open_log_after_reboot(timeout=15.0):
     raise AssertionError("log CDC not openable")
 
 
-def diag_head(link, tries=4):
-    """head_and_boot s opakovanim: prvni DIAG_GET po delsi pauze nekdy zustane bez DIAG_RESP (remote ho po ACK posila pozdeji)."""
-    for i in range(tries):
-        try:
-            return head_and_boot(link)
-        except AssertionError:
-            if i == tries - 1:
-                raise
-            time.sleep(0.5)
+def diag_try(link, cursor=0xFFFF, timeout=2.0):
+    """Jeden DIAG_GET bez vyjimky: (boot_id, head) nebo None, kdyz ACK/DIAG_RESP nedorazil (nic se nepolyka)."""
+    link.drain()
+    pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.DIAG_GET, proto.diag_encode_get(cursor)))
+    reply = link.recv(timeout, lambda p: p.src == ADDR_REMOTE and p.mtype in (MT.ACK, MT.NAK) and p.payload[:1] == bytes([pid]))
+    if reply is None or reply.mtype != MT.ACK:
+        return None
+    resp = link.recv(timeout, lambda p: p.src == ADDR_REMOTE and p.dst == ADDR_PC and p.mtype == MT.DIAG_RESP)
+    if resp is None:
+        return None
+    link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.ACK, bytes([resp.pid])))
+    boot_id, head, _ = decode(resp)
+    return boot_id, head
+
+
+def diag_head(link):
+    """(boot_id, head) pri stabilnim spojeni: nejvyse jeden opakovany pokus (R28), pocet se tiskne; jinak selhani."""
+    r = diag_try(link)
+    retries = 0
+    if r is None:
+        retries = 1
+        print("diag_head: 1 retry (no ACK/DIAG_RESP at the first attempt)")
+        r = diag_try(link)
+    assert r is not None, "no DIAG_RESP after 1 retry"
+    return r
 
 
 def banner_and_cause(log, timeout=8.0):
@@ -135,6 +153,26 @@ def poll_usb_ids(stop: threading.Event, seen: set):
     while not stop.is_set():
         seen |= lsusb_ids()
         time.sleep(0.25)
+
+
+@pytest.fixture
+def base_recover(link, base):
+    """Teardown base testu: zustala-li base v bootloaderu (abcd:1235), nahraje se BASETEST_BASE_BIN; pak se obnovi link a
+    pocka na abcd:1234 s oběma CDC. Zaroven uvolni ladeni (C_DEBUGEN)."""
+    yield
+    base.stop()
+    if "abcd:1235" in lsusb_ids():
+        print("RECOVERY: base left in the bootloader, flashing it back with the updater")
+        up = Updater("base", BASE_BIN, "base-recover")
+        try:
+            rc = up.wait(300)
+        finally:
+            up.kill()
+        assert rc == 0, up.text()[-500:]
+    wait_until(lambda: "abcd:1234" in lsusb_ids(), 20, interval=0.3, what="abcd:1234 back (recovery)")
+    link.detach()  # idempotentni: zavre pripadny stary port
+    link.attach(settle=1.0)
+    assert len(usblink._sysfs_ports()) == 2, usblink._sysfs_ports()
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -157,24 +195,30 @@ def test_remote_ota_via_base(link, base, remote, log):
     print(f"remote OTA: rc={rc} duration={up.duration:.1f} s")
     assert rc == 0, txt[-800:]
     assert "Firmware update complete" in txt, txt[-800:]
-    assert not re.search(r"FAILED|error", txt, re.I) or "verify" in txt.lower(), txt[-800:]
-    ota_lines = [l for l in log.lines(0.5)]
-    print("base log lines during update:", len(ota_lines))
+    # updater: CRC_OK od remote (= verify_image OK na remote) -> "Remote accepted the image"; zadny zalozni "assuming success"
+    assert "Remote accepted the image" in txt, txt[-800:]
+    assert "assuming success" not in txt and "FAILED" not in txt, txt[-800:]
+    # base log CDC: base remote OTA jen preposila, nesmi se resetovat ani logovat chybu
+    ota_lines = log.lines(0.5)
+    print("base log during update:", ota_lines)
+    assert not any(" E " in l[:20] or " I sys: reset: " in l for l in ota_lines), ota_lines
+    assert not any(re.search(BANNER_RE, l) for l in ota_lines), "base rebooted during remote OTA"
 
-    # zpet do 30 s po konci updateru: novy boot_id v DIAG (remote se po verify restartuje), pak BLE spojeni zabezpecene
+    # zpet do 30 s po konci updateru: novy boot_id v DIAG (remote se po verify restartuje), pak BLE spojeni zabezpecene.
+    # Behem restartu remote DIAG nemuze odpovidat (ocekavane, pocita se); po zmene boot_id je povolen max 1 opakovany pokus.
     t0 = time.monotonic()
     boot_id1 = None
+    failed_while_rebooting = 0
     while time.monotonic() - t0 < REMOTE_BACK_S:
-        try:
-            bid, _ = head_and_boot(link)
-        except AssertionError:
-            time.sleep(0.5)
-            continue
-        if bid != boot_id0:
-            boot_id1 = bid
+        r = diag_try(link)
+        if r is None:
+            failed_while_rebooting += 1
+        elif r[0] != boot_id0:
+            boot_id1 = r[0]
             break
         time.sleep(0.5)
     back_s = time.monotonic() - t0
+    print(f"DIAG attempts without answer while the remote rebooted: {failed_while_rebooting}")
     assert boot_id1 is not None, f"BLOCKED: remote did not come back with a new boot_id within {REMOTE_BACK_S} s"
     print(f"remote boot_id {boot_id0:#06x} -> {boot_id1:#06x} {back_s:.1f} s after the updater returned")
     try:
@@ -208,7 +252,7 @@ def test_remote_ota_via_base(link, base, remote, log):
     remote.stop()
 
 
-def test_base_ota_over_cdc(link, base, log):
+def test_base_ota_over_cdc(link, base, log, base_recover):
     """update base: abcd:1235 behem prenosu, pak abcd:1234 se OBEMA CDC, banner v logu s novou revizi (= inc/git.hpp)."""
     base.stop()
     link.detach()
@@ -227,6 +271,8 @@ def test_base_ota_over_cdc(link, base, log):
     print(f"base OTA: rc={rc} duration={up.duration:.1f} s, usb ids seen {sorted(seen)}")
     assert rc == 0, up.text()[-800:]
     assert "abcd:1235" in seen, "bootloader (abcd:1235) never appeared"
+    txt = up.text()
+    assert "Image programmed" in txt and "Reconnected to the base" in txt, txt[-600:]
     wait_until(lambda: "abcd:1234" in lsusb_ids(), 15, interval=0.3, what="abcd:1234 back")
     L = open_log_after_reboot()
     try:
@@ -242,7 +288,7 @@ def test_base_ota_over_cdc(link, base, log):
     assert cause is not None, "no reset cause line in the log"
 
 
-def test_base_ota_power_loss(link, base, log):
+def test_base_ota_power_loss(link, base, log, base_recover):
     """Reset base sondou uprostred prenosu -> zustane v bootloaderu (abcd:1235, ne :1234), druhy update projde."""
     base.stop()
     link.detach()
@@ -251,10 +297,13 @@ def test_base_ota_power_loss(link, base, log):
     try:
         wait_until(lambda: "abcd:1235" in lsusb_ids(), 60, interval=0.1, what="bootloader appeared")
         # prenos bezi: pockat na prvni znamky postupu (vystup updateru), pak reset
-        wait_until(lambda: re.search(r"\d+\s*%|chunk|sent|block|page", up.text(), re.I) is not None, 60, interval=0.1,
-                   what="transfer progress")
+        def progress() -> int:
+            m = re.findall(r"(\d+)%\s+\((\d+)/(\d+)\)", up.text())
+            return int(m[-1][0]) if m else 0
+        wait_until(lambda: progress() > 0, 60, interval=0.1, what="transfer progress")
         time.sleep(1.0)
-        assert up.p.poll() is None, f"updater already finished: {up.text()[-400:]}"
+        assert up.p.poll() is None and 0 < progress() < 100, f"transfer not mid-way: {progress()}% {up.text()[-300:]}"
+        print(f"reset at {progress()}%")
         t = time.monotonic()
         base.reset()
         base.stop()
