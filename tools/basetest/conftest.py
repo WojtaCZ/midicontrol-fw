@@ -5,10 +5,14 @@ import time
 import pytest
 
 
-def pytest_collection_modifyitems(items):
+def pytest_collection_modifyitems(config, items):
+    # needs_user: jen kdyz o ne vyber vyslovne zada (-m needs_user); `-m hw` je jinak vybere taky
+    want_user = "needs_user" in (config.option.markexpr or "")
     for item in items:
         if not item.fspath.basename.endswith("_offline.py"):
             item.add_marker(pytest.mark.hw)
+        if item.get_closest_marker("needs_user") and not want_user:
+            item.add_marker(pytest.mark.skip(reason="needs a person at the bench: run with -m needs_user"))
 
 
 @pytest.fixture(scope="session")

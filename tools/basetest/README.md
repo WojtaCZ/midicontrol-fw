@@ -134,3 +134,22 @@ export BASETEST_REMOTE_ELF=$S/build/midicontroller-fw.elf
 - `dbg.Target.fault_record()` decodes `fault::_record` (92 B, magic 0x46415554, zlib CRC-32 of the first 88 B);
   `addr2line(addr)` gives the function name (symbol table only, Release ELF has no DWARF).
 - Relay and remote-key tests need `BASETEST_REMOTE_ELF` (see "Remote symbols"). Without it, gdb key injection fails.
+
+## Remote diagnostics, slots and watchdogs (`test_remote_diag.py`)
+
+- **A remote reset powers the remote off** (it releases PA1). Tests that really trigger a remote HardFault, loop
+  stall or IWDG reset are marked `needs_user` and are skipped unless selected with `-m needs_user`; someone at the
+  bench must switch the remote on again (the test waits up to 3 min): `test_remote_fault_survives_power_off`,
+  `test_remote_loop_stall`, `test_remote_iwdg`. Injection: `fault::testInject` on the remote (`1` unaligned `ldr` →
+  HardFault, `2` `testSpin` → LOOP_STALL after 2000 ms, `3` `testSpinNoIrq` → IWDG after ~4 s).
+- The M0+ cannot read DHCSR.C_DEBUGEN, so the remote always resets after a fault; set `fault::haltOnFault = 1`
+  through the probe to stop at `bkpt` instead (the slot is written first).
+- `test_persisted_slot_roundtrip` runs without a reset: gdb calls `diag::testPersist(marker)` (the real persist path:
+  interrupts off, polling SPI, one W25Q32 page program), reads the slot back into `diag::testBuf` with
+  `diag::testReadSlot`, decodes it in Python (magic 0x544C5344, zlib CRC-32 of bytes 0..239), loads it into the
+  ring with `diag::testLoadSlot` and checks that DIAG_GET returns its records and that a cursor past them programs
+  the slot's "fetched" byte. Each run uses one of the 16 slots; a boot compacts a full sector.
+- `test_watchdogs_do_not_trip`: 10 min (`BASETEST_WDG_SECONDS` overrides) of DIAG polls, relayed signals and key
+  injection plus one full-size OTA staging erase (`FW_UPDATE_START`, then `FW_UPDATE_END` without data = BAD_SIZE);
+  the remote's boot_id must not change. It also reads `wdg::maxGapMs` (longest gap between kicks, must be < 2000 ms)
+  and `wdg::bootToLoopMs`.
