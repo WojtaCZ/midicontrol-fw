@@ -42,16 +42,17 @@ def paired(base):
     return base
 
 
-def diag_timed(link, cursor):
+def diag_timed(link, cursor, rv=None):
     """DIAG_GET -> (ack_s, resp_s, resp); None kdyz chybi. Cas DIAG_RESP od odeslani DIAG_GET (do 8 s, bez opakovani)."""
     link.drain()
     t0 = time.monotonic()
     pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.DIAG_GET, proto.diag_encode_get(cursor)))
-    ack = link.recv(8.0, reply_to(pid))
+    rv = rv or link.recv
+    ack = rv(8.0, reply_to(pid))
     t_ack = time.monotonic() - t0
     if ack is None or ack.mtype != MT.ACK:
         return None, None, ack
-    resp = link.recv(8.0 - t_ack, lambda p: p.src == ADDR_REMOTE and p.dst == ADDR_PC and p.mtype == MT.DIAG_RESP)
+    resp = rv(8.0 - t_ack, lambda p: p.src == ADDR_REMOTE and p.dst == ADDR_PC and p.mtype == MT.DIAG_RESP)
     if resp is None:
         return t_ack, None, None
     t_resp = time.monotonic() - t0
@@ -66,7 +67,7 @@ def test_soak(paired, link, remote_probe):
     os.makedirs(out_dir, exist_ok=True)
     pr = midi.ports()
     log = loglink.LogLink()
-    c = dict(cycles=0, age_samples=0, base_reset=0, log_alive=0, remote_crc_recs=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, diag_polls=0, diag_no_ack=0,
+    c = dict(cycles=0, max_key_s=0.0, max_sample_gap_ms=0.0, age_samples=0, base_reset=0, log_alive=0, remote_crc_recs=0, play_missed=0, play_retrans=0, ack_missed=0, nak=0, diag_polls=0, diag_no_ack=0,
              diag_no_resp=0, diag_nak=0, diag_slow=0, midi_err=0, halted=0, lockup=0, remote_dead=0, digits_stale=0,
              fault_recs=0, boot_changed=0, ble_disconnected=0, max_remote_age_ms=0.0)
     lat_ack, lat_resp = [], []
@@ -74,7 +75,7 @@ def test_soak(paired, link, remote_probe):
 
     def ack_for(mtype, payload=b""):
         pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, mtype, payload))
-        r = link.recv(1.5, reply_to(pid))
+        r = recv_s(1.5, reply_to(pid))
         if r is None:
             c["ack_missed"] += 1
             errors.append(f"{time.monotonic() - t_start:.0f}s: no ACK for {MT(mtype).name}")
@@ -112,10 +113,27 @@ def test_soak(paired, link, remote_probe):
     next_poll = t_start
     rows = []
     last_age = [0.0]
+    last_sample_t = [None]
+
+    def recv_s(timeout, pred=None):
+        """link.recv po <= 0.2 s dilech, mezi nimi sample(): cekani na odpoved nezakryje ztracene keepalive."""
+        end = time.monotonic() + timeout
+        while True:
+            sample()
+            left = end - time.monotonic()
+            if left <= 0:
+                return None
+            p = link.recv(min(0.2, left), pred)
+            if p is not None:
+                return p
 
     def sample():
         """Systick (reset detekce) a stari posledniho paketu od remote; vola se >= 4x/s i behem cekani cyklu."""
         nonlocal last_ticks
+        tnow = time.monotonic()
+        if last_sample_t[0] is not None:
+            c["max_sample_gap_ms"] = max(c["max_sample_gap_ms"], (tnow - last_sample_t[0]) * 1000)
+        last_sample_t[0] = tnow
         res = base.u("stmcpp::systick::resolution_")
         ticks = base.u("stmcpp::systick::ticks_")
         if ticks < last_ticks:
@@ -144,8 +162,11 @@ def test_soak(paired, link, remote_probe):
             row = dict(t=round(now, 1), cycle=c["cycles"])
             # --- PLAY z remote
             link.drain()
+            tk = time.monotonic()
             remote.key("4", "0", "6", dbg.ENTER)
-            pkt = link.recv(2.5, from_remote(MT.PLAY_SONG))
+            row["key_s"] = round(time.monotonic() - tk, 3)
+            c["max_key_s"] = max(c["max_key_s"], row["key_s"])
+            pkt = recv_s(2.5, from_remote(MT.PLAY_SONG))
             if pkt is None:
                 c["play_missed"] += 1
                 errors.append(f"{now:.0f}s: PLAY_SONG missing")
@@ -195,7 +216,7 @@ def test_soak(paired, link, remote_probe):
             # --- DIAG
             if time.monotonic() >= next_poll:
                 next_poll += DIAG_PERIOD
-                t_ack, t_resp, resp = diag_timed(link, cur)
+                t_ack, t_resp, resp = diag_timed(link, cur, recv_s)
                 c["diag_polls"] += 1
                 if resp is None:
                     if t_ack is None:
@@ -273,5 +294,7 @@ def test_soak(paired, link, remote_probe):
     bad = {k: c[k] for k in zero if c[k]}
     assert not bad, f"soak counters: {bad}; errors {errors[:10]}; log {lines_ew[:10]}"
     assert c["log_alive"]
+    assert c["max_sample_gap_ms"] < 1000, f"age sampling gap {c['max_sample_gap_ms']:.0f} ms (remote.key max {c['max_key_s']} s): a lost keepalive could hide"
+    assert c["age_samples"] >= 4 * duration, f"{c['age_samples']} age samples in {duration:.0f} s (< 4 Hz)"
     assert c["max_remote_age_ms"] < MAX_REMOTE_AGE_MS, c["max_remote_age_ms"]
     assert remote_alive(base)

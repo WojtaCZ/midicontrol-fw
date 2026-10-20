@@ -191,5 +191,8 @@ the summary to `$SOAK_OUT/summary.txt`. DIN is not checked (bench link broken). 
 One lost DIAG poll fails the soak by design. Base BLE-side CRC errors are NOT measured (no counter in bluetooth.cpp).
 CDC bad frames: `router::_badFrames` is zeroed after each report, so they show as `cdc: N bad frames dropped` W lines;
 that count covers all bad CDC frames (CRC, length, incomplete), not only CRC. Remote CRC_ERRORS diag records are counted.
-The log CDC is positive-checked at start (`level d`, then back to the default INFO). The age of the last remote packet is
-sampled >= 4 Hz (`age_samples`) and must stay below 3000 ms.
+The log CDC is positive-checked at start (`level d`, then back to the default INFO). The age of the last remote packet (and the base systick)
+is sampled through `sample()`, also while waiting for replies (<= 0.2 s slices). The test asserts max age < 3000 ms,
+`max_sample_gap_ms` < 1000 (one lost 2 s keepalive is above 3000 ms for only ~1 s) and `age_samples` >= 4 x SOAK_SECONDS.
+`remote.key()` cannot be sliced (a gdb batch per call; time per call in the CSV as `key_s`): if it exceeds ~0.8 s the gap
+assert fails by design.
