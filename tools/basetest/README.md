@@ -113,3 +113,24 @@ export BASETEST_REMOTE_ELF=$S/build/midicontroller-fw.elf
 - Base-originated KEEPALIVEs are auto-answered and also delivered to `recv(pred)`.
 - `pause_keepalive()` stops background keepalives and auto-answers (the PC goes silent); `pause_keepalive(False)` resumes.
 - Thread failures are stored in `Link.error`; `recv`/`send` re-raise, the `link` fixture teardown asserts it is None.
+
+## Fault tests (`test_fault.py`)
+
+- Faults are injected through `fault::testInject` (u8, read once per main-loop pass): `1` = read from 0xFFFFFFF0
+  (BusFault, `pc` in `main`), `2` = `fault::testSpin()` with interrupts on (LOOP_STALL after 1000 ms), `3` =
+  `fault::testSpinNoIrq()` (IWDG reset after ~2 s, no record).
+- **C_DEBUGEN.** With DHCSR.C_DEBUGEN set the firmware stops at `bkpt` in `fault::finish()` instead of resetting.
+  The ST-Link sets it on connect, a system reset keeps it, and **exiting openocd does not clear it** (bench
+  2026-10-20: after a plain openocd exit an injected stall left the core halted, DHCSR 0x00030003). Only a POR or a
+  DHCSR write clears it. `inject(release=True)` / `dbg.Target.release_debug()` therefore writes
+  `DHCSR = 0xA05F0000` (DBGKEY, C_DEBUGEN = 0, core keeps running) and then stops openocd at once. The next
+  `tcl()` starts openocd again, which sets C_DEBUGEN again.
+- While the core is halted (bkpt test) USB is not serviced: detach `link` and close the log first, or the
+  keepalive write times out and the session `link` fixture fails.
+- openocd's `stm32g4x.cfg` sets `DBG_IWDG_STOP` on examine, and the firmware sets it in `wdg::start()`, so the IWDG
+  does not run while the core is halted. The loop watchdog stops too, because SysTick does not tick in debug halt.
+- A software-started IWDG does not survive a system reset or its own IWDG reset on the G431 (IWDG_SW = 1). Every
+  boot starts it again (`wdg::start()`).
+- `dbg.Target.fault_record()` decodes `fault::_record` (92 B, magic 0x46415554, zlib CRC-32 of the first 88 B);
+  `addr2line(addr)` gives the function name (symbol table only, Release ELF has no DWARF).
+- Relay and remote-key tests need `BASETEST_REMOTE_ELF` (see "Remote symbols"). Without it, gdb key injection fails.

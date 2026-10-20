@@ -24,6 +24,11 @@ CONFIGS = {
                    safe_bp="base::Keyboard::process"),
 }
 
+# fault::Record (base, inc/fault.hpp): 8 B hlavicka + 18 x u32 + rev[8] + crc
+FAULT_RECORD_SIZE = 92
+FAULT_KINDS = {1: "HARDFAULT", 2: "MEMMANAGE", 3: "BUSFAULT", 4: "USAGEFAULT", 5: "ERROR", 6: "LOOP_STALL"}
+NOINIT_ADDR, NOINIT_SIZE = 0x20007800, 2048
+
 # ui::InputEvent (remote)
 UP, DOWN, MF, RIGHT, ENTER, BACK = 0, 1, 2, 3, 4, 5
 DIGIT = {str(d): 6 + d for d in range(10)}
@@ -222,6 +227,34 @@ class Target:
         time.sleep(0.2)
         if self.core_state()["halted"]:
             self.resume()
+
+    def release_debug(self):
+        """Odpojit ladeni tak, aby firmware videlo DHCSR.C_DEBUGEN = 0 (fault -> zaznam + NVIC_SystemReset misto bkpt).
+        C_DEBUGEN nuluje jen POR nebo zapis DHCSR; ST-Link (hla) ho pri pripojeni nastavi a systemovy reset ho necha.
+        Proto: DHCSR = DBGKEY bez C_DEBUGEN (0xA05F0000, jadro bezi dal), hned potom ukoncit openocd (dalsi tcl() ho
+        spusti znovu a C_DEBUGEN opet nastavi). Viz README "Fault tests"."""
+        self.tcl("write_memory 0xE000EDF0 32 {0xA05F0000}")
+        self.stop()
+
+    def addr2line(self, addr: int) -> str:
+        """Jmeno funkce pro adresu (arm-none-eabi-addr2line -f -C); Release ELF bez DWARF -> z tabulky symbolu."""
+        r = subprocess.run([NM.replace("nm", "addr2line"), "-f", "-C", "-e", self.elf, f"0x{addr:08x}"], capture_output=True, text=True)
+        return r.stdout.splitlines()[0] if r.stdout else "??"
+
+    def fault_record(self):
+        """Base: fault::_record v .noinit jako dict, nebo None (spatna magic/CRC). Rozlozeni = fault::Record (fault.hpp)."""
+        import struct
+        import zlib
+        raw = self.read(self.sym("fault::_record"), FAULT_RECORD_SIZE)
+        magic, kind, count, code = struct.unpack_from("<IBBH", raw, 0)
+        regs = struct.unpack_from("<18I", raw, 8)
+        rev = raw[80:88].split(b"\0")[0].decode(errors="replace")
+        crc = struct.unpack_from("<I", raw, 88)[0]
+        if magic != 0x46415554 or crc != zlib.crc32(raw[:88]) & 0xFFFFFFFF:
+            return None
+        names = ["r0", "r1", "r2", "r3", "r12", "lr", "pc", "xpsr", "exc_return", "msp", "psp", "ipsr", "cfsr", "hfsr",
+                 "mmfar", "bfar", "afsr", "uptime_ms"]
+        return dict(kind=kind, count=count, code=code, rev=rev, **dict(zip(names, regs)))
 
     def function_symbol(self, name: str) -> str:
         """Plny demanglovany nazev funkce z tabulky symbolu, napr. 'Bluetooth::queueCommand(char const*)'."""
