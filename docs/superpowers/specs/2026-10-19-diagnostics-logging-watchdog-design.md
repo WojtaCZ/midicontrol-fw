@@ -116,7 +116,8 @@ ring and the fault record. `sizeBudget.ram` (data+bss) becomes 29184 B so 1.5 KB
     cursor wrap.
   - Old firmware answers NAK UNKNOWN_MSG (0x01); the PC then stops polling that node until reconnect.
 - **Polling:** the PC sends DIAG_GET on remote link-up and every 10 s while alive; never during OTA; stops when the
-  response says nothing new. Worst case 1 frame of ~110 B per 10 s per direction.
+  response says nothing new. Worst case one DIAG_RESP (≤ 101 B payload, ~110–120 B on the wire typically, ≤ ~220 B if every byte
+  escaped) plus its ACK per 10 s per direction. DIAG_RESP is ACKed by the requester like STATUS_RESP (R22).
 - The base forwards these like any other frame (Dest = PC/Remote) — no base router change.
 - PROTOCOL.md documents both messages, the record layout and the code table; the PC's vendored protocol copy and
   `names.cpp` get the same.
