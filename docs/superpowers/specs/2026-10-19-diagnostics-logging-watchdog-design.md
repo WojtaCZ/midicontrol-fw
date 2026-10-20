@@ -69,6 +69,10 @@ ring and the fault record. `sizeBudget.ram` (data+bss) becomes 29184 B so 1.5 KB
 - Then: debugger attached (`CoreDebug->DHCSR & C_DEBUGEN`) → `bkpt` (bench behaviour unchanged); otherwise
   `NVIC_SystemReset()`.
 - `signalError()` records `error` with a code, logs it, blinks the red LED for ~3 s and resets (no infinite loop).
+- **Amendment 2026-10-20 (R21):** a failed RN4870 init/configure is *not* such an error: it logs `E ble:`, records
+  fault `ERROR` once (no reset), the base keeps running without BLE (USB-MIDI, SSR, display, OLED stay usable) and
+  retries BLE init every 60 s (kicking the watchdogs during the attempt). `signalError()` + reset is reserved for
+  errors that leave the base unusable. A reset loop because of BLE would take the organ's MIDI with it.
 - Next boot prints the record (banner) and keeps it until `dump`/power-off; a second fault overwrites it (the
   record carries a counter of faults since power-on).
 - PC decodes CFSR/HFSR bits to names (IACCVIOL, PRECISERR, UNDEFINSTR, INVSTATE, NOCP, DIVBYZERO, UNALIGNED,
