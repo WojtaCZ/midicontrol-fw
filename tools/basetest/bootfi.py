@@ -50,12 +50,39 @@ def glitch_bin() -> str:
     return binf
 
 
+def _retry(fn, timeout=8.0, restart=None):
+    """Probe cteni behem resetu / kopirovani bootloaderem obcas selze ("read_memory: failed to read memory"). Po resetu
+    remote bezici openocd (hla) uz cist nemusi vubec, novy ano (bench 2026-10-24): po 1 s chyb se openocd restartuje."""
+    end = time.monotonic() + timeout
+    first_fail = None
+    while True:
+        try:
+            return fn()
+        except (ValueError, IndexError, RuntimeError, OSError):
+            now = time.monotonic()
+            if now > end:
+                raise
+            first_fail = first_fail or now
+            if restart and now - first_fail > 1.0:
+                restart()
+                first_fail = None
+            time.sleep(0.3)
+
+
 class Board:
     def __init__(self, name: str):
         self.name = name
         self.b = BOARDS[name]
         self.t = dbg.Target(name)
         self._syms = None
+
+    def restart_server(self):
+        """openocd znovu (bez uvolneni ladeni: jen ukoncit proces), novy se k jadru pripoji znovu."""
+        p = dbg._servers.pop(self.name, None)
+        if p and p.poll() is None:
+            p.terminate()
+            p.wait(5)
+        self.t.start()
 
     # -- symboly bootloaderu
     def bl_sym(self, name: str) -> int:
@@ -85,8 +112,18 @@ class Board:
                 buf += chunk
         return buf[:-1].decode(errors="replace")
 
+    def core_state(self) -> dict:
+        def rd():
+            out = self.tcl("read_memory 0xE000EDF0 32 1")
+            try:
+                d = int(out.split()[0], 0)
+            except (ValueError, IndexError):
+                raise RuntimeError(f"DHCSR read failed: {out.strip()[:300]!r}") from None
+            return {"halted": bool(d & (1 << 17)), "sleeping": bool(d & (1 << 18)), "lockup": bool(d & (1 << 19)), "dhcsr": d}
+        return _retry(rd, restart=self.restart_server)
+
     def halted(self) -> bool:
-        return self.t.core_state()["halted"]
+        return self.core_state()["halted"]
 
     def halt(self):
         self.tcl("halt 500")
@@ -111,11 +148,16 @@ class Board:
         self.t.stop()
 
     def u32(self, addr: int) -> int:
-        return int(self.tcl(f"read_memory 0x{addr:08x} 32 1").split()[0], 0)
+        return _retry(lambda: int(self.tcl(f"read_memory 0x{addr:08x} 32 1").split()[0], 0), restart=self.restart_server)
 
     def flash_read(self, addr: int, n: int) -> bytes:
-        words = self.tcl(f"read_memory 0x{addr:08x} 32 {(n + 3) // 4}").split()
-        return b"".join(struct.pack("<I", int(w, 0)) for w in words)[:n]
+        def rd():
+            words = self.tcl(f"read_memory 0x{addr:08x} 32 {(n + 3) // 4}").split()
+            out = b"".join(struct.pack("<I", int(w, 0)) for w in words)[:n]
+            if len(out) != n:
+                raise ValueError(f"short read {len(out)}/{n}")
+            return out
+        return _retry(rd, restart=self.restart_server)
 
     def eccr(self) -> int:
         return self.u32(FLASH_ECCR)
@@ -123,7 +165,7 @@ class Board:
     def where(self) -> dict:
         """Kde jadro je: kind = app | bootloader | hang (fault exception nebo lockup kdekoli) | unknown.
         Kratce zastavi jadro (pc, xPSR) a pusti ho dal."""
-        st = self.t.core_state()
+        st = self.core_state()
         was_halted = st["halted"]
         if not was_halted:
             self.halt()
@@ -243,7 +285,7 @@ class Board:
             self.halt()
         return out
 
-    def app_matches(self, update_bin=None) -> bool:
-        """Oblast aplikace ve flash = update soubor (vcetne traileru)."""
-        img = open(update_bin or self.b["update_bin"], "rb").read()
+    def app_matches(self, image=None) -> bool:
+        """Oblast aplikace ve flash = update soubor (vcetne traileru); `image` = cesta nebo bajty, default build."""
+        img = image if isinstance(image, (bytes, bytearray)) else open(image or self.b["update_bin"], "rb").read()
         return self.flash_read(self.b["app"], len(img)) == img
