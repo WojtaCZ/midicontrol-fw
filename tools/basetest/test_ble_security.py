@@ -121,6 +121,29 @@ def test_frames_need_secured_remote(remote_away):
     assert base.gpio("A", 4) == ssr0, "SSR not restored"
 
 
+def test_unsecured_remote_link_kicked(remote_away):
+    """Re-review I-1: spojeni s adresou ovladace, %STREAM_OPEN%, ale zadny %SECURED%/%ERR_SEC% -> base po ~3 s posle
+    B znovu a po dalsich ~3 s K,1 (pak auto-reconnect za 5 s). Spojeni bez prijateho protejsku nesmi viset navzdy."""
+    base = remote_away
+    proc, sr = la.start(12, channels="D2,D3", samplerate="1M")
+    time.sleep(1.0)
+    try:
+        base.inject_status(f"CONNECT,0,{REMOTE}")
+        time.sleep(0.3)
+        base.inject_status("STREAM_OPEN")  # t0: B, zadna odpoved (modul ve skutecnosti nepripojen)
+        time.sleep(8.0)
+        accepted = base.read_bool("Bluetooth::_peerAccepted")
+    finally:
+        la.finish(proc, sr, 30)
+        base.inject_status("DISCONNECT")  # stav firmware zpet
+    data, _ = la.uart_timed(sr, la.CH["base_ble_tx"], BAUD, 1e6)
+    tx = bytes(b for _, b in data if 32 <= b < 127 or b == 13)
+    assert not accepted, "peer accepted without %SECURED%"
+    assert tx.count(b"B\r") == 2, f"expected B on STREAM_OPEN and one B again: {tx!r}"
+    second_b = tx.index(b"B\r", tx.index(b"B\r") + 1)
+    assert b"K,1\r" in tx[second_b:], f"unsecured link not kicked after the second B: {tx!r}"
+
+
 def test_connect_while_scanning_kicked(remote_away):
     """%CONNECT% behem skenovani parovani (nikdo se k nam pripojovat nema) -> K,1, sken bezi dal."""
     base = remote_away

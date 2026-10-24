@@ -107,6 +107,51 @@ static void bleFailed(uint16_t code, const char *what);
 static void bleBootStart();
 static void bleProcess();
 
+// Spojení bez přijatého protějšku (re-review I-1): mimo párování nesmí viset navždy (rámce se zahazují, PC dostává
+// NAK UNREACHABLE, ovladač se sám neodpojí). SECURE_KICK_TIMEOUT po %CONNECT%/%STREAM_OPEN% bez přijetí → u adresy
+// uloženého ovladače ještě jednou B, po dalším timeoutu K,1 (pak auto-reconnect za 5 s). Cizí adresa nikdy B, jen K,1.
+// Párování má vlastní 15s timeout. Neblokující: kontrola z hlavní smyčky (secureWatchdog), jeden řádek W na zásah.
+static constexpr duration SECURE_KICK_TIMEOUT = 3000_ms;
+enum class SecureWatch : uint8_t { IDLE, WAIT_SECURE, WAIT_RETRY };
+static SecureWatch _secureWatch = SecureWatch::IDLE;
+static duration _secureWatchSince = 0_ms;
+
+// %CONNECT% / %STREAM_OPEN%: odpočet znovu od této události (B se posílá až po STREAM_OPEN)
+static void secureWatchArm() {
+	_secureWatch = SecureWatch::WAIT_SECURE;
+	_secureWatchSince = stmcpp::systick::getDuration();
+}
+
+static void secureWatchdog() {
+	if (_bleState != BleState::READY || Bluetooth::isPairing() || !Bluetooth::isConnected() || Bluetooth::isPeerAccepted()) {
+		_secureWatch = SecureWatch::IDLE;
+		return;
+	}
+	duration now = stmcpp::systick::getDuration();
+	if (_secureWatch == SecureWatch::IDLE) {
+		// Spojení bez přijetí, které nezačalo událostí (např. po neúspěšném párování) → také hlídat
+		_secureWatch = SecureWatch::WAIT_SECURE;
+		_secureWatchSince = now;
+		return;
+	}
+	if ((now - _secureWatchSince) <= SECURE_KICK_TIMEOUT) return;
+	_secureWatchSince = now;
+	if (_secureWatch == SecureWatch::WAIT_SECURE && _peerAddrMatched && Bluetooth::isStreamOpen()) {
+		_secureWatch = SecureWatch::WAIT_RETRY;
+		if (Bluetooth::queueCommand("B")) {
+			Debug::log(Debug::Level::WARNING, "ble", "link not secured in 3 s, B again");
+			return;
+		}
+		// B neodešel → rovnou odpojit (auto-reconnect zkusí znovu)
+		Debug::log(Debug::Level::WARNING, "ble", "link not secured, B not queued, K,1");
+	} else {
+		_secureWatch = SecureWatch::WAIT_RETRY;
+		Debug::log(Debug::Level::WARNING, "ble", "link not accepted, K,1");
+	}
+	// Při neúspěchu (nebo když %DISCONNECT% nepřijde) se K,1 zkusí znovu po dalším timeoutu
+	if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
+}
+
 extern Oled::OledBuffer frameBuffer;
 
 static uint8_t ledSubCounter = 0;
@@ -301,6 +346,9 @@ extern "C" int main(void) {
 
 		bleProcess();
 
+		// Spojení bez přijatého protějšku mimo párování: B ještě jednou, pak K,1
+		secureWatchdog();
+
 		// Auto-reconnect k bondovanému Remote zařízení (neblokující); během párování a bez uloženého ovladače ne
 		if (_bleState == BleState::READY && _reconnectNeeded && remoteKnown() && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
@@ -371,6 +419,7 @@ extern "C" int main(void) {
 					Bluetooth::setConnected(true);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = false;
+					secureWatchArm();
 					if (pairing == PS::SCANNING) {
 						// Při skenování se k nám nikdo připojovat nemá (ovladač teprve hledáme) → odpojit, sken běží dál
 						Debug::log(Debug::Level::WARNING, "ble", "pairing: unexpected connect %s, K,1", addr.c_str());
@@ -415,10 +464,11 @@ extern "C" int main(void) {
 					Debug::log(Debug::Level::INFO, "ble", "stream open");
 					Bluetooth::setConnected(true);
 					Bluetooth::setStreamOpen(true);
+					secureWatchArm();
 					if (_secureOnStreamOpen) {
 						// B s uloženým klíčem → %SECURED% za ~0,2 s, bez dotazu na OLED
 						_secureOnStreamOpen = false;
-						if (!Bluetooth::queueCommand("B")) Debug::log(Debug::Level::WARNING, "ble", "B not queued, link unsecured");
+						if (!Bluetooth::queueCommand("B")) Debug::log(Debug::Level::WARNING, "ble", "B not queued, retry in 3 s");
 					}
 					break;
 
