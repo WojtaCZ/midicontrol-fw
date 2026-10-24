@@ -39,12 +39,12 @@ def offset_at(size: int, pct: int) -> int:
     return (size * pct // 100) // CHUNK * CHUNK
 
 
-def make_image(update: bytes, *, board=None, corrupt_trailer=False, corrupt_body=False, truncate=None) -> bytes:
-    """Z platneho update souboru: jina deska (znovu podepsano), poskozeny trailer, poskozeny obsah (trailer puvodni),
-    zkraceny o `truncate` bajtu."""
-    size, _crc, version, b, _fmt, _r, _tcrc, _magic = struct.unpack("<IIIBBHII", update[-fw_trailer.TRAILER_SIZE:])
+def make_image(update: bytes, *, board=None, version=None, corrupt_trailer=False, corrupt_body=False, truncate=None) -> bytes:
+    """Z platneho update souboru: jina deska nebo verze (znovu podepsano), poskozeny trailer, poskozeny obsah (trailer
+    puvodni), zkraceny o `truncate` bajtu."""
+    size, _crc, ver, b, _fmt, _r, _tcrc, _magic = struct.unpack("<IIIBBHII", update[-fw_trailer.TRAILER_SIZE:])
     body = bytearray(update[:size])
-    out = bytes(body) + fw_trailer.make_trailer(bytes(body), board if board is not None else b, version)
+    out = bytes(body) + fw_trailer.make_trailer(bytes(body), board if board is not None else b, version if version is not None else ver)
     if corrupt_body:
         body[len(body) // 2] ^= 0xFF
         out = bytes(body) + update[size:]
@@ -88,14 +88,15 @@ class Client:
         self.retries = retries
         self.src = src
 
-    def _reliable(self, mtype, payload=b"", timeout=2.0):
-        """(acked, status|None): ACK/NAK s pid v payload[0]; STATUS, prijde-li do 0,5 s po ACK."""
+    def _reliable(self, mtype, payload=b"", timeout=2.0, status_wait=0.5):
+        """(acked, status|None): ACK/NAK s pid v payload[0]; STATUS, prijde-li do `status_wait` s po ACK (DATA dostava
+        STATUS jen pri chybe, ta jde hned za NAK/ACK)."""
         for _ in range(self.retries + 1):
             pid = self.link.send(Packet(self.src, self.target, 0, mtype, payload))
             reply = self.link.recv(timeout, lambda p: p.src == self.target and p.mtype in (MT.ACK, MT.NAK) and p.payload[:1] == bytes([pid]))
             if reply is None:
                 continue
-            st = self.link.recv(0.5 if reply.mtype == MT.ACK else 0.2, lambda p: p.src == self.target and p.mtype == MT.FW_UPDATE_STATUS)
+            st = self.link.recv(status_wait if reply.mtype == MT.ACK else 0.2, lambda p: p.src == self.target and p.mtype == MT.FW_UPDATE_STATUS)
             status = st.payload[0] if st is not None and st.payload else None
             return reply.mtype == MT.ACK, status
         return False, None
@@ -104,7 +105,7 @@ class Client:
         return self._reliable(MT.FW_UPDATE_START, start_payload(self.target if target_byte is None else target_byte, size, crc), timeout)
 
     def data(self, off: int, chunk: bytes, timeout=2.0):
-        return self._reliable(MT.FW_UPDATE_DATA, data_payload(off, chunk), timeout)
+        return self._reliable(MT.FW_UPDATE_DATA, data_payload(off, chunk), timeout, status_wait=0.01)
 
     def end(self, timeout=10.0):
         return self._reliable(MT.FW_UPDATE_END, b"", timeout)

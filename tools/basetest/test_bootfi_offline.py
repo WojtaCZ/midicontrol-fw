@@ -132,3 +132,11 @@ def test_send_image_on_chunk_callback():
 @pytest.mark.parametrize("pct,expect", [(0, 0), (50, 480), (100, 1024)])
 def test_offset_at_percent_is_chunk_aligned(pct, expect):
     assert fwclient.offset_at(1024, pct) == expect
+
+
+def test_make_image_version_changes_only_trailer():
+    src = good_image()
+    img = fwclient.make_image(src, version=0x00FF01)
+    assert fw_trailer.check(img, 0x02) is None
+    assert img[:-24] == src[:-24] and img != src
+    assert struct.unpack("<I", img[-16:-12])[0] == 0x00FF01

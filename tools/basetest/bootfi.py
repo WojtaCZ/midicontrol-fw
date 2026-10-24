@@ -23,7 +23,7 @@ GLITCH_DIR = os.path.join(HERE, "glitch")
 GLITCH_ADDR, PARAMS_ADDR = 0x20001000, 0x20000F00
 FLASH, FLASH_ECCR, FLASH_SR, FLASH_CR = 0x40022000, 0x40022018, 0x40022010, 0x40022014
 ECCD, ECCC = 1 << 31, 1 << 30
-OP_ERASE, OP_PROGRAM, OP_MEASURE_ERASE, OP_MEASURE_PROGRAM = range(4)
+OP_ERASE, OP_PROGRAM, OP_MEASURE_ERASE, OP_MEASURE_PROGRAM, OP_ERASE_THEN_PROGRAM, OP_MEASURE_ERASE_THEN_PROGRAM = range(6)
 
 BOARDS = {
     "base": dict(cpu="stm32g4x.cpu", app=0x08008000, app_end=0x0801F800, page=2048,
@@ -70,8 +70,20 @@ class Board:
         return self._syms[name]
 
     # -- jadro
-    def tcl(self, cmd: str) -> str:
-        return self.t.tcl(cmd)
+    def tcl(self, cmd: str, timeout: float = 5.0) -> str:
+        if timeout <= 5.0:
+            return self.t.tcl(cmd)
+        import socket
+        self.t.start()
+        with socket.create_connection(("127.0.0.1", self.t.c["tcl"]), timeout) as s:
+            s.sendall(cmd.encode() + b"\x1a")
+            buf = b""
+            while not buf.endswith(b"\x1a"):
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+        return buf[:-1].decode(errors="replace")
 
     def halted(self) -> bool:
         return self.t.core_state()["halted"]
@@ -80,14 +92,22 @@ class Board:
         self.tcl("halt 500")
 
     def reg(self, name: str) -> int:
-        out = self.tcl(f"reg {name}")
-        return int(re.search(r"0x[0-9a-fA-F]+", out.split(":")[-1]).group(0), 16)
+        out = self.tcl(f"reg {name} force")  # vzdy z jadra, ne z cache openocd
+        m = re.search(r"0x[0-9a-fA-F]+", out)
+        if not m:
+            raise RuntimeError(f"reg {name}: {out!r}")
+        return int(m.group(0), 16)
 
     def reset(self):
         """Reset sondou (SYSRESETREQ, reset_config none); jadro bezi dal."""
         self.t.reset()
 
     def stop(self):
+        try:
+            if dbg.probe_holder(self.name) is None and dbg._servers.get(self.name):
+                self.disarm_all()
+        except Exception:  # noqa: BLE001 - jadro/sonda nedostupne
+            pass
         self.t.stop()
 
     def u32(self, addr: int) -> int:
@@ -101,7 +121,7 @@ class Board:
         return self.u32(FLASH_ECCR)
 
     def where(self) -> dict:
-        """Kde jadro je: kind = app | bootloader | hang (NMI/HardFault/lockup v bootloaderu nebo jinde) | unknown.
+        """Kde jadro je: kind = app | bootloader | hang (fault exception nebo lockup kdekoli) | unknown.
         Kratce zastavi jadro (pc, xPSR) a pusti ho dal."""
         st = self.t.core_state()
         was_halted = st["halted"]
@@ -109,9 +129,11 @@ class Board:
             self.halt()
         pc, xpsr = self.reg("pc"), self.reg("xPSR")
         if not was_halted:
-            self.tcl("resume")
+            self.t.resume()
         ipsr = xpsr & 0x1FF
-        if st["lockup"] or ipsr in (2, 3):
+        # NMI, HardFault, MemManage, BusFault, UsageFault: v bootloaderu nekonecna smycka, v aplikaci s probem bkpt
+        # (bez proby reset a znovu totez) -> pro testy vzdy "hang"
+        if st["lockup"] or ipsr in (2, 3, 4, 5, 6):
             kind = "hang"
         elif 0x08000000 <= pc < self.b["app"]:
             kind = "bootloader"
@@ -125,13 +147,31 @@ class Board:
 
     # -- breakpointy / watchpointy
     def arm(self, addr: int, watch_write=False):
-        if watch_write:
-            self.tcl(f"wp 0x{addr:08x} 4 w")
-        else:
-            self.tcl(f"bp 0x{addr:08x} 2 hw")
+        """HW bp / DWT write watchpoint. wp nastaveny za behu jadra (hla) se tise neprojevi: nastavuje se pri zastavenem
+        jadru (bench 2026-10-24)."""
+        was_halted = self.halted()
+        if not was_halted:
+            self.halt()
+        out = self.tcl(f"wp 0x{addr:08x} 4 w" if watch_write else f"bp 0x{addr:08x} 2 hw")
+        if not was_halted:
+            self.t.resume()
+        if "rror" in out:
+            raise RuntimeError(f"arm 0x{addr:08x}: {out}")
 
     def disarm_all(self):
-        self.tcl("capture {rbp all}; capture {rwp all}")
+        """Zrusi vsechny bp/wp i primo v FPB/DWT: ty prezivaji systemovy reset i konec openocd (jen POR je nuluje) a
+        openocd 0.12 nema `rwp all`. Zapomenuty FPB bp bez ladeni (C_DEBUGEN = 0) = HardFault (bench 2026-10-24)."""
+        self.tcl("capture {rbp all}")
+        for line in self.tcl("wp").splitlines():
+            m = re.match(r"address: (0x[0-9a-f]+)", line.strip())
+            if m:
+                self.tcl(f"capture {{rwp {m.group(1)}}}")
+        n_comp = (self.u32(0xE0002000) >> 4) & 0xF  # FP_CTRL.NUM_CODE
+        for i in range(n_comp):
+            self.tcl(f"write_memory 0x{0xE0002008 + 4 * i:08x} 32 {{0}}")
+        n_dwt = self.u32(0xE0001000) >> 28  # DWT_CTRL.NUMCOMP
+        for i in range(n_dwt):
+            self.tcl(f"write_memory 0x{0xE0001028 + 16 * i:08x} 32 {{0}}")
 
     def wait_halt(self, timeout: float) -> bool:
         end = time.monotonic() + timeout
@@ -151,7 +191,7 @@ class Board:
                 if not self.wait_halt(timeout):
                     return False
                 if i + 1 < hits:
-                    self.tcl("resume")
+                    self.t.resume()
                     time.sleep(0.005)
             if before_reset:
                 before_reset()
@@ -174,8 +214,8 @@ class Board:
         self.tcl(f"reg pc 0x{GLITCH_ADDR:08x}")
         self.tcl("reg xPSR 0x01000000")
         self.tcl("reg primask 1")
-        self.tcl("resume")
-        if op >= OP_MEASURE_ERASE:
+        self.t.resume()
+        if op in (OP_MEASURE_ERASE, OP_MEASURE_PROGRAM, OP_MEASURE_ERASE_THEN_PROGRAM):
             if not self.wait_halt(timeout):
                 raise RuntimeError("glitch measure did not finish")
             r = self.u32(PARAMS_ADDR + 28)
@@ -184,7 +224,7 @@ class Board:
             return r
         time.sleep(0.3)  # reset uz probehl
         if self.halted():
-            self.tcl("resume")
+            self.t.resume()
         return None
 
     # -- obnova
@@ -192,11 +232,15 @@ class Board:
         """Nahraje -update.hex (cela oblast aplikace, 0xFF az do APP_END) a spusti; posledni zachrana."""
         hexfile = hexfile or self.b["update_hex"]
         self.halt()
-        out = self.tcl(f"flash write_image erase {{{hexfile}}}; verify_image {{{hexfile}}}")
-        self.tcl("reset run")
-        time.sleep(0.3)
-        if self.halted():
-            self.tcl("resume")
+        for attempt in range(2):
+            out = self.tcl(f"flash write_image erase {{{hexfile}}}; verify_image {{{hexfile}}}", timeout=180)
+            self.tcl("reset run")
+            time.sleep(1.5)
+            if self.halted():
+                self.t.resume()
+            if "verified" in out and self.where()["kind"] == "app":
+                break
+            self.halt()
         return out
 
     def app_matches(self, update_bin=None) -> bool:

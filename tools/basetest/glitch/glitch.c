@@ -1,7 +1,9 @@
 // Glitch rutina pro testy bootloaderu (nahrava ji bootfi.py sondou do SRAM, bezi na G071 i G431: Thumb-1).
 // Spusti skutecne mazani stranky / programovani dvojslova a po `delay` iteracich resetuje MCU (SYSRESETREQ), tj.
 // preruseni flash operace v jejim prubehu - nejblizsi nahrada vypadku napajeni, kterou lavice umi.
-// op: 0 = erase + reset, 1 = program + reset, 2 = erase + mereni (iterace do konce BSY, bkpt), 3 = program + mereni.
+// op: 0 = erase + reset, 1 = program + reset, 2 = erase + mereni (iterace do konce BSY, bkpt), 3 = program + mereni,
+// 4 = smazat stranku (dokoncit) a pak program + reset, 5 = smazat stranku a pak program + mereni. 4/5 bezi ze stavu
+// aplikace: programovani ze zastaveneho bootloaderu base hlasi PGAERR|PGSERR (bench 2026-10-24, pricina neznama).
 #include <stdint.h>
 
 typedef struct {
@@ -39,6 +41,15 @@ void run(void) {
 	while (f[SR] & BSY) {}
 	f[SR] = 0x0000C3FBu; // smazat chybove priznaky
 	uint32_t op = P->op;
+	if (op >= 4) {
+		f[CR] = (P->page << 3) | (1u << 1);
+		f[CR] |= (1u << 16);
+		while (f[SR] & BSY) {}
+		f[CR] = 0;
+		f[SR] = 0x0000C3FBu;
+		op -= 3; // 4 -> 1 (program + reset), 5 -> 2 ... viz nize: program + mereni
+		if (op == 2) op = 3;
+	}
 	if (op == 0 || op == 2) {
 		f[CR] = (P->page << 3) | (1u << 1); // PNB | PER
 		f[CR] |= (1u << 16);                // STRT
