@@ -43,7 +43,7 @@ arm-none-eabi-gdb -batch -ex 'print sizeof(ui::MenuItem)' -ex 'print &((ui::Menu
 
 ```bash
 cd tools/basetest
-../../.venv/bin/python -m pytest -q test_proto_offline.py test_soak_offline.py test_usblink_offline.py  # no hardware
+../../.venv/bin/python -m pytest -q test_proto_offline.py test_soak_offline.py test_usblink_offline.py test_dbg_offline.py  # no hardware
 ../../.venv/bin/python -m pytest -q -m hw                      # with the bench
 ```
 
@@ -54,7 +54,8 @@ cd tools/basetest
   packet matching `pred`; the others stay for later calls. With `keepalive=True` a background thread sends
   KEEPALIVE to the base every second (the base counts the PC dead after 6 s) and swallows the matching
   KEEPALIVE_ACKs (`keepalive_acks`); KEEPALIVEs from the base are answered. `.stray` must stay empty.
-- `dbg.Target("base"|"remote")` - `sym`, `read`, `write`, `u`, `read_u8`, `read_bool`, `cstr`, `core_state`, `gpio`,
+- `dbg.Target("base"|"remote")` - `sym`, `read` (byte accesses), `write`, `u`/`read_uint` (aligned 2/4 B values with one
+  16/32-bit access, so a counter an ISR is incrementing is never read torn across a byte carry), `read_u8`, `read_bool`, `cstr`, `core_state`, `gpio`,
   `reset` (reset run), `call("ns::func(args)")` (gdb; the function is found by `nm` and called through a cast
   pointer, returns int; it first stops at a main-loop safe point: base `Bluetooth::process`, remote
   `base::Keyboard::process`), `debug_log` (base); remote: `key`, `type_code`, `goto_player`, `player_state`,

@@ -229,7 +229,15 @@ class Target:
         return None
 
     def u(self, name: str, size: int = 4) -> int:
-        return int.from_bytes(self.read(self.sym(name), size), "little")
+        return self.read_uint(self.sym(name), size)
+
+    def read_uint(self, addr: int, size: int = 4) -> int:
+        """Cislo little-endian bez zastaveni jadra. Zarovnane 2/4 B jednim 16/32bit pristupem: bajtove cteni (read())
+        se roztrhne pres prenos, kdyz ISR hodnotu prave inkrementuje (soak 2026-10-24: "systick went back
+        271871 -> 271819", ticks_ = 0x425FF). Ostatni (1 B, nezarovnane, jine delky) po bajtech."""
+        if size in (2, 4) and addr % size == 0:
+            return int(self.tcl(f"read_memory 0x{addr:08x} {size * 8} 1").split()[0], 0)
+        return int.from_bytes(self.read(addr, size), "little")
 
     def read_u8(self, name: str) -> int:
         return self.u(name, 1)
