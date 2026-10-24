@@ -5,7 +5,9 @@ SIGNAL_STOPPED. Kazdych 10 s DIAG_GET na remote s merenim latence DIAG_GET -> DI
 jdou do CSV (`SOAK_OUT`, default <tmp>/basetest-soak/soak.csv), na konci se vypise souhrn.
 CRC: base BLE strana se NEMERI (bluetooth.cpp nema pocitadlo); CDC PC -> base: router::_badFrames se po hlaseni nuluje, chyby
 prichazi jako W radek "cdc: N bad frames dropped" (CRC, delka i neuplne ramce dohromady; log ma kladnou kontrolu);
-remote: zaznamy CRC_ERRORS z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
+CDC base -> PC: pocitadla parseru harnessu (crc_errors, bad_frames, overflows) jako rozdil od otevreni okna (pc_crc_errors,
+pc_bad_frames, pc_overflows; Link.attach() parser nahrazuje, novy parser se zapocita cely); remote: zaznamy CRC_ERRORS
+z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
 Pass = vsechna pocitadla chyb nulova, boot_id remote stejny, base log v okne bez jedineho E/W radku (zadny seznam
 "znamych" radku; STATUS_RESP se proto potvrzuje, jinak by base po 3 opakovanich zalogovala W "retries exhausted"),
 uptime base monotonni, zadne jadro nezastavene/lockup. Latence se jen hlasi (hranice 2 s se pocita, ale neni podminkou)."""
@@ -43,6 +45,11 @@ def paired(base):
     wait_until(lambda: base.read_bool("Bluetooth::_streamOpen"), 15, what="BLE stream open (pair first: test_pairing.py)")
     wait_until(lambda: remote_alive(base), 8, interval=0.5, what="remote alive")
     return base
+
+
+def parser_errors(parser):
+    """Pocitadla chyb parseru PC strany (ramce base -> PC): CRC, delka/neuplne, preteceni."""
+    return parser.crc_errors, parser.bad_frames, parser.overflows
 
 
 def diag_timed(link, cursor, rv=None):
@@ -167,6 +174,8 @@ def test_soak(paired, link, remote_probe):
     assert resp is not None, "no DIAG_RESP at start"
     boot_id, cur, _ = decode(resp)
     ka_sent0, ka_ack0 = link.keepalives_sent, link.keepalive_acks
+    parser0 = link.parser  # Link.attach() ho nahrazuje
+    perr0 = parser_errors(parser0)
     log_start = len(log.history)
     rows = []
     writer_ctx = midi.Writer(pr["base"])
@@ -278,6 +287,10 @@ def test_soak(paired, link, remote_probe):
         time.sleep(0.05)
     ka_ack = link.keepalive_acks - ka_ack0
     c["pc_keepalive_miss"] = ka_sent - ka_ack
+    perr = [now - before for now, before in zip(parser_errors(parser0), perr0)]
+    if link.parser is not parser0:
+        perr = [a + b for a, b in zip(perr, parser_errors(link.parser))]
+    c["pc_crc_errors"], c["pc_bad_frames"], c["pc_overflows"] = perr
     hist = [l for _, l in log.history[log_start:]]
     log.close()
     parsed = [LOG_TS.match(l) for l in hist]
@@ -308,7 +321,7 @@ def test_soak(paired, link, remote_probe):
     assert link.stray == b"", f"bytes outside frames on CDC: {link.stray!r}"
     zero = ["play_missed", "play_retrans", "ack_missed", "nak", "base_reset", "remote_crc_recs", "diag_no_ack", "diag_no_resp", "midi_err", "halted",
             "lockup", "remote_dead", "boot_changed", "fault_recs", "log_ew", "log_nonmono", "log_markers", "log_banners",
-            "base_fault_record", "pc_keepalive_miss", "ble_disconnected"]
+            "base_fault_record", "pc_keepalive_miss", "ble_disconnected", "pc_crc_errors", "pc_bad_frames", "pc_overflows"]
     bad = {k: c[k] for k in zero if c[k]}
     assert not bad, f"soak counters: {bad}; errors {errors[:10]}; log {lines_ew[:10]}"
     assert c["log_alive"]

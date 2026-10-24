@@ -32,9 +32,11 @@ class FakeLink:
     """Simulovany remote za base: ACK na vse PC -> remote, DIAG_GET -> ACK + DIAG_RESP.
     Base: GET_STATUS -> ACK + STATUS_RESP (spolehlive; bez ACK od PC do STATUS_RETRY_S -> W radek v logu)."""
 
-    def __init__(self):
+    def __init__(self, crc_on_diag=False, reattach_on_diag=False):
         self.q = []
         self.pid = 0
+        self.parser = proto.FrameParser()  # pocitadla chyb PC strany (crc_errors, bad_frames, overflows)
+        self.crc_on_diag, self.reattach_on_diag = crc_on_diag, reattach_on_diag
         self.base_pid = 0x60
         self.status_pending = {}  # pid STATUS_RESP -> cas, kdy base vzda opakovani
         self.keepalives_sent = self.keepalive_acks = 0
@@ -57,6 +59,11 @@ class FakeLink:
         if p.dst == ADDR_REMOTE and p.mtype != MT.ACK:
             self.push(Packet(ADDR_REMOTE, ADDR_PC, 0, MT.ACK, bytes([pid])))
             if p.mtype == MT.DIAG_GET:
+                if self.reattach_on_diag:
+                    self.reattach_on_diag = False
+                    self.parser = proto.FrameParser()  # Link.attach() parser nahrazuje
+                if self.crc_on_diag:
+                    self.parser.crc_errors += 1  # poskozeny ramec base -> PC
                 self.push(Packet(ADDR_REMOTE, ADDR_PC, 0x40, MT.DIAG_RESP, proto.diag_encode_resp(BOOT_ID, 5, [])))
         elif p.dst == ADDR_BASE and p.mtype == MT.GET_STATUS:
             self.base_pid = (self.base_pid + 1) & 0xFF
@@ -192,9 +199,9 @@ def soak_env(monkeypatch, tmp_path):
     monkeypatch.setattr(test_soak, "DIAG_PERIOD", 1.5)
     monkeypatch.setattr(test_soak.midi, "ports", lambda: {"base": "fake"})
     monkeypatch.setattr(test_soak.midi, "Writer", FakeWriter)
-    def run(age_fn=happy_age, **remote_kw):
+    def run(age_fn=happy_age, link_kw=None, **remote_kw):
         clock = Clock()
-        link = FakeLink()
+        link = FakeLink(**(link_kw or {}))
         monkeypatch.setattr(test_soak.loglink, "LogLink", lambda: FakeLog(link))
         remote = FakeRemote(link, **remote_kw)
         test_soak.test_soak(FakeBase(clock, age_fn), link, remote)
@@ -248,3 +255,14 @@ def test_soak_dryrun_slow_back_key_fails_gap(soak_env):
 def test_soak_dryrun_remote_age_over_limit_fails(soak_env):
     with pytest.raises(AssertionError, match="max remote age"):
         soak_env(age_fn=lambda t: 3200.0 if 1.0 <= t < 2.0 else happy_age(t))
+
+
+def test_soak_dryrun_pc_crc_error_fails(soak_env):
+    with pytest.raises(AssertionError, match="pc_crc_errors"):
+        soak_env(link_kw=dict(crc_on_diag=True))
+
+
+def test_soak_dryrun_pc_crc_error_after_reattach_fails(soak_env):
+    # Link.attach() vymeni parser: chyba v novem parseru se musi zapocitat taky
+    with pytest.raises(AssertionError, match="pc_crc_errors"):
+        soak_env(link_kw=dict(crc_on_diag=True, reattach_on_diag=True))

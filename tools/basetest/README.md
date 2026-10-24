@@ -189,8 +189,11 @@ SIGNAL_STOPPED) plus DIAG_GET every 10 s with DIAG_GET -> DIAG_RESP latency. Per
 the summary to `$SOAK_OUT/summary.txt`. DIN is not checked (bench link broken). At the default INFO level the base logs nothing in steady state, so
 "log clean" means no E/W lines.
 One lost DIAG poll fails the soak by design. Base BLE-side CRC errors are NOT measured (no counter in bluetooth.cpp).
-CDC bad frames: `router::_badFrames` is zeroed after each report, so they show as `cdc: N bad frames dropped` W lines;
-that count covers all bad CDC frames (CRC, length, incomplete), not only CRC. Remote CRC_ERRORS diag records are counted. Every E/W line in the window fails the soak (no allow-list), so the soak ACKs every
+CDC bad frames PC -> base: `router::_badFrames` is zeroed after each report, so they show as `cdc: N bad frames dropped` W lines;
+that count covers all bad CDC frames (CRC, length, incomplete), not only CRC. CDC base -> PC: the harness parser's
+`crc_errors`/`bad_frames`/`overflows` are snapshotted when the window opens and their deltas must be zero (`pc_crc_errors`,
+`pc_bad_frames`, `pc_overflows`; `Link.attach()` replaces the parser, a replacement parser is counted in full). Remote
+CRC_ERRORS diag records are counted. Every E/W line in the window fails the soak (no allow-list), so the soak ACKs every
 STATUS_RESP (`test_log.ack_status`): an un-ACKed one makes the base retry 3 x 500 ms and log
 `W router: retries exhausted: type 0x51` inside the window (bench 2026-10-24).
 The log CDC is positive-checked at start (`level d`, then back to the default INFO). The age of the last remote packet (and the base systick)
@@ -201,5 +204,5 @@ The test asserts max age < 3000 ms, `max_sample_gap_ms` < 1000 within the window
 and `age_samples` >= 4 x `elapsed_s`. `remote.key()` cannot be sliced (a gdb batch per call): every call in the cycle is timed
 (CSV `key_s` for PLAY, `back_key_s` for the stale-digit BACK keys, `max_key_s` overall); if one exceeds ~0.8 s the gap assert fails by design.
 `test_soak_offline.py` (no hardware) dry-runs the soak with fakes (`SOAK_SECONDS=3`): happy path passes, a 1.2 s PLAY or BACK key fails the gap
-assert, a remote age of 3200 ms for 1 s fails the age assert. The
+assert, a remote age of 3200 ms for 1 s fails the age assert, a PC-side CRC error (also after a parser replacement) fails the counters. The
 fake base models the reliable STATUS_RESP: left un-ACKed for 2 s it adds the `retries exhausted` W line to the fake log history.
