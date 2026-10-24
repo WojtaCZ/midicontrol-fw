@@ -1,5 +1,5 @@
 """Prvni sparovani base s remote (menu "Sparovat ovladac" -> Bluetooth::startPairing): sken, pripojeni jen k
-MIDIControlRemote, bond (Just Works: base SA,2 NoInputNoOutput, remote SA,1 DisplayYesNo), opetovne pripojeni po
+MIDIControlRemote, bond (Just Works: base i remote SA,2 NoInputNoOutput, viz CLAUDE.md), opetovne pripojeni po
 resetu base a timeout bez remote. Zaznam obou UART RN4870 behem parovani jde do PAIRING_LOG (vychozi: tmp)."""
 
 import os
