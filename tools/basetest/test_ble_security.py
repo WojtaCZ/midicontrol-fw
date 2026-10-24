@@ -195,9 +195,12 @@ def test_no_reconnect_without_stored_remote(remote_away):
     def text(t0, t1):
         return bytes(b for t, b in data if t0 <= t < t1)
 
-    # 2.5 s: rezerva na start zachytu a pokus o pripojeni rozbehnuty tesne pred smazanim
-    assert b"C\r" not in text(2.5, 13.0), f"reconnect attempt while no remote was stored: {text(2.5, 13.0)!r}"
-    assert b"C\r" in text(13.0, 21.0), f"no reconnect after the address was restored: {text(13.0, 21.0)!r}"
+    # 2.5 s: rezerva na start zachytu a pokus o pripojeni rozbehnuty tesne pred smazanim.
+    # Adresa se vraci v ~13.0 s pythonovskeho casu, ale zachyt (sigrok) startuje pozdeji nez hodiny Pythonu, takze
+    # okamzity reconnect po vraceni vychazi v case zachytu uz kolem 12.98 s. Zaporne okno proto konci o 1 s driv
+    # (12.0) a kladne okno od nej zacina; zaporne okno (9.5 s) stale pokryva vic nez jeden 5 s interval pripojeni.
+    assert b"C\r" not in text(2.5, 12.0), f"reconnect attempt while no remote was stored: {text(2.5, 12.0)!r}"
+    assert b"C\r" in text(12.0, 21.0), f"no reconnect after the address was restored: {text(12.0, 21.0)!r}"
 
 
 def test_pairing_ignores_foreign_connect(remote_away):
