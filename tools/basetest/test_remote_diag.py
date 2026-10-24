@@ -387,7 +387,18 @@ def test_remote_iwdg(paired, link, remote_probe):
     3,8-4,3 s). Zadny slot (IWDG nedava sanci nic zapsat); po zapnuti BOOT, pred nim zadny novy FAULT/LOOP_STALL.
     Pricina resetu: IWDG (bit 5) jen kdyz remote reset prezil napajeny, jinak POR."""
     remote = remote_probe
+    # Stav pred injekci: vsechny FAULT/LOOP_STALL, ktere tento beh zna (nactene ze starsich slotu i vlastni). Po zapnuti
+    # smi byt pred BOOT jen ty (znovu nactene sloty nesou puvodni uptime a arg), zadny novy z behu ukonceneho IWDG.
+    _, head0 = head_and_boot(link)
+    _, pre, _ = read_range(link, 0, head0)
     off = _inject_and_wait_off(remote, paired, 3, "IWDG")
     assert 3.0 <= off <= 7.0, f"IWDG reset after {off:.1f} s, expected ~4 s"
     loaded, boot = _records_before_boot(link)
     print(f"IWDG: off after {off:.1f} s, BOOT cause {boot[4]:#04x}, records loaded from slots {len(loaded)}")
+    new = _fault_keys(loaded) - _fault_keys(pre)
+    assert not new, f"IWDG reset recorded as FAULT/LOOP_STALL (code, uptime, arg): {sorted(new)}; loaded {loaded}"
+
+
+def _fault_keys(recs):
+    """FAULT/LOOP_STALL zaznamy jako (code, uptime_ms, arg): seq a boot se po nacteni ze slotu meni, tohle ne."""
+    return {(r[1], r[3], r[4]) for r in recs if r[1] in (CODE_FAULT, CODE_LOOP_STALL)}
