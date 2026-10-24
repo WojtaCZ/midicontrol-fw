@@ -3,10 +3,12 @@ Cyklus (~3 s): PLAY z remote (klavesy 406 + ENTER) -> harness potvrdi, SIGNAL_PL
 USB-MIDI noty na base (DIN nelze overit, bench DIN link je rozbity: jen se pozoruje, ze zapis projde a log je cisty),
 SIGNAL_STOPPED. Kazdych 10 s DIAG_GET na remote s merenim latence DIAG_GET -> DIAG_RESP (R28). Pocitadla po iteracich
 jdou do CSV (`SOAK_OUT`, default <tmp>/basetest-soak/soak.csv), na konci se vypise souhrn.
-CRC: base BLE strana se NEMERI (bluetooth.cpp nema pocitadlo); CDC: router::_badFrames se po hlaseni nuluje, chyby prichazi
-jako W radek "cdc: N bad frames dropped" (CRC, delka i neuplne ramce dohromady; log ma kladnou kontrolu); remote: zaznamy CRC_ERRORS z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
-Pass = vsechna pocitadla chyb nulova, boot_id remote stejny, base log bez E/W (krome znamych), uptime base monotonni,
-zadne jadro nezastavene/lockup. Latence se jen hlasi (hranice 2 s se pocita, ale neni podminkou)."""
+CRC: base BLE strana se NEMERI (bluetooth.cpp nema pocitadlo); CDC PC -> base: router::_badFrames se po hlaseni nuluje, chyby
+prichazi jako W radek "cdc: N bad frames dropped" (CRC, delka i neuplne ramce dohromady; log ma kladnou kontrolu);
+remote: zaznamy CRC_ERRORS z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
+Pass = vsechna pocitadla chyb nulova, boot_id remote stejny, base log v okne bez jedineho E/W radku (zadny seznam
+"znamych" radku; STATUS_RESP se proto potvrzuje, jinak by base po 3 opakovanich zalogovala W "retries exhausted"),
+uptime base monotonni, zadne jadro nezastavene/lockup. Latence se jen hlasi (hranice 2 s se pocita, ale neni podminkou)."""
 
 import csv
 import os
@@ -24,6 +26,7 @@ import proto
 from conftest import remote_alive, wait_until
 from proto import MT, Packet
 from test_relay import from_remote, pc_ack, reply_to
+from test_log import ack_status
 from test_remote_diag import CODE_FAULT, CODE_LOOP_STALL, decode
 
 ADDR_PC, ADDR_BASE, ADDR_REMOTE = proto.ADDR_PC, proto.ADDR_BASE, proto.ADDR_REMOTE
@@ -149,7 +152,8 @@ def test_soak(paired, link, remote_probe):
     # vychozi uroven je INFO (src/debug.cpp), po kontrole se vraci `level i`
     try:
         assert log.command("level d") == ["level D"], "log CDC not answering"
-        link.send_msg(MT.GET_STATUS)
+        # STATUS_RESP potvrdit: nepotvrzenou base 3x opakuje a pak zaloguje W "retries exhausted" uz v okne mereni
+        ack_status(link)
         got = log.lines(3.0, pred=lambda l: loglink.is_log_line(l) and " D " in l)
         assert any(loglink.is_log_line(l) and " D " in l for l in got), "no D line on the log CDC at level d"
     finally:

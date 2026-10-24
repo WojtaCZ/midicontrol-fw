@@ -43,7 +43,7 @@ arm-none-eabi-gdb -batch -ex 'print sizeof(ui::MenuItem)' -ex 'print &((ui::Menu
 
 ```bash
 cd tools/basetest
-../../.venv/bin/python -m pytest -q test_proto_offline.py     # no hardware
+../../.venv/bin/python -m pytest -q test_proto_offline.py test_soak_offline.py test_usblink_offline.py  # no hardware
 ../../.venv/bin/python -m pytest -q -m hw                      # with the bench
 ```
 
@@ -190,7 +190,9 @@ the summary to `$SOAK_OUT/summary.txt`. DIN is not checked (bench link broken). 
 "log clean" means no E/W lines.
 One lost DIAG poll fails the soak by design. Base BLE-side CRC errors are NOT measured (no counter in bluetooth.cpp).
 CDC bad frames: `router::_badFrames` is zeroed after each report, so they show as `cdc: N bad frames dropped` W lines;
-that count covers all bad CDC frames (CRC, length, incomplete), not only CRC. Remote CRC_ERRORS diag records are counted.
+that count covers all bad CDC frames (CRC, length, incomplete), not only CRC. Remote CRC_ERRORS diag records are counted. Every E/W line in the window fails the soak (no allow-list), so the soak ACKs every
+STATUS_RESP (`test_log.ack_status`): an un-ACKed one makes the base retry 3 x 500 ms and log
+`W router: retries exhausted: type 0x51` inside the window (bench 2026-10-24).
 The log CDC is positive-checked at start (`level d`, then back to the default INFO). The age of the last remote packet (and the base systick)
 is sampled through `sample()`, also while waiting for replies (<= 0.2 s slices). Measured window = the cycle loop only: it opens with one
 sample right before the first cycle and closes at loop exit (`elapsed_s`, the last cycle's overrun included); the setup before it (log check,
@@ -199,4 +201,5 @@ The test asserts max age < 3000 ms, `max_sample_gap_ms` < 1000 within the window
 and `age_samples` >= 4 x `elapsed_s`. `remote.key()` cannot be sliced (a gdb batch per call): every call in the cycle is timed
 (CSV `key_s` for PLAY, `back_key_s` for the stale-digit BACK keys, `max_key_s` overall); if one exceeds ~0.8 s the gap assert fails by design.
 `test_soak_offline.py` (no hardware) dry-runs the soak with fakes (`SOAK_SECONDS=3`): happy path passes, a 1.2 s PLAY or BACK key fails the gap
-assert, a remote age of 3200 ms for 1 s fails the age assert.
+assert, a remote age of 3200 ms for 1 s fails the age assert. The
+fake base models the reliable STATUS_RESP: left un-ACKed for 2 s it adds the `retries exhausted` W line to the fake log history.

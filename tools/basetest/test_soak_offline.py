@@ -1,6 +1,9 @@
 """Offline dry-run ridiciho toku test_soak (bez hardware): male fake link / base / remote / log / midi.
-Overuje, ze soak dobehne na stastne ceste a ze asserty mezery vzorkovani a stari remote opravdu padnou."""
+Overuje, ze soak dobehne na stastne ceste a ze asserty mezery vzorkovani a stari remote opravdu padnou.
+Fake base modeluje i spolehlive STATUS_RESP: nepotvrzena odpoved na GET_STATUS da po ~2 s (3 x 500 ms opakovani)
+W radek "retries exhausted" do logu, jako skutecna base (src/router.cpp)."""
 
+import sys
 import time
 
 import pytest
@@ -22,15 +25,28 @@ class Clock:
         return time.monotonic() - self.t0
 
 
+STATUS_RETRY_S = 2.0  # base: STATUS_RESP 4x po 500 ms, pak W "retries exhausted"
+
+
 class FakeLink:
-    """Simulovany remote za base: ACK na vse PC -> remote, DIAG_GET -> ACK + DIAG_RESP."""
+    """Simulovany remote za base: ACK na vse PC -> remote, DIAG_GET -> ACK + DIAG_RESP.
+    Base: GET_STATUS -> ACK + STATUS_RESP (spolehlive; bez ACK od PC do STATUS_RETRY_S -> W radek v logu)."""
 
     def __init__(self):
         self.q = []
         self.pid = 0
+        self.base_pid = 0x60
+        self.status_pending = {}  # pid STATUS_RESP -> cas, kdy base vzda opakovani
         self.keepalives_sent = self.keepalive_acks = 0
         self.error = None
         self.stray = b""
+
+    def overdue_status(self):
+        now = time.monotonic()
+        for pid, deadline in list(self.status_pending.items()):
+            if now >= deadline:
+                del self.status_pending[pid]
+                yield f"[  {now:7.3f}] W router: retries exhausted: type 0x51 to 0x01 pid {pid}"
 
     def push(self, p):
         self.q.append(p)
@@ -42,6 +58,13 @@ class FakeLink:
             self.push(Packet(ADDR_REMOTE, ADDR_PC, 0, MT.ACK, bytes([pid])))
             if p.mtype == MT.DIAG_GET:
                 self.push(Packet(ADDR_REMOTE, ADDR_PC, 0x40, MT.DIAG_RESP, proto.diag_encode_resp(BOOT_ID, 5, [])))
+        elif p.dst == ADDR_BASE and p.mtype == MT.GET_STATUS:
+            self.base_pid = (self.base_pid + 1) & 0xFF
+            self.push(Packet(ADDR_BASE, ADDR_PC, 0x5F, MT.ACK, bytes([pid])))
+            self.push(Packet(ADDR_BASE, ADDR_PC, self.base_pid, MT.STATUS_RESP, bytes([1, 0, 0, 1])))
+            self.status_pending[self.base_pid] = time.monotonic() + STATUS_RETRY_S
+        elif p.dst == ADDR_BASE and p.mtype == MT.ACK and p.payload:
+            self.status_pending.pop(p.payload[0], None)
         return pid
 
     def send_msg(self, mtype, payload=b""):
@@ -121,8 +144,17 @@ class FakeRemote:
 
 
 class FakeLog:
-    def __init__(self):
-        self.history = []
+    """history: radky base logu; W radky za nepotvrzene STATUS_RESP pribudou, jakmile base vzda opakovani."""
+
+    def __init__(self, link=None):
+        self._history = []
+        self.link = link
+
+    @property
+    def history(self):
+        if self.link is not None:
+            self._history += [(time.monotonic(), line) for line in self.link.overdue_status()]
+        return self._history
 
     def command(self, cmd):
         return {"level d": ["level D"], "level i": ["level I"]}[cmd]
@@ -160,11 +192,10 @@ def soak_env(monkeypatch, tmp_path):
     monkeypatch.setattr(test_soak, "DIAG_PERIOD", 1.5)
     monkeypatch.setattr(test_soak.midi, "ports", lambda: {"base": "fake"})
     monkeypatch.setattr(test_soak.midi, "Writer", FakeWriter)
-    monkeypatch.setattr(test_soak.loglink, "LogLink", FakeLog)
-
     def run(age_fn=happy_age, **remote_kw):
         clock = Clock()
         link = FakeLink()
+        monkeypatch.setattr(test_soak.loglink, "LogLink", lambda: FakeLog(link))
         remote = FakeRemote(link, **remote_kw)
         test_soak.test_soak(FakeBase(clock, age_fn), link, remote)
         return tmp_path, remote
@@ -178,6 +209,23 @@ def test_soak_dryrun_happy(soak_env, capsys):
     plays = [k for k in remote.calls if dbg.ENTER in k]
     assert len(plays) >= 2, remote.calls
     assert "SOAK 3 s" in capsys.readouterr().out
+
+
+def test_fake_base_logs_unacked_status_resp(monkeypatch):
+    """Model sam: nepotvrzena STATUS_RESP -> W radek; potvrzena -> nic."""
+    monkeypatch.setattr(sys.modules[__name__], "STATUS_RETRY_S", 0.05)
+    link = FakeLink()
+    log = FakeLog(link)
+    link.send_msg(MT.GET_STATUS)
+    time.sleep(0.1)
+    assert [l for _, l in log.history if " W router: retries exhausted: type 0x51" in l]
+    link2 = FakeLink()
+    log2 = FakeLog(link2)
+    link2.send_msg(MT.GET_STATUS)
+    resp = link2.recv(0.1, lambda p: p.mtype == MT.STATUS_RESP)
+    link2.send(Packet(ADDR_PC, ADDR_BASE, 0, MT.ACK, bytes([resp.pid])))
+    time.sleep(0.1)
+    assert log2.history == []
 
 
 def test_soak_dryrun_slow_play_key_fails_gap(soak_env):
