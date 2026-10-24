@@ -12,7 +12,7 @@ import pytest
 
 import dbg
 from conftest import remote_alive, wait_until
-from proto import MT
+from proto import ADDR_BASE, ADDR_PC, ADDR_REMOTE, MT, NAK
 from test_fault import boot, reboot
 from test_log import BANNER_RE, keepalive_rtt, log  # noqa: F401 - fixture log
 
@@ -125,6 +125,13 @@ def test_wedged_module_detected_and_restarted(base, link, log):  # noqa: F811
         assert len([l for l in lines if "$$$ timeout" in l]) >= 3
         assert not base.core_state()["halted"]
         keepalive_rtt(link)  # USB bezi dal bez BLE
+        # Final review M1: mrtvy modul -> spojeni neplatí hned (ne az za 60 s), PC dostane NAK UNREACHABLE
+        assert not base.read_bool("Bluetooth::_connected"), "link flags stale after the wedge"
+        assert not base.read_bool("Bluetooth::_streamOpen")
+        assert not base.read_bool("Bluetooth::_peerAccepted")
+        pid = link.send_msg(MT.SIGNAL_STOPPED, dst=ADDR_REMOTE)
+        nak = link.recv(1.0, lambda p: p.src == ADDR_BASE and p.dst == ADDR_PC and p.mtype == MT.NAK and p.payload[:1] == bytes([pid]))
+        assert nak is not None and nak.payload == bytes([pid, NAK.UNREACHABLE]), nak
 
         holder.release()
         base.hold_ble_reset(False)

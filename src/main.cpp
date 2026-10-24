@@ -457,6 +457,12 @@ static void bleFailed(uint16_t code, const char *what) {
 	_bleWasDown = true;
 	_bleRetryAt = stmcpp::systick::getDuration();
 	Bluetooth::setUp(false);
+	// Mrtvý modul: spojení neplatí (jinak by router "předával" do mrtvého modulu a STATUS_RESP hlásil ble=1)
+	Bluetooth::setConnected(false);
+	Bluetooth::setBonded(false);
+	_secureOnStreamOpen = false;
+	_peerAddrMatched = false;
+	_reconnectNeeded = true;
 	if (!_bleErrorRecorded) {
 		_bleErrorRecorded = true;
 		Debug::log(Debug::Level::ERROR, "ble", "RN4870 %s failed, running without BLE, retry every 60 s", what);
