@@ -146,6 +146,37 @@ def test_connect_while_scanning_kicked(remote_away):
     assert not accepted
 
 
+SETTINGS_REMOTE_ADDR_OFFSET = 8  # settings::ramCopy.remoteAddr (za 8 B dat verze 1, src/settings.cpp)
+
+
+def test_no_reconnect_without_stored_remote(remote_away):
+    """Prazdna adresa ovladace (upgrade z nastaveni v1, ruling R32 b): base se k nicemu nepripojuje (zadne Z/C kazdych
+    5 s). Adresa se smaze jen v RAM kopii nastaveni (flash beze zmeny) a na konci se vrati. Kladna kontrola: po
+    vraceni adresy prijde "C" do ~6 s. Napoveda "Sparuj ovladac" v titulku hlavniho menu se kontroluje okem."""
+    base = remote_away
+    addr = base.sym("settings::ramCopy") + SETTINGS_REMOTE_ADDR_OFFSET
+    saved = base.read(addr, 13)
+    assert saved[:12].decode(errors="replace") == REMOTE, f"stored remote {saved!r}"
+    proc, sr = la.start(20, channels="D2,D3", samplerate="1M")
+    time.sleep(1.0)  # zachyt bezi ~1 s pred smazanim
+    try:
+        base.write(addr, b"\0")
+        time.sleep(12.0)
+        base.write(addr, saved)
+        time.sleep(7.0)
+    finally:
+        base.write(addr, saved)
+        la.finish(proc, sr, 40)
+    data, _ = la.uart_timed(sr, la.CH["base_ble_tx"], BAUD, 1e6)
+
+    def text(t0, t1):
+        return bytes(b for t, b in data if t0 <= t < t1)
+
+    # 2.5 s: rezerva na start zachytu a pokus o pripojeni rozbehnuty tesne pred smazanim
+    assert b"C\r" not in text(2.5, 13.0), f"reconnect attempt while no remote was stored: {text(2.5, 13.0)!r}"
+    assert b"C\r" in text(13.0, 21.0), f"no reconnect after the address was restored: {text(13.0, 21.0)!r}"
+
+
 def test_pairing_ignores_foreign_connect(remote_away):
     base = remote_away
     proc, sr = la.start(8, channels="D2,D3", samplerate="1M")

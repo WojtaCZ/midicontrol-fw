@@ -342,6 +342,14 @@ void render() {
 
     // Status ikony pouze na menu obrazovkách (ne na SplashScreen, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
+
+    // Bez uloženého ovladače (nová base, upgrade z nastavení v1): nápověda místo titulku hlavního menu.
+    // Base se v tom stavu k ničemu nepřipojuje, dokud uživatel nespáruje ovladač z menu Nastaveni.
+    // 14 znaků 7x10 = 98 px, vejde se vlevo od ikony PC (x = 104).
+    if (dirty && cur == &mainScreen && settings::remoteAddr()[0] == '\0') {
+        gfx::drawFilledRect(frameBuffer, 0, 0, theme.displayWidth, theme.titleBarHeight, (uint8_t)0);
+        gfx::text::drawText(frameBuffer, *theme.titleFont, "Sparuj ovladac", 0, 0, gfx::Anchor::TopLeft, (uint8_t)1);
+    }
     bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen);
 
     if (showStatusIcons && Bluetooth::isConnected()) {

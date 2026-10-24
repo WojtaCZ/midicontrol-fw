@@ -43,6 +43,9 @@ static bool _secureOnStreamOpen = false;
 // Jen pak %SECURED%/%BONDED% udělá z protějšku přijatý (Bluetooth::setPeerAccepted) a jeho rámce se provádějí.
 static bool _peerAddrMatched = false;
 
+// Bez uloženého ovladače (nová base, upgrade z nastavení v1) se k ničemu nepřipojuje (žádné "C" každých 5 s)
+static bool remoteKnown() { return settings::remoteAddr()[0] != '\0'; }
+
 // ── Párování s ovladačem (spouští menu "Sparovat ovladac" → Bluetooth::startPairing) ──
 // SCANNING:   reklama se jménem REMOTE_NAME → X, C,<typ>,<adresa>, CONNECTING (ostatní zařízení se ignorují)
 // CONNECTING: %CONNECT% → B (bez dotazu na OLED, párování spustil uživatel), BONDING
@@ -298,8 +301,8 @@ extern "C" int main(void) {
 
 		bleProcess();
 
-		// Auto-reconnect k bondovanému Remote zařízení (neblokující); během párování ne
-		if (_bleState == BleState::READY && _reconnectNeeded && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
+		// Auto-reconnect k bondovanému Remote zařízení (neblokující); během párování a bez uloženého ovladače ne
+		if (_bleState == BleState::READY && _reconnectNeeded && remoteKnown() && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
 			_lastReconnectAttempt = stmcpp::systick::getDuration();
 			Debug::log(Debug::Level::DEBUG, "ble", "reconnect attempt");
