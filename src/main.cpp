@@ -39,6 +39,9 @@ static duration _lastReconnectAttempt = 0_ms;
 static constexpr duration RECONNECT_INTERVAL = 5000_ms;
 // Po %CONNECT% z auto-reconnectu: zabezpečit (B) až po %STREAM_OPEN%
 static bool _secureOnStreamOpen = false;
+// Adresa z posledního %CONNECT% patří uloženému ovladači (mimo párování) nebo adrese párování (CONNECTING).
+// Jen pak %SECURED%/%BONDED% udělá z protějšku přijatý (Bluetooth::setPeerAccepted) a jeho rámce se provádějí.
+static bool _peerAddrMatched = false;
 
 // ── Párování s ovladačem (spouští menu "Sparovat ovladac" → Bluetooth::startPairing) ──
 // SCANNING:   reklama se jménem REMOTE_NAME → X, C,<typ>,<adresa>, CONNECTING (ostatní zařízení se ignorují)
@@ -331,8 +334,16 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::BONDED:
 				case Bluetooth::Command::Type::SECURED:
 					Debug::log(Debug::Level::INFO, "ble", "%s", command->getType() == Bluetooth::Command::Type::BONDED ? "bonded" : "secured");
-					Bluetooth::setBonded(true);
-					if (pairing == PS::BONDING) pairingFinished(true, pairing);
+					// Rámce se provádějí jen od zabezpečeného spojení se správnou adresou (uložený ovladač / párování)
+					if (_peerAddrMatched && (pairing == PS::BONDING || !Bluetooth::isPairing())) {
+						Bluetooth::setBonded(true);
+						Bluetooth::setPeerAccepted();
+						if (pairing == PS::BONDING) pairingFinished(true, pairing);
+					} else {
+						Debug::log(Debug::Level::WARNING, "ble", "secured link from unexpected peer, K,1");
+						if (Bluetooth::isConnected() && !Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
+						if (pairing == PS::BONDING) pairingFinished(false, pairing);
+					}
 					break;
 
 				case Bluetooth::Command::Type::ERR_SEC:
@@ -340,6 +351,9 @@ extern "C" int main(void) {
 					if (pairing == PS::BONDING) {
 						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 						pairingFinished(false, pairing);
+					} else if (!Bluetooth::isPairing() && Bluetooth::isConnected()) {
+						// Zabezpečení selhalo (protějšek nemá náš klíč, např. podvržená adresa) → odpojit
+						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 					}
 					break;
 
@@ -347,11 +361,20 @@ extern "C" int main(void) {
 					// %CONNECT,<typ adresy 0/1>,<MAC>% — první parametr je typ adresy, ne stav spojení
 					const std::string &addr = static_cast<Bluetooth::ConnectCommand *>(command.get())->getAddr();
 					Debug::log(Debug::Level::INFO, "ble", "connect %s", addr.c_str());
+					// Nové spojení: nic z předchozího neplatí (přijetí protějšku, fronta rámců, B po STREAM_OPEN)
+					_secureOnStreamOpen = false;
+					_peerAddrMatched = false;
+					Bluetooth::resetPeer();
 					Bluetooth::setConnected(true);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = false;
-					if (pairing == PS::CONNECTING) {
+					if (pairing == PS::SCANNING) {
+						// Při skenování se k nám nikdo připojovat nemá (ovladač teprve hledáme) → odpojit, sken běží dál
+						Debug::log(Debug::Level::WARNING, "ble", "pairing: unexpected connect %s, K,1", addr.c_str());
+						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
+					} else if (pairing == PS::CONNECTING) {
 						if (addr == Bluetooth::pendingConnectAddr()) {
+							_peerAddrMatched = true;
 							// Párování spustil uživatel z menu → zabezpečit a uložit bond hned (bez dotazu na OLED)
 							if (Bluetooth::queueCommand("B")) {
 								Bluetooth::setPairingState(PS::BONDING);
@@ -369,6 +392,7 @@ extern "C" int main(void) {
 					} else if (!Bluetooth::isPairing()) {
 						const char *remote = settings::remoteAddr();
 						if (remote[0] != '\0' && addr == remote) {
+							_peerAddrMatched = true;
 							// Spárovaný ovladač (typicky náš auto-reconnect "C"). Spojení se samo nezabezpečí
 							// (DS50002466, příkaz B: po ztrátě spojení je nutné znovu B; na lavici bez B žádný
 							// %SECURED% a Remote ukázal dotaz "Sparovat?"). B až po %STREAM_OPEN%: B hned po
@@ -398,6 +422,7 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::DISCONNECT:
 					Debug::log(Debug::Level::INFO, "ble", "disconnect");
 					_secureOnStreamOpen = false;
+					_peerAddrMatched = false;
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
 					if (pairing == PS::CONNECTING || pairing == PS::BONDING) pairingFinished(false, pairing);
@@ -406,7 +431,10 @@ extern "C" int main(void) {
 
 				case Bluetooth::Command::Type::REBOOT:
 					Debug::log(Debug::Level::WARNING, "ble", "module reboot");
+					_secureOnStreamOpen = false;
+					_peerAddrMatched = false;
 					Bluetooth::setConnected(false);
+					Bluetooth::setBonded(false);
 					_reconnectNeeded = true;
 					if (Bluetooth::isPairing()) pairingFinished(false, pairing);
 					break;

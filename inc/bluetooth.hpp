@@ -301,7 +301,15 @@ namespace Bluetooth{
     bool isStreamOpen();
     void setStreamOpen(bool open);
 
-    // Lze teď odeslat datový rámec k Remote? (spojení + transparentní UART + datový režim)
+    // Přijatý protějšek: spojení zabezpečené (%SECURED%/%BONDED%) se zařízením, jehož adresa z %CONNECT% odpovídala
+    // uloženému ovladači (nebo adrese párování). Nastavuje hlavní smyčka; bez něj se přijaté rámce zahazují.
+    bool isPeerAccepted();
+    void setPeerAccepted();
+    // Zrušit přijetí protějšku a zahodit přijaté rámce i stav parseru (%CONNECT%, %DISCONNECT%, %REBOOT%, restart()).
+    // setConnected(false) ho volá samo.
+    void resetPeer();
+
+    // Lze teď odeslat datový rámec k Remote? (spojení + transparentní UART + přijatý protějšek + datový režim)
     bool canSendData();
 
     // Data receive timestamp

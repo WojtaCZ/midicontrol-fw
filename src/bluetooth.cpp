@@ -34,6 +34,10 @@ namespace Bluetooth{
 	[[gnu::used]] volatile bool _bonded = false;
 	[[gnu::used]] volatile bool _streamOpen = false;
 	[[gnu::used]] volatile PairingState _pairingState = PairingState::IDLE;
+	// Přijatý protějšek: spojení zabezpečené (%SECURED%/%BONDED%) se zařízením, jehož adresa z %CONNECT% odpovídala
+	// uloženému ovladači (nebo adrese párování). Bez něj se přijaté rámce zahazují a nic se neodesílá.
+	[[gnu::used]] volatile bool _peerAccepted = false;
+	static bool _dropLogged = false; // jeden řádek logu o zahozených rámcích na spojení
 	static duration _pairingStart = 0_ms;
 	duration _dataReceivedTimestamp = 0_ms;
 
@@ -269,6 +273,7 @@ namespace Bluetooth{
 					_mode = Mode::DATA;
 					_connected = false;
 					_streamOpen = false;
+					resetPeer();
 					// Zbytek této úlohy za R,1 se zahazuje; co se zařadilo až po R,1, zůstává
 					_finishJobKeepQueued(static_cast<uint8_t>(_jobIndex + 1));
 				}
@@ -473,8 +478,8 @@ namespace Bluetooth{
 
 	// noinline + used: test_fault.py ji volá přes gdb (rekonfigurace pod watchdogem)
 	[[gnu::used, gnu::noinline]] uint8_t configure() {
-		// SA,2: NoInputNoOutput (Just Works) — Base nemá klávesnici ani nezobrazuje passkey,
-		//       spárování potvrzuje uživatel dotazem na OLED (B / K,1).
+		// SA,2: NoInputNoOutput (Just Works) — Base nemá klávesnici ani nezobrazuje passkey; bond vzniká jen
+		//       párováním z menu (B po %CONNECT% od nalezeného ovladače), bez dotazu na OLED.
 		// SR,0000: 16bit bitmapa funkcí; bez řízení toku (0x8000), RTS/CTS nejsou zapojené.
 		//          Prompt "CMD> " zůstává zapnutý, automat na něj čeká.
 		// SS,C0: Device Information + UART Transparent.
@@ -547,7 +552,13 @@ namespace Bluetooth{
 
 			if (_inFrame) {
 				if (_protocolParser.feed(c)) {
-					_rxPackets.push(_protocolParser.getPacket());
+					if (_peerAccepted) {
+						_rxPackets.push(_protocolParser.getPacket());
+					} else if (!_dropLogged) {
+						// Nezabezpečený nebo cizí protějšek: rámec se neprovede (Remote po %SECURED% opakuje)
+						_dropLogged = true;
+						Debug::log(Debug::Level::INFO, "ble", "frame from unaccepted peer dropped");
+					}
 				}
 				if (c == protocol::FRAME_END) _inFrame = false;
 			} else {
@@ -586,6 +597,7 @@ namespace Bluetooth{
 		_connected = false;
 		_streamOpen = false;
 		_bonded = false;
+		resetPeer();
 		GPIOA->BSRR = (1u << (1 + 16)); // RST dolů
 		_restartRstHigh = false;
 		_restartTimestamp = stmcpp::systick::getDuration();
@@ -603,14 +615,28 @@ namespace Bluetooth{
 	bool isConnected() { return _connected; }
 	void setConnected(bool connected) {
 		_connected = connected;
-		if (!connected) _streamOpen = false;
+		if (!connected) {
+			_streamOpen = false;
+			resetPeer();
+		}
 	}
 	bool isBonded() { return _bonded; }
 	void setBonded(bool bonded) { _bonded = bonded; }
 	bool isStreamOpen() { return _streamOpen; }
 	void setStreamOpen(bool open) { _streamOpen = open; }
 
-	bool canSendData() { return _connected && _streamOpen && isIdle(); }
+	bool canSendData() { return _connected && _streamOpen && _peerAccepted && isIdle(); }
+
+	bool isPeerAccepted() { return _peerAccepted; }
+	void setPeerAccepted() { _peerAccepted = true; }
+
+	void resetPeer() {
+		_peerAccepted = false;
+		_dropLogged = false;
+		_rxPackets.clear();
+		_protocolParser.reset();
+		_inFrame = false;
+	}
 
 	duration getDataReceivedTimestamp() { return _dataReceivedTimestamp; }
 
@@ -632,6 +658,11 @@ namespace Bluetooth{
 	}
 
 	bool getProtocolPacket(protocol::Packet &pkt) {
+		// Pojistka: bez přijatého protějšku nic z fronty neprovádět
+		if (!_peerAccepted) {
+			_rxPackets.clear();
+			return false;
+		}
 		return _rxPackets.pop(pkt);
 	}
 

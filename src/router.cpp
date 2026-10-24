@@ -392,10 +392,11 @@ namespace router {
 
 		// Nelze předat: odesílatel přestane opakovat (NAK se neposílá na nepotvrzované zprávy)
 		if (!needsAck(pkt)) return;
-		// BUSY jen když je spojení použitelné (připojeno a stream otevřený), ale TX cesta je chvilku zaneprázdněná
-		// (příkazový režim modulu). Připojeno, ale stream ještě neotevřený (zabezpečování po %CONNECT%), je pro PC
-		// stále UNREACHABLE: BUSY by ho nutilo opakovat po dobu, kdy Remote není k dispozici.
-		bool linkUp = (to == Transport::BLE) ? (Bluetooth::isConnected() && Bluetooth::isStreamOpen()) : pcReachable();
+		// BUSY jen když je spojení použitelné (připojeno, stream otevřený a protějšek přijatý = zabezpečený ovladač),
+		// ale TX cesta je chvilku zaneprázdněná (příkazový režim modulu). Připojeno, ale stream ještě neotevřený nebo
+		// spojení ještě nezabezpečené (po %CONNECT%), je pro PC stále UNREACHABLE: BUSY by ho nutilo opakovat po dobu,
+		// kdy Remote není k dispozici.
+		bool linkUp = (to == Transport::BLE) ? (Bluetooth::isConnected() && Bluetooth::isStreamOpen() && Bluetooth::isPeerAccepted()) : pcReachable();
 		sendNak(pkt, linkUp ? NakReason::BUSY : NakReason::UNREACHABLE, from);
 	}
 
