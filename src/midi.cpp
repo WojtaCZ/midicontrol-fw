@@ -262,6 +262,7 @@ namespace midi {
 			UsbPacket *pkt = _dinToUsb.peek();
 			if (!pkt) return;
 			if (!tud_midi_packet_write(pkt->data)) return; // FIFO full, the packet stays in the queue
+			LED::notifyActivity(LED::PIXEL_USB);
 
 			uint8_t cin = pkt->data[0] & 0x0F;
 			if (cin == MIDI_CIN_SYSEX_START) _dinSysexOpen = true;

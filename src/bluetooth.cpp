@@ -369,7 +369,7 @@ namespace Bluetooth{
 		// --- Scan results (F) ---
 		// Connectable:      <address 12 hex>,<type 0/1>,<name>,<UUID>,<RSSI hex>   (name and UUID may be empty)
 		// Non-connectable:  <address 12 hex>,<type 0/1>,<RSSI hex>,Brcst:<data hex>
-		// On the bench e.g. "D88039FE5996,0,MIDIControlRemote,,F5" and "CAD46E49E827,1,AD,Brcst:07FF4C0012020001".
+		// On the bench e.g. "D88039FE5996,0,MIDIController,,F5" and "CAD46E49E827,1,AD,Brcst:07FF4C0012020001".
 		else {
 			const char *field[5] = {};
 			size_t fieldLen[5] = {};
@@ -477,6 +477,10 @@ namespace Bluetooth{
 	}
 
 	// noinline + used: test_fault.py calls it via gdb (reconfiguration under the watchdog)
+	static constexpr const char *NAME_COMMAND = "SN,MIDIControlBase";
+
+	const char *name() { return NAME_COMMAND + 3; } // after "SN,"
+
 	[[gnu::used, gnu::noinline]] uint8_t configure() {
 		// SA,2: NoInputNoOutput (Just Works) — the Base has no keyboard and does not display a passkey; a bond is created only
 		//       by pairing from the menu (B after %CONNECT% from the found remote), without an OLED prompt.
@@ -484,7 +488,7 @@ namespace Bluetooth{
 		//          The "CMD> " prompt stays enabled, the state machine waits for it.
 		// SS,C0: Device Information + UART Transparent.
 		// R,1: restart so the changes take effect; after %REBOOT% the module is in data mode.
-		static const char *const commands[] = {"SN,MIDIControlBase", "SA,2", "SR,0000", "SS,C0", "R,1"};
+		static const char *const commands[] = {NAME_COMMAND, "SA,2", "SR,0000", "SS,C0", "R,1"};
 		if (!_queueJob(commands, sizeof(commands) / sizeof(commands[0]))) return 1;
 		_configJob = true;
 		_configState = ConfigState::PENDING;

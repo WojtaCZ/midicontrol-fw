@@ -7,7 +7,15 @@
 
 namespace LED{
 
-    // Pixel indices on the rear LED strip
+    // Pixel indices on the rear LED strip, one function each (updateStatus()).
+    // Steady green = connected/on, short white blink = traffic; all off when the LED setting is off.
+    //   USB       PC is alive; blinks on USB-CDC and USB-MIDI traffic
+    //   DISPLAY   display connected; blinks on display frames
+    //   CURRENT   organ power (current source) on; blinks when switched
+    //   MIDIA     DIN in: red with "Ident. MIDI"; blinks on received bytes
+    //   MIDIB     DIN out: green with "Ident. MIDI"; blinks on sent packets
+    //   BLUETOOTH remote connected; blinks on BLE traffic
+    // The MIDI colours follow "Ident. MIDI" alone, so they stay lit with the LED setting off.
     constexpr uint8_t PIXEL_USB       = 0;
     constexpr uint8_t PIXEL_DISPLAY   = 1;
     constexpr uint8_t PIXEL_CURRENT   = 2;

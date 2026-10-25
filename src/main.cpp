@@ -316,6 +316,7 @@ extern "C" int main(void) {
 		// USB → DIN (organ)
 		while (tud_midi_available() && tud_midi_packet_read(&packet[0])) {
 			midi::send(packet);
+			LED::notifyActivity(LED::PIXEL_USB);
 			LED::notifyActivity(LED::PIXEL_MIDIB);
 		}
 

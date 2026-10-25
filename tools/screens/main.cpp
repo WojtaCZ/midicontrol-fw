@@ -89,6 +89,8 @@ int main(int argc, char **argv) {
 	key(E::Down);
 	snap("settings_display", "Settings: Displej");
 	key(E::Down);
+	snap("settings_bluetooth", "Settings: Bluetooth");
+	key(E::Down);
 	snap("settings_pair", "Settings: Sparovat ovladac");
 	run(4000);
 	snap("settings_pair_scrolled", "Settings: long item scrolled");
@@ -98,12 +100,17 @@ int main(int argc, char **argv) {
 	key(E::Up);
 	key(E::Up);
 	key(E::Up);
+	key(E::Up);
 	key(E::Enter);
 	snap("info_firmware", "Firmware info");
 	key(E::Enter);
 	key(E::Down);
 	key(E::Enter);
 	snap("info_display", "Song display info");
+	key(E::Enter);
+	key(E::Down);
+	key(E::Enter);
+	snap("info_bluetooth", "Bluetooth info");
 	key(E::Enter);
 	key(E::Down);
 	key(E::Enter);
@@ -155,7 +162,7 @@ int main(int argc, char **argv) {
 	snap("no_pc", "PC not connected: overlay over the main menu");
 	key(E::Enter);
 	snap("no_pc_settings", "PC not connected: Nastaveni opened from the overlay");
-	down(5);
+	down(6);
 	key(E::Enter);
 	snap("no_pc_pairing", "PC not connected: pairing from Nastaveni");
 	key(E::Enter);

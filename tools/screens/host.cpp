@@ -28,6 +28,8 @@ namespace Bluetooth {
 	bool isUp() { return host::state.bleUp; }
 	uint8_t startPairing() { return 0; }
 	bool isConnected() { return host::state.connected; }
+	bool isPeerAccepted() { return host::state.connected; }
+	const char *name() { return "MIDIControlBase"; }
 	stmcpp::units::duration getDataReceivedTimestamp() { return stmcpp::units::duration::fromSeconds(0); }
 }
 
@@ -41,6 +43,7 @@ namespace display {
 
 namespace router {
 	bool isPcAlive() { return host::state.pcAlive; }
+	bool isRemoteAlive() { return host::state.connected; }
 }
 
 namespace settings {

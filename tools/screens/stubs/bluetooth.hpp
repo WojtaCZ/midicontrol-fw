@@ -8,5 +8,7 @@ namespace Bluetooth {
 	bool isUp();
 	uint8_t startPairing();
 	bool isConnected();
+	bool isPeerAccepted();
+	const char *name();
 	stmcpp::units::duration getDataReceivedTimestamp();
 }

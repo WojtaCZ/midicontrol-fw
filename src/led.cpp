@@ -294,20 +294,16 @@ namespace LED{
 			pixels[PIXEL_CURRENT].setColorQuiet(off);
 		}
 
-		// MIDI A — always red if roleId, blinks white if master
-		if (roleId) {
+		// MIDI A (DIN in) — red if roleId, blinks white on received bytes if master
+		{
 			bool blink = master && (now - activityTimestamp[PIXEL_MIDIA]) < BLINK_DURATION;
-			pixels[PIXEL_MIDIA].setColorQuiet(blink ? white : red);
-		} else {
-			pixels[PIXEL_MIDIA].setColorQuiet(off);
+			pixels[PIXEL_MIDIA].setColorQuiet(blink ? white : (roleId ? red : off));
 		}
 
-		// MIDI B — always green if roleId, blinks white if master
-		if (roleId) {
+		// MIDI B (DIN out) — green if roleId, blinks white on sent packets if master
+		{
 			bool blink = master && (now - activityTimestamp[PIXEL_MIDIB]) < BLINK_DURATION;
-			pixels[PIXEL_MIDIB].setColorQuiet(blink ? white : green);
-		} else {
-			pixels[PIXEL_MIDIB].setColorQuiet(off);
+			pixels[PIXEL_MIDIB].setColorQuiet(blink ? white : (roleId ? green : off));
 		}
 
 		// Bluetooth

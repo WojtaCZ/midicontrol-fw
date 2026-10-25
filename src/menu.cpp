@@ -78,6 +78,7 @@ static void recordCallback(ui::MenuItem* item, void* userData);
 static void powerCallback(ui::MenuItem* item, void* userData);
 static void firmwareCallback(ui::MenuItem* item, void* userData);
 static void displayCallback(ui::MenuItem* item, void* userData);
+static void bluetoothCallback(ui::MenuItem* item, void* userData);
 static void ledMasterCallback(ui::MenuItem* item, void* userData);
 static void midiRoleCallback(ui::MenuItem* item, void* userData);
 static void pairCallback(ui::MenuItem* item, void* userData);
@@ -90,11 +91,12 @@ static ui::MenuItem settingsItems[] = {
     ui::MenuItem::checkbox("Napajeni varhan", false, powerCallback),
     ui::MenuItem("Verze FW", firmwareCallback),
     ui::MenuItem("Displej",  displayCallback),
+    ui::MenuItem("Bluetooth", bluetoothCallback),
     ui::MenuItem("Sparovat ovladac", pairCallback),
     ui::MenuItem::back("Zpet"),
 };
 
-static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 7);
+static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 8);
 
 // ── Main menu items & screen ──────────────────────────────────────────
 
@@ -160,6 +162,37 @@ static void onDisplayDismiss(void* userData) {
 }
 
 static ui::ParagraphScreen displayScreen(dispLines, 5, onDisplayDismiss);
+
+// Bluetooth info: values change at runtime, refreshed in render() while the screen is on top
+static char bleLine0[40];
+static char bleLine1[40];
+static char bleLine2[40];
+static char bleLine3[40];
+static char bleLine4[40];
+static const char* bleLines[] = { bleLine0, bleLine1, bleLine2, bleLine3, bleLine4 };
+
+static ui::ParagraphScreen bluetoothScreen(bleLines, 5, onDisplayDismiss);
+
+// Writes a line; returns true when the text changed
+static bool setLine(char (&line)[40], const char* fmt, const char* value) {
+    char buf[sizeof(line)];
+    std::snprintf(buf, sizeof(buf), fmt, value);
+    if (!std::strcmp(buf, line)) return false;
+    std::memcpy(line, buf, sizeof(line));
+    return true;
+}
+
+static void updateBluetoothInfo() {
+    bool changed = false;
+    const char* remote = settings::remoteAddr();
+    changed |= setLine(bleLine0, "%s", Bluetooth::name());
+    changed |= setLine(bleLine1, "Spojeni: %s", Bluetooth::isConnected() ? "Ano" : "Ne");
+    changed |= setLine(bleLine2, "Sparovano: %s", Bluetooth::isPeerAccepted() ? "Ano" : "Ne");
+    changed |= setLine(bleLine3, "Ovladac: %s", router::isRemoteAlive() ? "Ano" : "Ne");
+    changed |= setLine(bleLine4, "MAC: %s", remote[0] ? remote : "--");
+
+    if (changed) bluetoothScreen.markDirty();
+}
 
 // ── Now Playing screen ─────────────────────────────────────────────────
 
@@ -284,7 +317,7 @@ static void firmwareCallback(ui::MenuItem* item, void* userData) {
 
 static void pairCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
-    // Z, F → scan; connecting to MIDIControlRemote, B and the timeout are handled by the main loop (main.cpp)
+    // Z, F → scan; connecting to MIDIController, B and the timeout are handled by the main loop (main.cpp)
     // RN4870 is not working (running without BLE, spec R21): immediate message instead of waiting for the timeout
     bool up = Bluetooth::isUp();
     if (up && Bluetooth::startPairing() != 0) return;
@@ -334,6 +367,12 @@ static void displayCallback(ui::MenuItem* item, void* userData) {
     nav.push(&displayScreen);
 }
 
+static void bluetoothCallback(ui::MenuItem* item, void* userData) {
+    (void)item; (void)userData;
+    updateBluetoothInfo();
+    nav.push(&bluetoothScreen);
+}
+
 // ── Splash dismiss → main menu ────────────────────────────────────────
 
 static void onSplashDismiss(void* userData) {
@@ -358,6 +397,7 @@ void init() {
 
     firmwareScreen.setTitle("Verze FW");
     displayScreen.setTitle("Displej");
+    bluetoothScreen.setTitle("Bluetooth");
     noPcScreen.setComment2("Stisk: Nastaveni");
 
     // Synchronize the checkboxes from the saved settings
@@ -370,6 +410,12 @@ void init() {
 void render() {
     nav.tickScroll(30);
     syncNoPcScreen();
+
+    // Bluetooth info: value refresh; the display does not sleep while the screen is open (changes are visible)
+    if (nav.current() == &bluetoothScreen) {
+        updateBluetoothInfo();
+        Oled::wakeupCallback();
+    }
 
     // Without a stored remote (new base, upgrade from settings v1): a hint instead of the main menu title.
     // In this state the Base connects to nothing until the user pairs a remote from the Nastaveni menu.
