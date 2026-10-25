@@ -75,6 +75,7 @@ class Board:
         self.b = BOARDS[name]
         self.t = dbg.Target(name)
         self._syms = None
+        self._armed = []  # [(addr, watch_write)]: novy openocd pri examine FPB/DWT vymaze, restart_server je obnovi
 
     def restart_server(self):
         """openocd znovu (bez uvolneni ladeni: jen ukoncit proces), novy se k jadru pripoji znovu."""
@@ -83,6 +84,8 @@ class Board:
             p.terminate()
             p.wait(5)
         self.t.start()
+        for addr, watch in self._armed:
+            self._arm_hw(addr, watch)
 
     # -- symboly bootloaderu
     def bl_sym(self, name: str) -> int:
@@ -165,13 +168,17 @@ class Board:
     def where(self) -> dict:
         """Kde jadro je: kind = app | bootloader | hang (fault exception nebo lockup kdekoli) | unknown.
         Kratce zastavi jadro (pc, xPSR) a pusti ho dal."""
-        st = self.core_state()
-        was_halted = st["halted"]
-        if not was_halted:
-            self.halt()
-        pc, xpsr = self.reg("pc"), self.reg("xPSR")
-        if not was_halted:
-            self.t.resume()
+        def snap():
+            st = self.core_state()
+            was_halted = st["halted"]
+            if not was_halted:
+                self.halt()
+            try:
+                return st, self.reg("pc"), self.reg("xPSR")
+            finally:
+                if not was_halted:
+                    self.t.resume()
+        st, pc, xpsr = _retry(snap)
         ipsr = xpsr & 0x1FF
         # NMI, HardFault, MemManage, BusFault, UsageFault: v bootloaderu nekonecna smycka, v aplikaci s probem bkpt
         # (bez proby reset a znovu totez) -> pro testy vzdy "hang"
@@ -191,9 +198,14 @@ class Board:
     def arm(self, addr: int, watch_write=False):
         """HW bp / DWT write watchpoint. wp nastaveny za behu jadra (hla) se tise neprojevi: nastavuje se pri zastavenem
         jadru (bench 2026-10-24)."""
+        self._arm_hw(addr, watch_write)
+        self._armed.append((addr, watch_write))
+
+    def _arm_hw(self, addr: int, watch_write: bool):
         was_halted = self.halted()
         if not was_halted:
             self.halt()
+        self.tcl(f"capture {{rwp 0x{addr:08x}}}" if watch_write else f"capture {{rbp 0x{addr:08x}}}")
         out = self.tcl(f"wp 0x{addr:08x} 4 w" if watch_write else f"bp 0x{addr:08x} 2 hw")
         if not was_halted:
             self.t.resume()
@@ -203,6 +215,7 @@ class Board:
     def disarm_all(self):
         """Zrusi vsechny bp/wp i primo v FPB/DWT: ty prezivaji systemovy reset i konec openocd (jen POR je nuluje) a
         openocd 0.12 nema `rwp all`. Zapomenuty FPB bp bez ladeni (C_DEBUGEN = 0) = HardFault (bench 2026-10-24)."""
+        self._armed = []
         self.tcl("capture {rbp all}")
         for line in self.tcl("wp").splitlines():
             m = re.match(r"address: (0x[0-9a-f]+)", line.strip())
@@ -216,10 +229,33 @@ class Board:
             self.tcl(f"write_memory 0x{0xE0001028 + 16 * i:08x} 32 {{0}}")
 
     def wait_halt(self, timeout: float) -> bool:
+        """Ceka na zastaveni (bp/wp). Behem mazani interni flash sbernice stoji a cteni DHCSR ~1 s selhava; obnova
+        spojeni (hla) pritom FPB/DWT vymaze (bench 2026-10-24: FP_COMP0 = 0 po chybach). Proto: chyby prezit bez
+        restartu openocd a po prvnim uspesnem cteni nastavit bp/wp znovu. BOOTFI_TRACE=<soubor> zapisuje prubeh."""
         end = time.monotonic() + timeout
+        t0 = time.monotonic()
+        trace = os.environ.get("BOOTFI_TRACE")
+        failed = False
         while time.monotonic() < end:
-            if self.halted():
+            out = self.tcl("read_memory 0xE000EDF0 32 1")
+            if trace:
+                with open(trace, "a") as f:
+                    f.write(f"{time.monotonic() - t0:6.2f} {out.strip()[:60]}\n")
+            try:
+                dhcsr = int(out.split()[0], 0)
+            except (ValueError, IndexError):
+                failed = True
+                time.sleep(0.05)
+                continue
+            if dhcsr & (1 << 17):
                 return True
+            if failed:
+                failed = False
+                for addr, watch in self._armed:
+                    self._arm_hw(addr, watch)
+                if trace:
+                    with open(trace, "a") as f:
+                        f.write(f"{time.monotonic() - t0:6.2f} re-armed {[hex(a) for a, _ in self._armed]}\n")
             time.sleep(0.02)
         return False
 
