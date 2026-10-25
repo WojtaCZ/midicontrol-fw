@@ -42,15 +42,19 @@ static bool _secureOnStreamOpen = false;
 // The address from the last %CONNECT% belongs to the stored remote (outside pairing) or to the pairing address (CONNECTING).
 // Only then does %SECURED%/%BONDED% make the peer accepted (Bluetooth::setPeerAccepted) and its frames get executed.
 static bool _peerAddrMatched = false;
+// Pairing: one more connection attempt after a drop. The first connection after the base lost its bond (U,Z, new base)
+// while the remote still holds the old one ends in %CONNECT%%DISCONNECT%; the next attempt bonds (bench 2026-10-25).
+static uint8_t _pairAddrType = 0;
+static bool _pairRetried = false;
 
 // Without a stored remote (new base, upgrade from settings v1) it connects to nothing (no "C" every 5 s)
 static bool remoteKnown() { return settings::remoteAddr()[0] != '\0'; }
 
 // ── Pairing with the remote (started by the menu "Sparovat ovladac" → Bluetooth::startPairing) ──
 // SCANNING:   advertisement named REMOTE_NAME → X, C,<type>,<address>, CONNECTING (other devices are ignored)
-// CONNECTING: %CONNECT% → B (no OLED prompt, the user started the pairing), BONDING
+// CONNECTING: %CONNECT% → BONDING, B after %STREAM_OPEN% (no OLED prompt, the user started the pairing)
 // BONDING:    %SECURED% / %BONDED% → DONE
-// PAIRING_TIMEOUT in any unfinished state, a disconnect or %ERR_SEC% → FAILED.
+// PAIRING_TIMEOUT in any unfinished state, a second disconnect (the first one connects again) or %ERR_SEC% → FAILED.
 // Auto-reconnect does not run during pairing.
 static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
 	using PS = Bluetooth::PairingState;
@@ -372,7 +376,9 @@ extern "C" int main(void) {
 						auto *adv = static_cast<Bluetooth::AdvConnectableCommand *>(command.get());
 						if (adv->getName() == Bluetooth::REMOTE_NAME) {
 							Debug::log(Debug::Level::INFO, "ble", "pairing: remote found %s", adv->getAddr().c_str());
-							if (Bluetooth::stopScan() && Bluetooth::connectTo(static_cast<uint8_t>(adv->getConnected()), adv->getAddr().c_str())) {
+							_pairAddrType = static_cast<uint8_t>(adv->getConnected());
+							_pairRetried = false;
+							if (Bluetooth::stopScan() && Bluetooth::connectTo(_pairAddrType, adv->getAddr().c_str())) {
 								Bluetooth::setPairingState(PS::CONNECTING);
 							} else {
 								// Command queue full: X/C were not sent, do not wait 15 s for the timeout
@@ -429,14 +435,10 @@ extern "C" int main(void) {
 					} else if (pairing == PS::CONNECTING) {
 						if (addr == Bluetooth::pendingConnectAddr()) {
 							_peerAddrMatched = true;
-							// The user started pairing from the menu → secure and store the bond immediately (no OLED prompt)
-							if (Bluetooth::queueCommand("B")) {
-								Bluetooth::setPairingState(PS::BONDING);
-							} else {
-								Debug::log(Debug::Level::WARNING, "ble", "pairing: B not queued");
-								Bluetooth::queueCommand("K,1");
-								pairingFinished(false, pairing);
-							}
+							// The user started pairing from the menu → secure and store the bond (no OLED prompt). B only after
+							// %STREAM_OPEN%, as on reconnect: B right after %CONNECT% made the link drop in most pairings (bench 2026-10-25)
+							_secureOnStreamOpen = true;
+							Bluetooth::setPairingState(PS::BONDING);
 						} else {
 							// Someone else connected while waiting for the remote → disconnect, pairing failed
 							Debug::log(Debug::Level::WARNING, "ble", "pairing: foreign connect %s", addr.c_str());
@@ -470,7 +472,15 @@ extern "C" int main(void) {
 					if (_secureOnStreamOpen) {
 						// B with the stored key → %SECURED% within ~0.2 s, no OLED prompt
 						_secureOnStreamOpen = false;
-						if (!Bluetooth::queueCommand("B")) Debug::log(Debug::Level::WARNING, "ble", "B not queued, retry in 3 s");
+						if (!Bluetooth::queueCommand("B")) {
+							if (pairing == PS::BONDING) {
+								Debug::log(Debug::Level::WARNING, "ble", "pairing: B not queued");
+								Bluetooth::queueCommand("K,1");
+								pairingFinished(false, pairing);
+							} else {
+								Debug::log(Debug::Level::WARNING, "ble", "B not queued, retry in 3 s");
+							}
+						}
 					}
 					break;
 
@@ -480,7 +490,15 @@ extern "C" int main(void) {
 					_peerAddrMatched = false;
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
-					if (pairing == PS::CONNECTING || pairing == PS::BONDING) pairingFinished(false, pairing);
+					if (pairing == PS::CONNECTING || pairing == PS::BONDING) {
+						if (!_pairRetried && Bluetooth::connectTo(_pairAddrType, Bluetooth::pendingConnectAddr())) {
+							_pairRetried = true;
+							Debug::log(Debug::Level::INFO, "ble", "pairing: link dropped, connecting again");
+							Bluetooth::setPairingState(PS::CONNECTING);
+						} else {
+							pairingFinished(false, pairing);
+						}
+					}
 					GUI::renderForce();
 					break;
 
