@@ -73,17 +73,17 @@ int main(int argc, char **argv) {
 	key(E::Down);
 	snap("main_record", "Main menu, Nahraj selected");
 	key(E::Down);
-	snap("main_power", "Main menu, organ power (checkbox, off)");
-	key(E::Enter);
-	snap("main_power_on", "Main menu, organ power on");
-	key(E::Enter);
-	key(E::Down);
 	snap("main_settings", "Main menu, Nastaveni selected");
 
 	key(E::Enter);
 	snap("settings_led", "Settings: LED (checkbox)");
 	key(E::Down);
 	snap("settings_midi", "Settings: Ident. MIDI (checkbox)");
+	key(E::Down);
+	snap("settings_power", "Settings: organ power (checkbox, off)");
+	key(E::Enter);
+	snap("settings_power_on", "Settings: organ power on");
+	key(E::Enter);
 	key(E::Down);
 	snap("settings_firmware", "Settings: Verze FW");
 	key(E::Down);
@@ -152,7 +152,18 @@ int main(int argc, char **argv) {
 	GUI::hideFwProgress();
 
 	host::state.pcAlive = false;
-	snap("status_no_pc", "Main menu, PC not connected");
+	snap("no_pc", "PC not connected: overlay over the main menu");
+	key(E::Enter);
+	snap("no_pc_settings", "PC not connected: Nastaveni opened from the overlay");
+	down(5);
+	key(E::Enter);
+	snap("no_pc_pairing", "PC not connected: pairing from Nastaveni");
+	key(E::Enter);
+	key(E::Down);
+	key(E::Enter);
+	snap("no_pc_back", "PC not connected: Zpet returns to the overlay");
+	host::state.pcAlive = true;
+	snap("pc_back", "PC connected again: main menu");
 	host::state.connected = false;
 	snap("status_no_remote", "Main menu, remote not connected");
 	host::state.remoteAddr = "";

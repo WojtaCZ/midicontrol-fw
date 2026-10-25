@@ -52,7 +52,7 @@ namespace GUI {
     // Section label from SIGNAL_ANCHOR ("Sloka 2")
     void setNowPlayingAnchor(const char* label);
 
-    // "Napajeni Varhan" checkbox according to the actual SSR state (e.g. after SET_CURRENT from the PC)
+    // "Napajeni varhan" checkbox (Nastaveni) according to the actual SSR state (e.g. after SET_CURRENT from the PC)
     void syncPowerCheckbox();
 
     // Registers the callback for stopping playback (called on dismiss from the OLED)

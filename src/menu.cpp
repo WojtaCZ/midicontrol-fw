@@ -87,28 +87,50 @@ static void pairCallback(ui::MenuItem* item, void* userData);
 static ui::MenuItem settingsItems[] = {
     ui::MenuItem::checkbox("LED",  true,  ledMasterCallback),
     ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
+    ui::MenuItem::checkbox("Napajeni varhan", false, powerCallback),
     ui::MenuItem("Verze FW", firmwareCallback),
     ui::MenuItem("Displej",  displayCallback),
     ui::MenuItem("Sparovat ovladac", pairCallback),
     ui::MenuItem::back("Zpet"),
 };
 
-static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 6);
+static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 7);
 
 // ── Main menu items & screen ──────────────────────────────────────────
 
 static ui::MenuItem mainItems[] = {
     ui::MenuItem("Prehraj",  playCallback),
     ui::MenuItem("Nahraj",   recordCallback),
-    ui::MenuItem::checkbox("Napajeni varhan", false, powerCallback),
     ui::MenuItem("Nastaveni", static_cast<ui::Screen*>(&settingsScreen)),
 };
 
-static ui::MenuScreen mainScreen("Hlavni menu", mainItems, 4);
+static ui::MenuScreen mainScreen("Hlavni menu", mainItems, 3);
 
 // ── Splash screen ─────────────────────────────────────────────────────
 
 static ui::SplashScreen splashScreen("", "", "");
+
+// ── No PC overlay ─────────────────────────────────────────────────────
+// Covers the main menu while the PC player is not connected (everything there needs it).
+// Enter opens Nastaveni; leaving Nastaveni comes back here. Screens pushed later (pairing,
+// remote update, now playing) go on top of it.
+
+static void onNoPcEnter(void* userData) {
+    (void)userData;
+    nav.push(&settingsScreen);
+}
+
+static ui::SplashScreen noPcScreen("MIDIControl", "Odpojeno", "Cekam na PC", onNoPcEnter);
+
+// Pushes the overlay when the main menu is on top without a PC, removes it when it is on top and the PC is back
+static void syncNoPcScreen() {
+    ui::Screen* cur = nav.current();
+    if (!isPcAlive()) {
+        if (cur == &mainScreen) nav.push(&noPcScreen);
+    } else if (cur == &noPcScreen) {
+        nav.pop();
+    }
+}
 
 // ── Paragraph screens (firmware / display info) ───────────────────────
 
@@ -336,6 +358,7 @@ void init() {
 
     firmwareScreen.setTitle("Verze FW");
     displayScreen.setTitle("Displej");
+    noPcScreen.setComment2("Stisk: Nastaveni");
 
     // Synchronize the checkboxes from the saved settings
     settingsItems[0].setChecked(settings::ledMasterEnable());
@@ -346,6 +369,7 @@ void init() {
 
 void render() {
     nav.tickScroll(30);
+    syncNoPcScreen();
 
     // Without a stored remote (new base, upgrade from settings v1): a hint instead of the main menu title.
     // In this state the Base connects to nothing until the user pairs a remote from the Nastaveni menu.
@@ -456,7 +480,7 @@ ui::Navigator& navigator() {
 }
 
 ui::MenuItem& checkboxPower() {
-    return mainItems[2];
+    return settingsItems[2];
 }
 
 ui::MenuItem& checkboxLedMaster() {
@@ -562,7 +586,7 @@ void updateNowPlayingInfo() {
 }
 
 void syncPowerCheckbox() {
-    mainItems[2].setChecked(base::current::isEnabled());
+    settingsItems[2].setChecked(base::current::isEnabled());
     nav.forceRender();
 }
 
