@@ -10,6 +10,9 @@
 #include "router.hpp"
 
 #include <ui/progress_screen.hpp>
+#include <ui/list.hpp>
+#include <ui/text_scroll.hpp>
+#include <stmcpp/systick.hpp>
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
 #include <gfx/shapes.hpp>
@@ -56,8 +59,8 @@ static void initTheme() {
     theme.dotUnselected      = ui::makeIconRef(dot_outline);
     theme.arrowUp            = ui::makeIconRef(arrow_up);
     theme.arrowDown          = ui::makeIconRef(arrow_down);
-    theme.backSelected       = ui::makeIconRef(arrow_left_filled);
-    theme.backUnselected     = ui::makeIconRef(arrow_left_empty);
+    theme.backSelected       = ui::makeIconRef(back_filled);
+    theme.backUnselected     = ui::makeIconRef(back_outline);
     theme.checkboxSelEmpty   = ui::makeIconRef(checkbox_filled);
     theme.checkboxSelChecked = ui::makeIconRef(checkbox_filled_checked);
     theme.checkboxUnselEmpty   = ui::makeIconRef(checkbox_empty);
@@ -197,9 +200,6 @@ static void updateBluetoothInfo() {
 // ── Now Playing screen ─────────────────────────────────────────────────
 
 static StopCallback _stopCallback = nullptr;
-static char _nowPlayingSong[64] = "";
-static char _nowPlayingInfo[32] = "";
-static char _nowPlayingAnchor[24] = "";
 static bool _nowPlayingActive = false;
 
 // ── Song list data ──────────────────────────────────────────────────────
@@ -217,18 +217,158 @@ static SongListState _songListState = SongListState::Idle;
 static RequestSongListCallback _requestSongListCallback = nullptr;
 static PlaySongCallback _playSongCallback = nullptr;
 
-static void onNowPlayingDismiss(void* userData) {
-    (void)userData;
-    _nowPlayingActive = false;
-    nav.pop();
-    if (_stopCallback) {
-        _stopCallback();
+// PC section label -> display text: "Sloka 2" -> "Sloka: 2", "Sloka 2 +3" (3 repeats pending)
+// -> "Sloka: 2 (x3)", "Predehra +1" -> "Predehra (x1)"; anything else is kept as it is
+static void formatSection(const char* label, char* out, size_t size) {
+    auto isNumber = [](const char* b, const char* e) {
+        if (b == e) return false;
+        for (const char* c = b; c < e; c++) if (*c < '0' || *c > '9') return false;
+        return true;
+    };
+    const char* end = label + std::strlen(label);
+
+    // Trailing " +N": repeats left
+    const char* reps = nullptr;
+    const char* sp = end;
+    while (sp > label && sp[-1] != ' ') sp--;
+    if (sp > label && sp[0] == '+' && isNumber(sp + 1, end)) {
+        reps = sp + 1;
+        end  = sp - 1;
     }
+
+    // Trailing " N": the verse number
+    const char* num = end;
+    while (num > label && num[-1] != ' ') num--;
+    int n;
+    if (num > label && isNumber(num, end)) {
+        n = std::snprintf(out, size, "%.*s: %.*s", (int)(num - 1 - label), label, (int)(end - num), num);
+    } else {
+        n = std::snprintf(out, size, "%.*s", (int)(end - label), label);
+    }
+    if (reps && n >= 0 && (size_t)n < size) std::snprintf(out + n, size - n, " (x%s)", reps);
 }
 
-static ui::SplashScreen nowPlayingScreen(
-    "Prehravani", "", "[STOP]", onNowPlayingDismiss
-);
+// Same layout as the remote's player: the state in the title, the song code in the big
+// font, the section from the PC centered below it ("Sloka: 2 (x1)") and the Stop icon button,
+// the only input here (OK). After SIGNAL_STOPPED it shows "Zastaveno" for a moment.
+class NowPlayingScreen : public ui::Screen {
+public:
+    enum class State : uint8_t { Playing, Stopping, Stopped };
+
+    static constexpr uint32_t STOPPED_SHOW_MS = 1500;
+    static constexpr int INFO_CHARS = 18; // one 7x10 line
+
+    void start(const char* code) {
+        std::strncpy(code_, code, sizeof(code_) - 1);
+        code_[sizeof(code_) - 1] = '\0';
+        info_[0] = '\0';
+        state_ = State::Playing;
+        markDirty();
+    }
+
+    // Section label from SIGNAL_ANCHOR
+    void setSection(const char* label) {
+        formatSection(label, info_, sizeof(info_));
+        infoScroll_.reset();
+        markDirty();
+    }
+
+    void stopped() {
+        state_ = State::Stopped;
+        stoppedAt_ = stmcpp::systick::getTicks();
+        markDirty();
+    }
+
+    State state() const { return state_; }
+    bool stoppedExpired() const {
+        return state_ == State::Stopped && stmcpp::systick::getTicks() - stoppedAt_ >= STOPPED_SHOW_MS;
+    }
+
+    bool handleInput(ui::InputEvent event) override {
+        if (event != ui::InputEvent::Enter) return true; // the encoder turns nothing here
+        if (state_ == State::Stopped) {
+            leave();
+            return true;
+        }
+        // Stop (again while stopping: the PC may have missed it)
+        state_ = State::Stopping;
+        markDirty();
+        if (_stopCallback) _stopCallback();
+        return true;
+    }
+
+    void tickScroll(int elapsedMs) override {
+        int len = static_cast<int>(std::strlen(info_));
+        if (infoScroll_.tick(elapsedMs, len, INFO_CHARS)) markDirty();
+    }
+
+    void render(gfx::IFrameBuffer<uint8_t>& fb, const ui::Theme& theme) override {
+        gfx::fill(fb, (uint8_t)0);
+
+        const char* title = "Prehravam";
+        if (state_ == State::Stopping) title = "Zastavuji";
+        if (state_ == State::Stopped) title = "Zastaveno";
+        ui::drawTitleBar(fb, theme, title);
+
+        // Song code (Font_11x18): 5 underlined slots as on the remote
+        const int fw    = (int)theme.itemFont->width();
+        const int fh    = (int)theme.itemFont->height();
+        const int yD    = 14;
+        const int len   = (int)std::strlen(code_);
+        const int slots = 5;
+        if (len <= slots) {
+            const int gap   = 2;
+            const int total = slots * fw + (slots - 1) * gap;
+            const int x0    = (theme.displayWidth - total) / 2;
+            char dc[2] = { 0, 0 };
+            for (int i = 0; i < slots; i++) {
+                int x = x0 + i * (fw + gap);
+                dc[0] = (i < len) ? code_[i] : (i < 4 ? '-' : ' ');
+                gfx::text::drawText(fb, *theme.itemFont, dc, x, yD, gfx::Anchor::TopLeft, (uint8_t)1);
+                gfx::drawHLine(fb, x, yD + fh + 2, fw, (uint8_t)1);
+            }
+        } else {
+            gfx::text::drawText(fb, *theme.itemFont, code_, theme.displayWidth / 2, yD, gfx::Anchor::TopCenter, (uint8_t)1);
+        }
+
+        // Info line: the section from the PC, centered; a long one scrolls
+        const int infoY = ui::hintY(theme) - (int)theme.smallFont->height() - 6;
+        const int ilen  = static_cast<int>(std::strlen(info_));
+        if (state_ != State::Stopped && ilen <= INFO_CHARS) {
+            gfx::text::drawText(fb, *theme.smallFont, info_, theme.displayWidth / 2, infoY, gfx::Anchor::TopCenter, (uint8_t)1);
+        } else if (state_ != State::Stopped) {
+            char buf[INFO_CHARS + 1];
+            std::snprintf(buf, sizeof(buf), "%.18s", info_ + infoScroll_.offset(ilen, INFO_CHARS));
+            gfx::text::drawText(fb, *theme.smallFont, buf, theme.leftMargin, infoY, gfx::Anchor::TopLeft, (uint8_t)1);
+        }
+
+        // The Stop button, always selected (the only one)
+        if (state_ != State::Stopped) {
+            const int x = (theme.displayWidth - (int)btn_stop_selected.width) / 2;
+            const int y = theme.displayHeight - (int)btn_stop_selected.height;
+            gfx::drawIcon(fb, btn_stop_selected, x, y, gfx::Anchor::TopLeft, (uint8_t)1);
+        }
+
+        clearDirty();
+    }
+
+    void leave();
+
+private:
+    State    state_     = State::Stopped;
+    uint32_t stoppedAt_ = 0;
+    char     code_[12]  = {};
+    char     info_[32]  = {};
+    ui::TextScroll infoScroll_;
+};
+
+static NowPlayingScreen nowPlayingScreen;
+
+void NowPlayingScreen::leave() {
+    _nowPlayingActive = false;
+    // Remove only if it is on top (above it there may be e.g. a pairing prompt)
+    if (nav.current() == this) nav.pop();
+}
 
 // ── Pairing with the remote from the menu (progress and result) ───────
 
@@ -411,6 +551,8 @@ void render() {
     nav.tickScroll(30);
     syncNoPcScreen();
 
+    if (_nowPlayingActive && nowPlayingScreen.stoppedExpired()) nowPlayingScreen.leave();
+
     // Bluetooth info: value refresh; the display does not sleep while the screen is open (changes are visible)
     if (nav.current() == &bluetoothScreen) {
         updateBluetoothInfo();
@@ -424,10 +566,10 @@ void render() {
 
     bool dirty = nav.render(frameBuffer);
 
-    // Status icons only on menu screens (not on SplashScreen, ParagraphScreen, ConfirmScreen)
+    // Status icons on the menu screens and on the now playing screen (not on SplashScreen, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
 
-    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen);
+    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen || cur == &nowPlayingScreen);
 
     if (showStatusIcons && Bluetooth::isConnected()) {
         int iconX = theme.displayOffsetX + theme.displayWidth - 14;
@@ -544,12 +686,7 @@ void showPairingResult(const char* text) {
 }
 
 void showNowPlaying(const char* songName) {
-    std::strncpy(_nowPlayingSong, songName, sizeof(_nowPlayingSong) - 1);
-    _nowPlayingSong[sizeof(_nowPlayingSong) - 1] = '\0';
-    nowPlayingScreen.setSubtitle(_nowPlayingSong);
-    nowPlayingScreen.setComment("[STOP]");
-    _nowPlayingInfo[0] = '\0';
-    _nowPlayingAnchor[0] = '\0';
+    nowPlayingScreen.start(songName);
 
     // During a Remote update the progress screen stays on top; Now Playing is not pushed
     // (it will not show after the update, the next SIGNAL_PLAYING will display it)
@@ -564,12 +701,9 @@ void showNowPlaying(const char* songName) {
 }
 
 void dismissNowPlaying() {
+    // "Zastaveno" for a moment; render() removes the screen afterwards
     if (_nowPlayingActive) {
-        _nowPlayingActive = false;
-        // Remove only if it is on top (above it there may be e.g. a pairing prompt)
-        if (nav.current() == &nowPlayingScreen) {
-            nav.pop();
-        }
+        nowPlayingScreen.stopped();
         nav.forceRender();
     }
 }
@@ -607,27 +741,8 @@ void hideFwProgress() {
 }
 
 void setNowPlayingAnchor(const char* label) {
-    std::strncpy(_nowPlayingAnchor, label, sizeof(_nowPlayingAnchor) - 1);
-    _nowPlayingAnchor[sizeof(_nowPlayingAnchor) - 1] = '\0';
-    updateNowPlayingInfo();
-}
-
-void updateNowPlayingInfo() {
-    if (!_nowPlayingActive) return;
-
-    if (_nowPlayingAnchor[0] != '\0') {
-        // Section from the PC ("Predehra", "Sloka 2")
-        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo), "%s [STOP]", _nowPlayingAnchor);
-    } else {
-        // Display state digit by digit, as shown in the church (" 401", "1 ")
-        char song[5];
-        char verse[3];
-        display::formatSong(song);
-        display::formatVerse(verse);
-        char letter = display::getLetter();
-        std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo), "P:%s%c S:%s [STOP]", song, letter, verse);
-    }
-    nowPlayingScreen.setComment(_nowPlayingInfo);
+    if (nowPlayingScreen.state() == NowPlayingScreen::State::Stopped) return;
+    nowPlayingScreen.setSection(label);
     nav.forceRender();
 }
 
@@ -688,12 +803,12 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
         if (!_loadingScreenShown) {
             // The loading screen has not been shown yet — show it with the error
             songListLoadingScreen.setSubtitle("Zadne pisne");
-            songListLoadingScreen.setComment("Stiskni pro navrat");
+            songListLoadingScreen.setComment("");
             nav.push(&songListLoadingScreen);
             _loadingScreenShown = true;
         } else {
             songListLoadingScreen.setSubtitle("Zadne pisne");
-            songListLoadingScreen.setComment("Stiskni pro navrat");
+            songListLoadingScreen.setComment("");
         }
         nav.forceRender();
         return;
@@ -736,12 +851,12 @@ void songListTimeout() {
         songListDelayScheduler.stop();
         if (!_loadingScreenShown) {
             songListLoadingScreen.setSubtitle("PC neodpovida");
-            songListLoadingScreen.setComment("Stiskni pro navrat");
+            songListLoadingScreen.setComment("");
             nav.push(&songListLoadingScreen);
             _loadingScreenShown = true;
         } else {
             songListLoadingScreen.setSubtitle("PC neodpovida");
-            songListLoadingScreen.setComment("Stiskni pro navrat");
+            songListLoadingScreen.setComment("");
         }
         nav.forceRender();
     }

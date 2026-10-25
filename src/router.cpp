@@ -337,7 +337,6 @@ namespace router {
 			case MsgType::NOW_PLAYING_INFO:
 				// One frame to the display, no ACK (frequent message)
 				display::applyNowPlaying(pkt.payload, pkt.payloadLen);
-				GUI::updateNowPlayingInfo();
 				break;
 
 			case MsgType::SONG_LIST_RESP:

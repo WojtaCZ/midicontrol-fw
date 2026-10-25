@@ -148,11 +148,17 @@ int main(int argc, char **argv) {
 
 	// Playback
 	GUI::showNowPlaying("406A");
-	GUI::updateNowPlayingInfo();
-	snap("now_playing", "Now playing, display state");
+	snap("now_playing", "Now playing, no section yet");
 	GUI::setNowPlayingAnchor("Sloka 2");
 	snap("now_playing_anchor", "Now playing, section from the PC");
+	GUI::setNowPlayingAnchor("Sloka 2 +2");
+	snap("now_playing_repeats", "Now playing, two repeats of the verse left");
+	key(E::Enter);
+	snap("now_playing_stopping", "Now playing, OK pressed: stopping");
 	GUI::dismissNowPlaying();
+	snap("now_playing_stopped", "Now playing, stopped (shown for a moment)");
+	stmcpp::systick::ticks_ += 2000;
+	GUI::render();
 
 	GUI::showFwProgress("Prenos do ovladace", 42);
 	snap("fw_remote_update", "Remote firmware update relayed");

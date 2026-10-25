@@ -46,10 +46,7 @@ namespace GUI {
     // End of the update: the screen is removed from the stack (back to the main menu)
     void hideFwProgress();
 
-    // Update of the info on the "Now Playing" screen (song/verse/letter from display::)
-    void updateNowPlayingInfo();
-
-    // Section label from SIGNAL_ANCHOR ("Sloka 2")
+    // Section label from SIGNAL_ANCHOR ("Sloka 2", "Sloka 2 +1" while repeats are pending)
     void setNowPlayingAnchor(const char* label);
 
     // "Napajeni varhan" checkbox (Nastaveni) according to the actual SSR state (e.g. after SET_CURRENT from the PC)
