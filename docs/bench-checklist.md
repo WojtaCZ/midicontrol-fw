@@ -51,6 +51,32 @@ ELF: `export BASETEST_REMOTE_ELF=<-g build>/midicontroller-fw.elf` (recipe in `t
 - [ ] **Remote `test_outbound`** (`../midicontroller-fw/tools/bletest`): the PC's BLE adapter plays the base and
       re-pairs the remote, so the base loses its bond. Re-pair from the base menu afterwards (or run `test_pairing.py`).
 
+## 5. Bootloader recovery (added 2026-10-25)
+
+The automated bootloader suites (`test_boot_base.py`, `test_boot_remote.py`) passed on 2026-10-25, apart from the known
+findings. Report: `docs/bootloader-robustness-report.md`. The bench cannot switch either board's supply, so these are
+left for a person. Before you start, have the probe ready to recover the base, because F4 can hang it for good.
+
+- [ ] **Base real power cut during an update (F4):** run `update base` and unplug the base USB in its last ~1 s, many
+      times. The danger window is ~25 ms per update, so most tries land outside it. Expected: it always comes back in the
+      bootloader (`abcd:1235`) or the app. A dark, non-enumerating base is F4: note how many tries it took, then recover
+      it with the probe.
+- [ ] **Base real power cut mid-transfer:** unplug at ~10 %, ~50 % and ~90 % of `update base`, then plug it back in.
+      Expected: the bootloader enumerates, and a second `update base` finishes and boots the app.
+- [ ] **Base forced entry:** hold the encoder while plugging in the base. Expected: the bootloader, even with a good app.
+- [ ] **Base ROM DFU (BOOT0) as the last resort for F4:** with BOOT0 held high at power-on, `dfu-util -l` lists the
+      STM32 ROM DFU. Then flash the bootloader and the app over it and check both boot.
+- [ ] **Remote battery pull during the image copy:** start a remote OTA and pull the battery right after "apply" (the
+      copy takes a few seconds). Put the battery back and power on. Expected: the copy finishes, and the remote runs the new
+      app or the old one. It must never stay dark.
+- [ ] **Remote brown-out:** run a remote OTA apply on a nearly flat battery (or a bench supply ramped down through
+      ~2.0 V). Remote BOR is off (F1), so watch for a corrupt or half-copied app. Expected: the next power-on on a good
+      battery finishes the copy.
+- [ ] **Remote stays reachable after OTA (F6):** after every remote OTA or reset done by hand, check the remote buttons
+      reach the base within ~10 s. A link that the base calls secured but that carries nothing is F6: note it, then reset the remote.
+- [ ] **PC updater end to end (F2):** run `test_ota.py::test_base_ota_over_cdc` on a host outside this container. It
+      fails here because the updater races for the port.
+
 ## If something odd shows up
 
 - A soak "base reset" with no USB re-enumeration is a harness read problem, not a reset (trail learning, `tools/basetest/dbg.py`).
