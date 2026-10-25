@@ -337,6 +337,7 @@ extern "C" int main(void) {
 
 		keypressScheduler.dispatch();
 		guiRenderScheduler.dispatch();
+		oledSleepScheduler.dispatch();
 		Oled::process();
 		splashDismissScheduler.dispatch();
 		ledScheduler.dispatch();

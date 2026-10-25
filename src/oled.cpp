@@ -52,9 +52,12 @@ namespace Oled{
     volatile bool busy;
     bool framePending;
 
-    // Display on, appended after the first frame following initialization
+    // Display on, appended after the first frame following initialization or wakeup
     const uint8_t displayOnCmd[] = {OLED_MEM_CMD, 0xaf};
     bool displayOn = false;
+    // Display off (sleep); sent alone as soon as the bus is free
+    const uint8_t sleepCmd[] = {OLED_MEM_CMD, 0xae};
+    bool sleepPending;
 
     const uint8_t initBuffer[] = {
         //CMD type
@@ -162,19 +165,21 @@ namespace Oled{
         stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
     }
 
-    //Wakeup function for the oled
+    //Wakeup function for the oled: the current frame is sent first, the display is turned on after it
     void wakeup(){
         if(isSleeping()){
             sleeping = false;
+            sleepPending = false;
+            displayOn = false;
+            framePending = true;
         }
     }
 
-    //Sleep function for the oled
+    //Sleep function for the oled (display off; the frame buffer is kept, frames are not sent while sleeping)
     void sleep(){
         if(!isSleeping()){
-            //fill(Color::BLACK);
-            update();
             sleeping = true;
+            sleepPending = true;
         }
     }
 
@@ -212,7 +217,20 @@ namespace Oled{
 
     // Starts the pending frame as soon as the bus is free (called from the main loop)
     void process(){
-        if(!isInitialized() || isSleeping() || busy || !framePending) return;
+        if(!isInitialized() || busy) return;
+
+        if(sleepPending){
+            sleepPending = false;
+            chunkPtr[0] = sleepCmd;
+            chunkLen[0] = sizeof(sleepCmd);
+            chunkCount = 1;
+            chunkIndex = 0;
+            busy = true;
+            startChunk(0);
+            return;
+        }
+
+        if(isSleeping() || !framePending) return;
         framePending = false;
 
         constexpr int STRIDE = OledBuffer::STRIDE;
@@ -249,7 +267,7 @@ namespace Oled{
     // noinline + used: test_fault.py calls it via gdb (a full flush under the watchdog)
     [[gnu::used, gnu::noinline]] void flush(uint32_t timeoutMs){
         uint32_t start = stmcpp::systick::getTicks();
-        while((!isInitialized() || busy || framePending) && (stmcpp::systick::getTicks() - start) < timeoutMs){
+        while((!isInitialized() || busy || sleepPending || (framePending && !isSleeping())) && (stmcpp::systick::getTicks() - start) < timeoutMs){
             wdg::kick(); // waits up to timeoutMs (at startup: 500 ms)
             process();
         }
@@ -282,14 +300,12 @@ namespace Oled{
 
     //Callback for the sleep scheduler
     void sleepCallback(void){
-        oledSleepScheduler.pause();
         sleep();
     }
 
-    //Callback to wakeup the oled
+    //Callback to wakeup the oled, (re)starts the inactivity timer
     void wakeupCallback(void){
-        oledSleepScheduler.reset();
-        oledSleepScheduler.resume();
+        oledSleepScheduler.start();
         wakeup();
     }
 

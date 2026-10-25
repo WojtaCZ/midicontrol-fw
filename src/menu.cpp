@@ -682,6 +682,7 @@ ui::MenuItem& checkboxMidiRole() {
 void showPairingResult(const char* text) {
     if (!_pairStatusShown) return;
     pairStatusScreen.setComment(text);
+    Oled::wakeupCallback();
     nav.forceRender();
 }
 
@@ -697,6 +698,7 @@ void showNowPlaying(const char* songName) {
         _nowPlayingActive = true;
         nav.push(&nowPlayingScreen);
     }
+    Oled::wakeupCallback();
     nav.forceRender();
 }
 
@@ -704,6 +706,7 @@ void dismissNowPlaying() {
     // "Zastaveno" for a moment; render() removes the screen afterwards
     if (_nowPlayingActive) {
         nowPlayingScreen.stopped();
+        Oled::wakeupCallback();
         nav.forceRender();
     }
 }
@@ -743,6 +746,7 @@ void hideFwProgress() {
 void setNowPlayingAnchor(const char* label) {
     if (nowPlayingScreen.state() == NowPlayingScreen::State::Stopped) return;
     nowPlayingScreen.setSection(label);
+    Oled::wakeupCallback();
     nav.forceRender();
 }
 
