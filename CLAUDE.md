@@ -30,6 +30,8 @@ Build outputs in `build/`:
 
 Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-generated on each build via `cmake/git.cmake`. There are no unit tests in this project; hardware tests (USB-CDC, both ST-Links, logic analyzer) live in `tools/basetest/` (README there).
 
+**Screen images**: `tools/screens/export.sh [outdir] [scale]` builds the real GUI code (`src/menu.cpp`, `lib/ui`, `lib/gfx`) for the host with stubbed hardware (`tools/screens/stubs/`, `host.cpp`) and saves every screen as PNG plus `sheet.png` (all screens in a grid) and `index.html` (default `build-screens/png/`). The scenarios are in `tools/screens/main.cpp`; add one when you add a screen. Use it to check UI changes and for the manual's pictures.
+
 ## Flash layout
 
 | Region | Address | Size |

@@ -46,7 +46,7 @@ static void initTheme() {
     theme.titleBarHeight = 12;
     theme.itemStartY     = 21;
     theme.itemSpacing    = 3;
-    theme.leftMargin     = 0;
+    theme.leftMargin     = 2;
     theme.iconTextGap    = 3;
     theme.visibleItems   = 2;
     theme.scrollArrowX   = 117;
@@ -100,7 +100,7 @@ static ui::MenuScreen settingsScreen("Nastaveni", settingsItems, 6);
 static ui::MenuItem mainItems[] = {
     ui::MenuItem("Prehraj",  playCallback),
     ui::MenuItem("Nahraj",   recordCallback),
-    ui::MenuItem::checkbox("Napajeni Varhan", false, powerCallback),
+    ui::MenuItem::checkbox("Napajeni varhan", false, powerCallback),
     ui::MenuItem("Nastaveni", static_cast<ui::Screen*>(&settingsScreen)),
 };
 
@@ -298,7 +298,7 @@ static void displayCallback(ui::MenuItem* item, void* userData) {
     }
 
     std::snprintf(dispLine0, sizeof(dispLine0), "Pripojen: %s",
-                  display::isConnected() ? "ano" : "ne");
+                  display::isConnected() ? "Ano" : "Ne");
     char song[5];
     char verse[3];
     display::formatSong(song);
@@ -334,6 +334,9 @@ void init() {
     );
     splashScreen.setComment2(git::branch.c_str());
 
+    firmwareScreen.setTitle("Verze FW");
+    displayScreen.setTitle("Displej");
+
     // Synchronize the checkboxes from the saved settings
     settingsItems[0].setChecked(settings::ledMasterEnable());
     settingsItems[1].setChecked(settings::midiRoleIdentifier());
@@ -344,18 +347,16 @@ void init() {
 void render() {
     nav.tickScroll(30);
 
+    // Without a stored remote (new base, upgrade from settings v1): a hint instead of the main menu title.
+    // In this state the Base connects to nothing until the user pairs a remote from the Nastaveni menu.
+    // 14 characters of 7x10 = 98 px + 2 px margin, fits to the left of the PC icon (screen x = 102).
+    mainScreen.setTitle(settings::remoteAddr()[0] == '\0' ? "Sparuj ovladac" : "Hlavni menu");
+
     bool dirty = nav.render(frameBuffer);
 
     // Status icons only on menu screens (not on SplashScreen, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
 
-    // Without a stored remote (new base, upgrade from settings v1): a hint instead of the main menu title.
-    // In this state the Base connects to nothing until the user pairs a remote from the Nastaveni menu.
-    // 14 characters of 7x10 = 98 px, fits to the left of the PC icon (x = 104).
-    if (dirty && cur == &mainScreen && settings::remoteAddr()[0] == '\0') {
-        gfx::drawFilledRect(frameBuffer, 0, 0, theme.displayWidth, theme.titleBarHeight, (uint8_t)0);
-        gfx::text::drawText(frameBuffer, *theme.titleFont, "Sparuj ovladac", 0, 0, gfx::Anchor::TopLeft, (uint8_t)1);
-    }
     bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen);
 
     if (showStatusIcons && Bluetooth::isConnected()) {

@@ -46,6 +46,7 @@ set(SOURCES
 	${CMAKE_SOURCE_DIR}/lib/gfx/src/font_11x18.cpp
 
 	${CMAKE_SOURCE_DIR}/lib/ui/src/menu_screen.cpp
+	${CMAKE_SOURCE_DIR}/lib/ui/src/list.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/splash_screen.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/paragraph_screen.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/number_screen.cpp
