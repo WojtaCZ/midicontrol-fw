@@ -1,5 +1,5 @@
 """First pairing of the base with the remote (menu "Sparovat ovladac" -> Bluetooth::startPairing): scan, connecting only to
-MIDIController, bond (Just Works: base and remote SA,2 NoInputNoOutput, see CLAUDE.md), reconnection after a
+MIDIControlRemote, bond (Just Works: base and remote SA,2 NoInputNoOutput, see CLAUDE.md), reconnection after a
 base reset and a timeout without the remote. The recording of both RN4870 UARTs during pairing goes to PAIRING_LOG (default: tmp)."""
 
 import os

@@ -317,7 +317,7 @@ static void firmwareCallback(ui::MenuItem* item, void* userData) {
 
 static void pairCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
-    // Z, F → scan; connecting to MIDIController, B and the timeout are handled by the main loop (main.cpp)
+    // Z, F → scan; connecting to MIDIControlRemote, B and the timeout are handled by the main loop (main.cpp)
     // RN4870 is not working (running without BLE, spec R21): immediate message instead of waiting for the timeout
     bool up = Bluetooth::isUp();
     if (up && Bluetooth::startPairing() != 0) return;

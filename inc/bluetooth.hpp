@@ -22,7 +22,7 @@ namespace Bluetooth{
 	static constexpr char STATUS_DELIMITER = '%';
 
 	// Pairing with the controller (Remote): connects only to a device with this name (SN in ../midicontroller-fw)
-	static constexpr const char *REMOTE_NAME = "MIDIController";
+	static constexpr const char *REMOTE_NAME = "MIDIControlRemote";
 	// Total time from startPairing() to DONE; after that X/Z/K,1 and FAILED
 	static constexpr stmcpp::units::duration PAIRING_TIMEOUT = 15000_ms;
 

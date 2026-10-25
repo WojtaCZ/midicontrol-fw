@@ -211,7 +211,7 @@ def test_pairing_ignores_foreign_connect(remote_away):
         assert base.call("Bluetooth::startPairing()") == 0
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") == dbg.PAIR_SCANNING, 2, what="SCANNING")
         time.sleep(0.5)
-        base.inject_status(f"{REMOTE},0,MIDIController,,F5")  # remote advertisement -> X, C,0,<remote>
+        base.inject_status(f"{REMOTE},0,MIDIControlRemote,,F5")  # remote advertisement -> X, C,0,<remote>
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") == dbg.PAIR_CONNECTING, 2, what="CONNECTING")
         time.sleep(0.5)
         base.inject_status(f"CONNECT,0,{STRANGER}")  # somebody else connects
