@@ -3,8 +3,9 @@ slots in the W25Q32, watchdogs and fault capture (Task 6D-2).
 Precondition: the base and the remote are paired (test_pairing.py), the remote runs new firmware with diag.
 
 A remote reset releases PA1 and the remote SWITCHES OFF (nobody switches it back on at the bench): tests that really trigger a fault/watchdog
-are `needs_user` (they run only with `-m needs_user` and a person at the bench who switches the remote on). A remote powered from
-USB-C or the ST-Link's 3.3 V stays on through the reset; the tests accept both (warm reset: the RAM ring keeps the old run's records)."""
+are `needs_user` (they run only with `-m needs_user` and a person at the bench who switches the remote on). In practice a fault or
+watchdog reset is over before the power latch drops and the remote stays on (only a long halt, e.g. a reflash, switches it off);
+the tests accept both (warm reset: the RAM ring keeps the old run's records)."""
 
 import os
 import struct
