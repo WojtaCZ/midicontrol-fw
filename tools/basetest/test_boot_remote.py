@@ -453,7 +453,6 @@ def test_remote_ota_x3(rb, base, link, remote_ok):
         base.stop()
 
 
-@pytest.mark.parametrize("dummy", [0])
 def test_remote_program_error(rb, base, link, remote_ok):
     """flashprog::program pri kopii jednou selze (oblast uz smazana): pending zustane. Bud druhy pokus v tomtez bootu
     obraz dokonci, nebo bootloader nema bootovatelnou aplikaci -> pusti PA1 (napajeni) a ceka; dalsi reset obraz
@@ -528,13 +527,23 @@ def test_remote_glitch_erase_vector_page(rb, base, remote_ok):
     assert not bad, f"remote hung/off after an interrupted erase: {bad}"
 
 
+F4B = ("F4b: interrupted program of the app vector page (no pending image) -> ECC double error -> remote bootloader NMI "
+       "-> Default_Handler with PA1 still high (stays on, hung, battery drain)")
+
+
+@pytest.mark.xfail(strict=True, reason=F4B)
 def test_remote_glitch_program_vector(rb, base, remote_ok):
+    """Vektorova stranka smazana a reset v prubehu programovani 1. dvojslova, vse z jedne glitch rutiny ze stavu
+    aplikace (programovani ze zastaveneho bootloaderu hlasi PGAERR|PGSERR, jako u base). Bez pending obrazu: ocekava
+    se bootloader (PA1 pusteny) nebo aplikace; nikdy viset (ECC -> NMI, F4 na base)."""
     img = IMG_A if installed(rb) == "A" else IMG_B
     w0, w1 = int.from_bytes(img[:4], "little"), int.from_bytes(img[4:8], "little")
-    n_prog = rb.glitch(bootfi.OP_MEASURE_PROGRAM, SCRATCH, w0=w0, w1=w1)
+    n_prog = rb.glitch(bootfi.OP_MEASURE_ERASE_THEN_PROGRAM, SCRATCH, w0=w0, w1=w1)
+    assert n_prog < 0x80000000, f"flash error during measure: {n_prog:#x}"
     rb.glitch(bootfi.OP_MEASURE_ERASE, SCRATCH)
-    rows = _sweep(rb, "remote-program-vector", lambda: rb.glitch(bootfi.OP_MEASURE_ERASE, APP), bootfi.OP_PROGRAM, APP,
-                  n_prog, w=(w0, w1))
-    rb.swd_restore()
+    print(f"program takes {n_prog} iterations")
+    rows = _sweep(rb, "remote-program-vector", lambda: _restore_if_needed(rb), bootfi.OP_ERASE_THEN_PROGRAM, APP, n_prog,
+                  w=(w0, w1))
+    _restore_if_needed(rb)
     bad = [r for r in rows if r["where"] in ("hang", "off?", "unknown")]
     assert not bad, f"remote hung/off after an interrupted program: {bad}"
