@@ -115,15 +115,21 @@ def remote_ok(rb, base):
     linked(base)
     yield
     hung = None
-    w = rb.where()
-    if w["kind"] != "app":
-        time.sleep(15)  # mozna jeste aplikuje (kopie trva sekundy)
+    try:
         w = rb.where()
-    if w["kind"] != "app" or installed(rb) == "other":
-        hung = dict(where=w, installed=installed(rb))
-        rb.disarm_all()
-        rb.swd_restore()
-    rb.stop()
+        if w["kind"] != "app":
+            time.sleep(15)  # mozna jeste aplikuje (kopie trva sekundy)
+            w = rb.where()
+        if w["kind"] != "app" or installed(rb) == "other":
+            hung = dict(where=w, installed=installed(rb))
+            rb.disarm_all()
+            rb.swd_restore()
+            if rb.where()["kind"] != "app" or installed(rb, settle=2) == "other":
+                pytest.exit(f"BLOCKED: remote not recoverable by SWD after {hung}", returncode=3)
+    except (RuntimeError, ValueError, OSError) as e:
+        pytest.exit(f"BLOCKED (needs_user?): remote not reachable through its probe - switched off? {e!r}", returncode=3)
+    finally:
+        rb.stop()
     linked(base, 60)
     base.stop()
     assert hung is None, f"remote not back in a known app (recovered by SWD): {hung}"
@@ -267,12 +273,25 @@ def boot_bootloader(rb):
     rb.tcl("reset run")
 
 
-def stage_and_break(rb, link, addr, *, hits=1, watch_write=False, timeout=60, before_reset=None):
-    """Bp v bootloaderu na `addr` (hits-ty zasah), pak reset = vypadek tam. Vraci (pred, cil)."""
+def stage_and_break(rb, link, addr, *, hits=1, watch_write=False, timeout=60, before_reset=None, expect_r0=None):
+    """Bp v bootloaderu na `addr` (hits-ty zasah), pak reset = vypadek tam. Vraci (pred, cil). `expect_r0`: prvni
+    argument funkce na zasahu (adresa stranky/bloku) - kontrola, ze pocitany zasah nepreskocil (po obnove spojeni se
+    FPB maze a znovu nastavuje; review 2026-10-25)."""
     before, want = stage_halted_at_reboot(rb, link)
     rb.arm(addr, watch_write)
     boot_bootloader(rb)
-    assert rb.break_then_reset(0, hits=hits, armed=True, timeout=timeout, before_reset=before_reset), f"bp 0x{addr:08x} not hit"
+    seen = []
+
+    def at_hit():
+        if expect_r0 is not None:
+            rb.tcl("halt")
+            seen.append(rb.reg("r0"))
+        if before_reset:
+            before_reset()
+
+    assert rb.break_then_reset(0, hits=hits, armed=True, timeout=timeout, before_reset=at_hit), f"bp 0x{addr:08x} not hit"
+    if expect_r0 is not None:
+        assert seen == [expect_r0], f"hit {hits} of 0x{addr:08x} had r0 {[hex(x) for x in seen]}, want {expect_r0:#x}"
     return before, want
 
 
@@ -290,7 +309,8 @@ def converged(rb, want):
 
 @pytest.mark.parametrize("hit", [1, 2, N_PAGES // 2, N_PAGES])
 def test_remote_bp_erase(rb, base, link, remote_ok, hit):
-    _, want = stage_and_break(rb, link, rb.bl_sym("boot::flashprog::erasePageAt"), hits=hit)
+    _, want = stage_and_break(rb, link, rb.bl_sym("boot::flashprog::erasePageAt"), hits=hit,
+                              expect_r0=APP + (hit - 1) * R["page"])
     converged(rb, want)
 
 
@@ -300,7 +320,8 @@ PROG_REST = (len(IMG_A) - 2048 + 255) // 256  # volani pred vektorovou strankou
 
 
 def test_remote_bp_copy_mid(rb, base, link, remote_ok):
-    _, want = stage_and_break(rb, link, rb.bl_sym("boot::flashprog::program"), hits=PROG_REST // 2)
+    h = PROG_REST // 2
+    _, want = stage_and_break(rb, link, rb.bl_sym("boot::flashprog::program"), hits=h, expect_r0=APP + 2048 + 256 * (h - 1))
     converged(rb, want)
 
 
@@ -308,7 +329,7 @@ def test_remote_bp_copy_mid(rb, base, link, remote_ok):
 # blok (SP, reset vektor, prvni vektory) uz zapsany, 7 = vse krome posledniho bloku.
 @pytest.mark.parametrize("j", [0, 1, 7])
 def test_remote_bp_vector_copy(rb, base, link, remote_ok, j):
-    _, want = stage_and_break(rb, link, rb.bl_sym("boot::flashprog::program"), hits=PROG_REST + 1 + j)
+    _, want = stage_and_break(rb, link, rb.bl_sym("boot::flashprog::program"), hits=PROG_REST + 1 + j, expect_r0=APP + 256 * j)
     converged(rb, want)
 
 
@@ -482,7 +503,7 @@ def test_remote_program_error(rb, base, link, remote_ok):
 # ------------------------------------------------------------------------- Task 6: preruseni flash operace (T1)
 
 SCRATCH = 0x0801F000
-FRACTIONS = [0.0, 0.02, 0.1, 0.25, 0.5, 0.75, 0.9, 0.98, 1.2]
+FRACTIONS = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0, 1.1]
 
 
 def _probe(rb):
@@ -531,7 +552,7 @@ F4B = ("F4b: interrupted program of the app vector page (no pending image) -> EC
        "-> Default_Handler with PA1 still high (stays on, hung, battery drain)")
 
 
-@pytest.mark.xfail(strict=True, reason=F4B)
+@pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4B)
 def test_remote_glitch_program_vector(rb, base, remote_ok):
     """Vektorova stranka smazana a reset v prubehu programovani 1. dvojslova, vse z jedne glitch rutiny ze stavu
     aplikace (programovani ze zastaveneho bootloaderu hlasi PGAERR|PGSERR, jako u base). Bez pending obrazu: ocekava
@@ -545,5 +566,8 @@ def test_remote_glitch_program_vector(rb, base, remote_ok):
     rows = _sweep(rb, "remote-program-vector", lambda: _restore_if_needed(rb), bootfi.OP_ERASE_THEN_PROGRAM, APP, n_prog,
                   w=(w0, w1))
     _restore_if_needed(rb)
-    bad = [r for r in rows if r["where"] in ("hang", "off?", "unknown")]
-    assert not bad, f"remote hung/off after an interrupted program: {bad}"
+    bad = [r for r in rows if r["where"] in ("off?", "unknown")]
+    assert not bad, f"remote off/unknown after an interrupted program: {bad}"
+    hangs = [r for r in rows if r["where"] == "hang"]
+    if hangs:
+        raise bootfi.ProductDefect(f"remote hung after an interrupted program: {hangs}")

@@ -66,7 +66,14 @@ void run(void) {
 		P->result = sr ? (0xE0000000u | sr) : n;
 		return; // bkpt v entry
 	}
-	for (volatile uint32_t i = 0; i < P->delay; i++) {}
+	// Stejne telo jako merici smycka nahore (jedno cteni SR, test, inkrement), aby `delay` z mereni odpovidal case:
+	// puvodni smycka s volatile citacem byla ~1,5x pomalejsi (review 2026-10-25), pozdni cast okna se nevzorkovala.
+	uint32_t d = P->delay;
+	uint32_t i = 0;
+	while (i < d) {
+		if (f[SR] & 0x80000000u) break; // bit 31 SR je vzdy 0: jen cteni SR jako v mereni
+		i++;
+	}
 	*(volatile uint32_t *)0xE000ED0Cu = 0x05FA0004u; // AIRCR.SYSRESETREQ
 	for (;;) {}
 }

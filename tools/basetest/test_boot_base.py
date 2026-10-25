@@ -93,26 +93,45 @@ def board():
     b.stop()
 
 
-@pytest.fixture
-def recover(board):
-    """Teardown: base zpet v aplikaci build/-update.bin. Viset = SWD obnova + chyba testu."""
-    yield
-    hung = None
+def base_healthy(board):
+    """(ok, popis): jadro v aplikaci, oblast = build, jen abcd:1234 na USB."""
     try:
         w = board.where()
-        if w["kind"] == "hang":
-            hung = w
-            board.swd_restore()
+        matches = board.app_matches()
+    except Exception as e:  # noqa: BLE001 - sonda / jadro nedostupne
+        return False, f"probe error {e!r}"
     finally:
         board.stop()
+    ids = usb_ids()
+    ok = w["kind"] == "app" and matches and ids == {"abcd:1234"}
+    return ok, f"where={w} app_matches={matches} usb={sorted(ids)}"
+
+
+@pytest.fixture
+def recover(board):
+    """Teardown: base musi byt zdrava (aplikace z buildu, abcd:1234). Zustala-li v bootloaderu po ocekavanem
+    preruseni, nahraje se dobry obraz (produktova cesta). Cokoli jineho (visi, cizi obsah, nic na USB): SWD obnova a
+    test selze nahlas; nejde-li ani to, pytest.exit (BLOCKED), aby dalsi testy neselhavaly na nasledcich."""
+    yield
+    board.stop()
     time.sleep(1.5)
     if usb_ids() == {"abcd:1235"}:
-        res = flash_good()
-        assert res == "ok", f"recovery update failed: {res}"
-    wait_ids("abcd:1234", 15)
-    assert board.app_matches(), "base app region differs from build after recovery"
-    board.stop()
-    assert hung is None, f"base HUNG (recovered by SWD): {hung}"
+        try:
+            if board.where()["kind"] == "bootloader":
+                board.stop()
+                res = flash_good()
+                assert res == "ok", f"recovery update failed: {res}"
+        finally:
+            board.stop()
+    ok, why = base_healthy(board)
+    if ok:
+        return
+    board.swd_restore()
+    time.sleep(2.0)
+    ok2, why2 = base_healthy(board)
+    if not ok2:
+        pytest.exit(f"BLOCKED: base not recoverable by SWD: {why2}", returncode=3)
+    pytest.fail(f"base left in a bad state (repaired by SWD): {why}")
 
 
 def after_power_loss_expect_bootloader(board):
@@ -215,21 +234,48 @@ def test_base_wrong_target_keeps_app(board, recover):
     assert board.app_matches()
 
 
-def test_base_bootloader_idle_with_iwdg(board, recover):
-    """ENTER_BOOTLOADER z aplikace (IWDG bezi, nejde zastavit): 60 s necinnosti bez resetu; reset pak -> aplikace (T8)."""
+IWDG = 0x40003000  # KR, PR +4, RLR +8, SR +0xC (G431)
+DBGMCU_APB1FZR1 = 0xE0042008  # bit 12 DBG_IWDG_STOP
+
+
+def start_iwdg_2s(board):
+    """IWDG ~2 s (LSI 32 kHz /32, RLR 2000) spusteny sondou. IWDG aplikace reset do bootloaderu na G431 neprezije
+    (src/wdg.cpp), takze "bootloader s bezicim IWDG" (T7) se jinak na lavici nevyskytne: tady se vynuti."""
+    board.tcl(f"write_memory 0x{IWDG:08x} 32 {{0xCCCC}}")
+    board.tcl(f"write_memory 0x{IWDG:08x} 32 {{0x5555}}")
+    board.tcl(f"write_memory 0x{IWDG + 4:08x} 32 {{3}}")
+    board.tcl(f"write_memory 0x{IWDG + 8:08x} 32 {{2000}}")
+    wait_until(lambda: board.u32(IWDG + 0xC) == 0, 2, interval=0.05, what="IWDG SR settled")
+    board.tcl(f"write_memory 0x{IWDG:08x} 32 {{0xAAAA}}")
+
+
+def test_base_bootloader_kicks_iwdg(board, recover):
+    """T7: bootloader s bezicim IWDG (2 s) 30 s v necinnosti bez resetu, pak cely update (START maze ~1 s) bez resetu.
+    Kontrola, ze IWDG opravdu bezel: na konci DBG_IWDG_STOP pryc a jadro 3 s zastavit -> musi prijit reset."""
     L = enter_bootloader()
     L.close()
-    board.stop()  # bez openocd: DBG_IWDG_STOP nehraje roli, jadro bezi volne
-    n0 = usb_devnum("1235")
-    time.sleep(60)
-    n1 = usb_devnum("1235")
-    assert n0 is not None and n1 == n0, f"bootloader re-enumerated (reset?) {n0} -> {n1}"
-    board.reset()
-    time.sleep(1.0)
-    w = board.where()
+    start_iwdg_2s(board)
     board.stop()
-    assert w["kind"] == "app", w
-    wait_ids("abcd:1234", 10)
+    n0 = usb_devnum("1235")
+    time.sleep(30)
+    n1 = usb_devnum("1235")
+    assert n0 is not None and n1 == n0, f"bootloader reset while idle with IWDG running: devnum {n0} -> {n1}"
+    # update s bezicim IWDG; aplikace po nem IWDG spusti sama (wdg::start)
+    assert flash_good() == "ok"
+    # negativni kontrola na nove bootloaderu: IWDG spustit, DBG_IWDG_STOP shodit, jadro 3 s zastavit -> reset
+    L = enter_bootloader()
+    L.close()
+    start_iwdg_2s(board)
+    fz = board.u32(DBGMCU_APB1FZR1)
+    board.tcl(f"write_memory 0x{DBGMCU_APB1FZR1:08x} 32 {{0x{fz & ~(1 << 12):08x}}}")
+    m0 = usb_devnum("1235")
+    board.halt()
+    time.sleep(3)
+    board.t.resume()
+    board.stop()
+    time.sleep(2)
+    m1 = usb_devnum("1235")
+    assert m1 != m0, f"control failed: no IWDG reset with the core halted 3 s ({m0} -> {m1}) - IWDG not running?"
 
 
 def test_base_update_x10(board, recover):
@@ -282,7 +328,12 @@ def test_base_bp_erase(board, recover, hit, expect):
     try:
         board.arm(board.bl_sym("boot::flashprog::waitBusy"))
         bg = Bg(lambda: fwclient.Client(L, proto.ADDR_BASE, retries=0).send_image(IMG))
-        assert board.break_then_reset(0, hits=2 * hit - 1, armed=True, timeout=20), "bp not hit"
+        pnb = []
+        # zasah 2n-1 = pred STRT stranky n: v CR je jeste PNB predchozi stranky (16 + n - 2); n = 1: zadna
+        check = lambda: pnb.append((board.u32(0x40022014) >> 3) & 0x7F)  # noqa: E731
+        assert board.break_then_reset(0, hits=2 * hit - 1, armed=True, timeout=20, before_reset=check), "bp not hit"
+        if hit > 1:
+            assert pnb == [16 + hit - 2], f"bp hit {2 * hit - 1} is not before the erase of app page {hit}: PNB {pnb}"
         print("client:", bg.join())
     finally:
         L.close()
@@ -309,7 +360,8 @@ F4 = "F4: interrupted page0 programming -> ECC double error -> bootloader NMI ->
 F5 = "F5: trailer page lost -> NoTrailer accepted (BOOT_REQUIRE_TRAILER=0) -> truncated app boots and faults"
 
 
-@pytest.mark.parametrize("k", [pytest.param(0, marks=pytest.mark.xfail(strict=True, reason=F4)), 1, 2, 128, 255])
+@pytest.mark.parametrize("k", [pytest.param(0, marks=pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4)),
+                               1, 2, 128, 255])
 def test_base_bp_commit_page0(board, recover, k):
     L = enter_bootloader()
     try:
@@ -323,6 +375,11 @@ def test_base_bp_commit_page0(board, recover, k):
     time.sleep(1.0)
     w = board.where()
     print(f"k={k}: after reset {w}, ECCR {board.eccr():#x}, app[0:16] {board.flash_read(APP, 16).hex()}")
+    if w["kind"] == "hang":
+        eccr = board.eccr()
+        board.swd_restore()  # sama obnovit: recover pak hlida jen chyby harnessu
+        board.stop()
+        raise bootfi.ProductDefect(f"after a reset during the page0 commit: {w}, ECCR {eccr:#x}")
     board.stop()
     assert w["kind"] in ("bootloader", "app"), f"after a reset during the page0 commit: {w}"
 
@@ -347,7 +404,9 @@ def test_base_bp_after_commit(board, recover):
 
 OUT = os.environ.get("BASETEST_OUT", "/tmp")
 SCRATCH = 0x0801F000  # posledni stranka oblasti aplikace pred nastavenim; obraz ji nepouziva (prazdna)
-FRACTIONS = [0.0, 0.02, 0.1, 0.25, 0.5, 0.75, 0.9, 0.98, 1.2]
+# Podil zmerene doby operace (glitch delay a mereni maji od 2026-10-25 stejne telo smycky). Huste v cele dobe operace,
+# aby kratke okno ECC chyby (u dvojslova ~25-50 %) trefil kazdy beh.
+FRACTIONS = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0, 1.1]
 
 
 def glitch_log(name, rows):
@@ -406,7 +465,7 @@ def test_base_glitch_erase_vector_page(board, recover):
     assert not hangs, f"base hung after an interrupted erase: {hangs}"
 
 
-@pytest.mark.xfail(strict=True, reason=F4)
+@pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4)
 def test_base_glitch_program_vector(board, recover):
     """Vektorova stranka smazana a hned reset v prubehu programovani 1. dvojslova (SP, reset vektor), vse z jedne glitch
     rutiny ve stavu aplikace (0..120 % doby programovani). Nikdy nesmi viset."""
@@ -422,10 +481,11 @@ def test_base_glitch_program_vector(board, recover):
     rows = _sweep(board, "base-program-vector", prepare, bootfi.OP_ERASE_THEN_PROGRAM, APP, n_prog, w=(w0, w1))
     board.swd_restore()
     hangs = [r for r in rows if r["where"] == "hang"]
-    assert not hangs, f"base hung after an interrupted program: {hangs}"
+    if hangs:
+        raise bootfi.ProductDefect(f"base hung after an interrupted program: {hangs}")
 
 
-@pytest.mark.xfail(strict=True, reason=F5)
+@pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F5)
 def test_base_glitch_erase_trailer_page(board, recover):
     """Reset v prubehu mazani posledni pouzite stranky (trailer) platne aplikace: bootloader nebo aplikace, nikdy viset."""
     last = APP + (len(IMG) - 1) // 2048 * 2048
@@ -439,4 +499,5 @@ def test_base_glitch_erase_trailer_page(board, recover):
     rows = _sweep(board, "base-erase-trailer", prepare, bootfi.OP_ERASE, last, n_erase)
     board.swd_restore()
     hangs = [r for r in rows if r["where"] == "hang"]
-    assert not hangs, f"base hung after an interrupted trailer-page erase: {hangs}"
+    if hangs:
+        raise bootfi.ProductDefect(f"base hung after an interrupted trailer-page erase: {hangs}")

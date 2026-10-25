@@ -37,12 +37,18 @@ BOARDS = {
 }
 
 
+class ProductDefect(AssertionError):
+    """Prokazana vada produktu (ne harnessu): jen tuto vyjimku prijimaji xfail(raises=ProductDefect) testy F4/F4b/F5,
+    jakakoli jina chyba v nich je normalni selhani."""
+
+
 def glitch_bin() -> str:
     """Prelozi glitch.c (Thumb-1, bezi na M0+ i M4) do glitch/build/glitch.bin, je-li starsi nez zdroj."""
     src = os.path.join(GLITCH_DIR, "glitch.c")
     out_dir = os.path.join(GLITCH_DIR, "build")
     elf, binf = os.path.join(out_dir, "glitch.elf"), os.path.join(out_dir, "glitch.bin")
-    if not os.path.exists(binf) or os.path.getmtime(binf) < os.path.getmtime(src):
+    ld = os.path.join(GLITCH_DIR, "glitch.ld")
+    if not os.path.exists(binf) or os.path.getmtime(binf) < max(os.path.getmtime(src), os.path.getmtime(ld)):
         os.makedirs(out_dir, exist_ok=True)
         subprocess.run(["arm-none-eabi-gcc", "-mcpu=cortex-m0plus", "-mthumb", "-Os", "-ffreestanding", "-nostdlib",
                         "-T", os.path.join(GLITCH_DIR, "glitch.ld"), src, "-o", elf], check=True)
