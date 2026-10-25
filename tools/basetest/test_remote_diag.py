@@ -3,7 +3,8 @@ slots in the W25Q32, watchdogs and fault capture (Task 6D-2).
 Precondition: the base and the remote are paired (test_pairing.py), the remote runs new firmware with diag.
 
 A remote reset releases PA1 and the remote SWITCHES OFF (nobody switches it back on at the bench): tests that really trigger a fault/watchdog
-are `needs_user` (they run only with `-m needs_user` and a person at the bench who switches the remote on)."""
+are `needs_user` (they run only with `-m needs_user` and a person at the bench who switches the remote on). A remote powered from
+USB-C or the ST-Link's 3.3 V stays on through the reset; the tests accept both (warm reset: the RAM ring keeps the old run's records)."""
 
 import os
 import struct
@@ -311,40 +312,51 @@ def test_watchdogs_do_not_trip(paired, link, remote_probe):
           f"boot_id {boot_id:#06x} unchanged, head {head}, max kick gap {gap} ms, boot-to-loop {boot_ms} ms")
 
 
+# TAMP->BKP1R on the remote (STM32G071): boot state, the low 16 bits count boots (diag::init); survives a warm reset
+REMOTE_BKP1R = 0x4000B104
+
+
 def _inject_and_wait_off(remote, paired, value: int, what: str):
-    """Writes fault::testInject; returns the time [s] until the remote is lost (the probe can no longer read = switched off)."""
+    """Writes fault::testInject; returns the time [s] until the remote reset: the probe can no longer read (switched off) or the
+    boot counter in BKP1R changed (a remote powered from USB/ST-Link stays on through the reset)."""
+    bkp0 = remote.read_uint(REMOTE_BKP1R)
     t0 = time.monotonic()
     remote.write(remote.sym("fault::testInject"), bytes([value]))
-    off = None
+    off, powered = None, False
     while time.monotonic() - t0 < 15:
         try:
-            remote.tcl("read_memory 0x20000000 32 1")
+            if remote.read_uint(REMOTE_BKP1R) != bkp0:
+                off, powered = time.monotonic() - t0, True
+                break
             if remote.core_state()["halted"]:
                 remote.resume()
         except Exception:
             off = time.monotonic() - t0
             break
-        if not paired.read_bool("Bluetooth::_streamOpen") and off is None:
-            off = time.monotonic() - t0
-            break
-        time.sleep(0.1)
+        time.sleep(0.05)
     assert off is not None, f"{what}: remote still running 15 s after the injection"
     remote.stop()  # openocd on a switched-off target
-    tell_user(f"{what}: remote se vypnul ({off:.1f} s po injekci). Zapnete ho tlacitkem ON/OFF (do 3 min).")
+    if powered:
+        print(f"{what}: remote reset after {off:.1f} s and stayed powered")
+    else:
+        tell_user(f"{what}: remote se vypnul ({off:.1f} s po injekci). Zapnete ho tlacitkem ON/OFF (do 3 min).")
+    # The base notices the lost link only after the BLE supervision timeout: wait for the drop before waiting for the reconnect
+    wait_until(lambda: not paired.read_bool("Bluetooth::_streamOpen"), 20, interval=0.2, what="base lost the old link")
     wait_until(lambda: paired.read_bool("Bluetooth::_streamOpen"), 180, interval=1.0, what="remote switched on and reconnected")
     wait_until(lambda: remote_alive(paired), 15, interval=0.5, what="remote alive")
     return off
 
 
 def _records_before_boot(link):
-    """Records loaded from slots (before BOOT) and BOOT."""
-    _, recs, _ = read_range(link, 0, 1)
-    nxt = recs[-1][0] + 1
-    while not any(r[1] == CODE_BOOT for r in recs):
-        _, more, nxt = read_range(link, nxt, nxt + 1)
-        recs += more
-    i = next(i for i, r in enumerate(recs) if r[1] == CODE_BOOT)
-    return recs[:i], recs[i]
+    """Records before the newest BOOT back to the previous BOOT, and the newest BOOT. After a power-off these are the records
+    loaded from slots; after a warm reset the RAM ring still holds the crashed run's own records there."""
+    _, head = head_and_boot(link)
+    _, recs, _ = read_range(link, 0, head)
+    boots = [i for i, r in enumerate(recs) if r[1] == CODE_BOOT]
+    assert boots, recs
+    last = boots[-1]
+    first = boots[-2] + 1 if len(boots) > 1 else 0
+    return recs[first:last], recs[last]
 
 
 @pytest.mark.needs_user
