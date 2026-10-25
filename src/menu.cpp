@@ -120,7 +120,7 @@ static void onNoPcEnter(void* userData) {
     nav.push(&settingsScreen);
 }
 
-static ui::SplashScreen noPcScreen("MIDIControl", "Odpojeno", "Cekam na PC", onNoPcEnter);
+static ui::SplashScreen noPcScreen("Odpojeno", "", "Cekam na PC", onNoPcEnter);
 
 // Pushes the overlay when the main menu is on top without a PC, removes it when it is on top and the PC is back
 static void syncNoPcScreen() {

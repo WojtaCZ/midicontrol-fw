@@ -242,12 +242,16 @@ namespace router {
 		}
 	}
 
+	// The payload tells the remote whether the PC is alive; a change is sent at once (the remote's "Cekam na PC" splash)
 	static void sendKeepaliveToRemote() {
+		static bool lastPc = false;
 		duration now = stmcpp::systick::getDuration();
-		if ((now - _lastKeepalive) < KEEPALIVE_PERIOD) return;
+		uint8_t pc = static_cast<uint8_t>(isPcAlive());
+		if ((now - _lastKeepalive) < KEEPALIVE_PERIOD && (pc != 0) == lastPc) return;
 		_lastKeepalive = now;
 		if (!Bluetooth::canSendData()) return;
-		sendSimple(protocol::ADDR_REMOTE, MsgType::KEEPALIVE, nullptr, 0, Transport::BLE);
+		lastPc = pc != 0;
+		sendSimple(protocol::ADDR_REMOTE, MsgType::KEEPALIVE, &pc, 1, Transport::BLE);
 	}
 
 	static void requestBootloader() {
