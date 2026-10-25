@@ -1,6 +1,6 @@
-"""PC strana USB-CDC linku base: pyserial + ctecí vlakno -> FrameParser -> fronta paketu.
+"""PC side of the base USB-CDC link: pyserial + reader thread -> FrameParser -> packet queue.
 
-CDC nese jen protokolove ramce; vse mimo ramec konci v `.stray` (musi zustat prazdne)."""
+The CDC carries only protocol frames; everything outside a frame ends up in `.stray` (must stay empty)."""
 
 import glob
 import os
@@ -25,8 +25,8 @@ def _read(path):
 
 
 def _sysfs_ports():
-    """[(tty jmeno, major:minor, bInterfaceNumber, interface retezec)] pro ttyACM s VID:PID abcd:1234
-    (bez udev, jen sysfs). Base ma dve CDC: protokol (rozhrani 00) a log ("MIDIControl log")."""
+    """[(tty name, major:minor, bInterfaceNumber, interface string)] for ttyACM with VID:PID abcd:1234
+    (no udev, sysfs only). The base has two CDCs: protocol (interface 00) and log ("MIDIControl log")."""
     found = []
     for tty in sorted(glob.glob("/sys/class/tty/ttyACM*")):
         itf = os.path.realpath(os.path.join(tty, "device"))
@@ -45,7 +45,7 @@ LOG_ITF_NAME = "MIDIControl log"
 
 
 def _node(name, majmin) -> str:
-    """/dev/<name>; v kontejneru bez udev ho vytvori z sysfs `dev` (sudo mknod)."""
+    """/dev/<name>; in a container without udev it creates it from the sysfs `dev` (sudo mknod)."""
     node = f"/dev/{name}"
     if majmin:
         major, minor = (int(x) for x in majmin.split(":"))
@@ -60,8 +60,8 @@ def _node(name, majmin) -> str:
 
 
 def find_port(interface: str = PROTOCOL_ITF, name: str = None) -> str:
-    """Port CDC base: protokolove rozhrani (bInterfaceNumber 00), nebo s `name` rozhrani podle retezce
-    (log CDC). Nikdy nevraci jine rozhrani nez pozadovane."""
+    """Base CDC port: the protocol interface (bInterfaceNumber 00), or with `name` the interface matching the string
+    (log CDC). Never returns an interface other than the requested one."""
     if name is None:
         by_id = sorted(glob.glob(f"/dev/serial/by-id/*ABCD_1234*-if{interface}"))
         if by_id:
@@ -74,13 +74,13 @@ def find_port(interface: str = PROTOCOL_ITF, name: str = None) -> str:
 
 
 class KeepaliveTracker:
-    """Poradi KEEPALIVE odeslanych base (vlastni i pozadove). Base odpovida v poradi a KEEPALIVE_ACK nese
-    vlastni pid (nevraci nas), takze se paruje FIFO: ACK patri nejstarsimu neprosle odeslanemu keepalive.
-    Pozadovy (bg) ACK se spolkne, testovy se preda dal. Zaznamy starsi nez `expiry` s se zahazuji."""
+    """Order of KEEPALIVEs sent to the base (the test's own and the background ones). The base answers in order and KEEPALIVE_ACK carries
+    its own pid (it does not echo ours), so matching is FIFO: an ACK belongs to the oldest keepalive that has not expired yet.
+    A background (bg) ACK is swallowed, a test one is passed on. Records older than `expiry` s are discarded."""
 
     def __init__(self, expiry=1.0):
         self.expiry = expiry
-        self._q = []  # [(cas, bg)]
+        self._q = []  # [(time, bg)]
         self._lock = threading.Lock()
 
     def sent(self, bg, now=None):
@@ -88,7 +88,7 @@ class KeepaliveTracker:
             self._q.append((time.monotonic() if now is None else now, bg))
 
     def ack(self, now=None) -> bool:
-        """True = ACK patri pozadovemu keepalive (spolknout)."""
+        """True = the ACK belongs to a background keepalive (swallow it)."""
         now = time.monotonic() if now is None else now
         with self._lock:
             self._q = [e for e in self._q if now - e[0] < self.expiry]
@@ -102,15 +102,15 @@ class Link:
         self.port = port or (None if ser else find_port())
         self.ser = ser or serial.Serial(self.port, 115200, timeout=0.05, write_timeout=2)
         self.parser = proto.FrameParser()
-        self._txparser = proto.FrameParser()  # pozoruje vlastni zapisy kvuli keepalive evidenci
+        self._txparser = proto.FrameParser()  # observes our own writes for the keepalive bookkeeping
         self.stray = b""
         self.q = queue.Queue()
-        self._backlog = []  # pakety prectene z fronty, ktere nesedely na predikat
+        self._backlog = []  # packets read from the queue that did not match the predicate
         self._pid = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self.paused = False  # True: nesilat keepalive a neodpovidat na keepalive base (PC "mlci")
-        self.error = None  # vyjimka z vlakna; recv/send ji znovu vyhodi
+        self.paused = False  # True: do not send keepalive and do not answer the base's keepalive (the PC "goes silent")
+        self.error = None  # exception from the thread; recv/send re-raise it
         self.keepalive_acks = 0
         self.keepalives_sent = 0
         self._ka_track = KeepaliveTracker()
@@ -126,7 +126,7 @@ class Link:
     def _guard(self, fn, *args):
         try:
             fn(*args)
-        except BaseException as e:  # noqa: BLE001 - zaznamenat a ukazat testu
+        except BaseException as e:  # noqa: BLE001 - record it and surface it to the test
             self.error = e
 
     def _check(self):
@@ -136,7 +136,7 @@ class Link:
     def pause_keepalive(self, paused=True):
         self.paused = paused
 
-    # -- vlakna
+    # -- threads
     def _read_loop(self):
         while not self._stop.is_set():
             try:
@@ -157,7 +157,7 @@ class Link:
                 if p.src == proto.ADDR_BASE and p.mtype == proto.MT.KEEPALIVE:
                     if not self.paused:
                         self.send_raw(proto.encode(proto.ADDR_PC, p.src, p.pid, proto.MT.KEEPALIVE_ACK))
-                    # ...a take ho dorucit testu (recv s pred)
+                    # ...and also deliver it to the test (recv with pred)
                 elif p.mtype == proto.MT.KEEPALIVE_ACK and self._ka_track.ack():
                     self.keepalive_acks += 1
                     continue
@@ -189,7 +189,7 @@ class Link:
                 self.ser.flush()
 
     def _observe(self, b):
-        """Zapamatuje keepalive pro base ve vlastnich zapisech (i surovych), aby sedelo parovani ACK."""
+        """Remembers keepalives for the base in our own writes (raw ones too), so that the ACK matching works out."""
         for p in self._txparser.feed(b):
             if p.dst == proto.ADDR_BASE and p.mtype == proto.MT.KEEPALIVE:
                 self._ka_track.sent(False)
@@ -202,7 +202,7 @@ class Link:
         with self._lock:
             if bg:
                 self._ka_track.sent(True)
-                self._txparser.feed(frame)  # nezapocitat podruhe
+                self._txparser.feed(frame)  # do not count it a second time
             else:
                 self._observe(frame)
             self.ser.write(frame)
@@ -210,7 +210,7 @@ class Link:
         return pid
 
     def send(self, pkt: proto.Packet) -> int:
-        """Odesle paket; pid se vyplni z jednoho citace. Vraci pouzity pid."""
+        """Sends a packet; the pid is filled in from a single counter. Returns the pid used."""
         return self._send(pkt)
 
     def send_msg(self, mtype, payload=b"", dst=proto.ADDR_BASE) -> int:
@@ -223,7 +223,7 @@ class Link:
         return None
 
     def recv(self, timeout: float, pred=None):
-        """Prvni paket, ktery splnuje pred (None = jakykoli). Ostatni zustavaji pro dalsi recv()."""
+        """First packet that satisfies pred (None = any). The others remain for the next recv()."""
         end = time.monotonic() + timeout
         while True:
             self._check()
@@ -239,7 +239,7 @@ class Link:
                 return None
 
     def drain(self) -> list:
-        """Zahodi vse, co dorazilo; vraci to."""
+        """Discards everything that has arrived; returns it."""
         out = list(self._backlog)
         self._backlog.clear()
         while True:
@@ -249,12 +249,12 @@ class Link:
                 return out
 
     def expect_silence(self, seconds: float) -> list:
-        """Ceka `seconds`; vraci vse, co za tu dobu (a driv) dorazilo - prazdny seznam = ticho."""
+        """Waits `seconds`; returns everything that arrived during that time (and before) - an empty list = silence."""
         time.sleep(seconds)
         return self.drain()
 
     def detach(self):
-        """Zastavi vlakna a zavre port (pred resetem base, kdy CDC zmizi). Pak attach()."""
+        """Stops the threads and closes the port (before a base reset, when the CDC disappears). Then attach()."""
         self._stop.set()
         self._reader.join(2)
         if self._ka:
@@ -265,9 +265,9 @@ class Link:
             pass
 
     def attach(self, timeout=15.0, settle=2.0):
-        """Po detach(): pocka na znovu vyctene CDC, otevre ho a znovu spusti vlakna (keepalive, je-li zapnuty).
-        `settle`: nejdriv pockat, nez stare CDC zmizi (reset -> bootloader -> aplikace), jinak se otevre jeste stary
-        /dev/ttyACMn a cteni pak skonci SerialException."""
+        """After detach(): waits for the CDC to be enumerated again, opens it and restarts the threads (keepalive, if enabled).
+        `settle`: first wait for the old CDC to disappear (reset -> bootloader -> application), otherwise the old
+        /dev/ttyACMn is opened and the read then ends with SerialException."""
         time.sleep(settle)
         end = time.monotonic() + timeout
         last = None
@@ -276,7 +276,7 @@ class Link:
                 self.port = find_port()
                 self.ser = serial.Serial(self.port, 115200, timeout=0.05, write_timeout=2)
                 break
-            except Exception as e:  # noqa: BLE001 - port jeste neni
+            except Exception as e:  # noqa: BLE001 - the port is not there yet
                 last = e
                 time.sleep(0.3)
         else:

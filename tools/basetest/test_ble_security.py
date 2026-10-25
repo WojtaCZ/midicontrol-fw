@@ -1,10 +1,10 @@
-"""Base se pripojuje a bonduje jen s ovladacem (Review Focus 5), provadi ramce jen od zabezpeceneho ovladace
-(final review I1) a automat prikazoveho rezimu neztraci prikazy.
+"""The base connects and bonds only with the controller (Review Focus 5), executes frames only from a secured controller
+(final review I1) and the command-mode state machine does not lose commands.
 
-Cizi zarizeni: PC (BlueZ) se k base umi pripojit, jen kdyz base advertisuje (normalne ne, viz report) a BlueZ spojeni
-sam hned ukonci, takze %STREAM_OPEN% nikdy neprijde. Proto se stavove zpravy modulu vkladaji pres sondu do
-Bluetooth::_statusQueue (dbg.inject_status) - firmware na ne reaguje stejne jako na skutecne; odpovedi base jdou
-skutecne do RN4870 a jsou videt na D3."""
+Foreign device: the PC (BlueZ) can connect to the base only when the base advertises (normally it does not, see the report) and BlueZ
+drops the link right away, so %STREAM_OPEN% never arrives. Therefore the module status messages are injected via the probe into
+Bluetooth::_statusQueue (dbg.inject_status) - the firmware reacts to them the same as to real ones; the base's replies really
+go to the RN4870 and are visible on D3."""
 
 import time
 
@@ -16,7 +16,7 @@ import proto
 from conftest import remote_alive, wait_until
 from proto import ADDR_BASE, ADDR_REMOTE, MT
 
-STRANGER = "10B1DF04F934"  # adresa BT adapteru PC
+STRANGER = "10B1DF04F934"  # address of the PC's BT adapter
 REMOTE = "D88039FE5996"
 BAUD = 115200
 
@@ -27,7 +27,7 @@ def tx_text(sr) -> bytes:
 
 @pytest.fixture
 def remote_away(base, remote_probe):
-    """RN4870 remote v resetu, base odpojena; na konci uvolnit a pockat na zabezpecene opetovne spojeni."""
+    """Remote RN4870 in reset, base disconnected; at the end release it and wait for a secured reconnection."""
     remote_probe.hold_ble_reset(True)
     try:
         wait_until(lambda: not base.read_bool("Bluetooth::_connected"), 10, what="base disconnected")
@@ -51,18 +51,18 @@ def test_inbound_stranger_dropped_not_secured(remote_away):
         bonded = base.read_bool("Bluetooth::_bonded")
     finally:
         la.finish(proc, sr, 30)
-        base.inject_status("DISCONNECT")  # stav firmware zpet (modul ve skutecnosti pripojen nebyl)
+        base.inject_status("DISCONNECT")  # firmware state back (the module was not actually connected)
     tx = tx_text(sr)
     assert b"K,1\r" in tx, f"stranger not disconnected: {tx!r}"
     assert b"B\r" not in tx, f"stranger got B (silent bond): {tx!r}"
     assert not bonded
 
 
-RX_RING_SIZE = 512  # Bluetooth::_rxRing: RingBuffer<uint8_t, 512> = 512 B dat, _head (u32), _tail (u32)
+RX_RING_SIZE = 512  # Bluetooth::_rxRing: RingBuffer<uint8_t, 512> = 512 B of data, _head (u32), _tail (u32)
 
 
 def inject_ble_data(base, data: bytes):
-    """Base: vlozi bajty do Bluetooth::_rxRing, jako by prisly z RN4870 v datovem rezimu (rozdeli je process())."""
+    """Base: injects bytes into Bluetooth::_rxRing as if they came from the RN4870 in data mode (process() splits them)."""
     addr = base.sym("Bluetooth::_rxRing")
     with base.safe_halt():
         head = int.from_bytes(base.read(addr + RX_RING_SIZE, 4), "little")
@@ -75,9 +75,9 @@ def inject_ble_data(base, data: bytes):
 
 
 def test_frames_need_secured_remote(remote_away):
-    """Podvrzena adresa ovladace: %CONNECT% s adresou ovladace + %STREAM_OPEN%, ale bez %SECURED% -> SET_CURRENT
-    z BLE se neprovede (PA4 beze zmeny), %ERR_SEC% -> K,1. Kladna kontrola: po %SECURED% na spojeni se spravnou
-    adresou se stejne vlozeny ramec provede (cesta vkladani funguje)."""
+    """Spoofed controller address: %CONNECT% with the controller's address + %STREAM_OPEN%, but without %SECURED% -> SET_CURRENT
+    from BLE is not executed (PA4 unchanged), %ERR_SEC% -> K,1. Positive check: after %SECURED% on a link with the correct
+    address the same injected frame is executed (the injection path works)."""
     base = remote_away
     ssr0 = base.gpio("A", 4)
     proc, sr = la.start(9, channels="D2,D3", samplerate="1M")
@@ -88,14 +88,14 @@ def test_frames_need_secured_remote(remote_away):
         base.inject_status(f"CONNECT,0,{REMOTE}")
         time.sleep(0.3)
         base.inject_status("STREAM_OPEN")
-        time.sleep(1.0)  # B jde do modulu (ve skutecnosti nepripojen), zadny %SECURED%
+        time.sleep(1.0)  # B goes to the module (not actually connected), no %SECURED%
         inject_ble_data(base, proto.encode(ADDR_REMOTE, ADDR_BASE, 0x61, MT.SET_CURRENT, bytes([1 - ssr0])))
         time.sleep(0.5)
         ssr_unsecured = base.gpio("A", 4)
         accepted_before = base.read_bool("Bluetooth::_peerAccepted")
         base.inject_status("ERR_SEC")
         time.sleep(1.5)
-        # Kladna kontrola na novem spojeni
+        # Positive check on a new connection
         base.inject_status(f"CONNECT,0,{REMOTE}")
         time.sleep(0.3)
         base.inject_status("STREAM_OPEN")
@@ -111,7 +111,7 @@ def test_frames_need_secured_remote(remote_away):
         if base.gpio("A", 4) != ssr0 and base.read_bool("Bluetooth::_peerAccepted"):
             inject_ble_data(base, proto.encode(ADDR_REMOTE, ADDR_BASE, 0x63, MT.SET_CURRENT, bytes([ssr0])))
             time.sleep(0.5)
-        base.inject_status("DISCONNECT")  # stav firmware zpet (modul ve skutecnosti pripojen nebyl)
+        base.inject_status("DISCONNECT")  # firmware state back (the module was not actually connected)
     tx = tx_text(sr)
     assert ssr_unsecured == ssr0, "SET_CURRENT from an unsecured link was executed"
     assert accepted_before is False, "peer accepted without %SECURED%"
@@ -122,20 +122,20 @@ def test_frames_need_secured_remote(remote_away):
 
 
 def test_unsecured_remote_link_kicked(remote_away):
-    """Re-review I-1: spojeni s adresou ovladace, %STREAM_OPEN%, ale zadny %SECURED%/%ERR_SEC% -> base po ~3 s posle
-    B znovu a po dalsich ~3 s K,1 (pak auto-reconnect za 5 s). Spojeni bez prijateho protejsku nesmi viset navzdy."""
+    """Re-review I-1: a link with the controller's address, %STREAM_OPEN%, but no %SECURED%/%ERR_SEC% -> after ~3 s the base sends
+    B again and after another ~3 s K,1 (then auto-reconnect after 5 s). A link without an accepted peer must not hang forever."""
     base = remote_away
     proc, sr = la.start(12, channels="D2,D3", samplerate="1M")
     time.sleep(1.0)
     try:
         base.inject_status(f"CONNECT,0,{REMOTE}")
         time.sleep(0.3)
-        base.inject_status("STREAM_OPEN")  # t0: B, zadna odpoved (modul ve skutecnosti nepripojen)
+        base.inject_status("STREAM_OPEN")  # t0: B, no reply (the module is not actually connected)
         time.sleep(8.0)
         accepted = base.read_bool("Bluetooth::_peerAccepted")
     finally:
         la.finish(proc, sr, 30)
-        base.inject_status("DISCONNECT")  # stav firmware zpet
+        base.inject_status("DISCONNECT")  # firmware state back
     data, _ = la.uart_timed(sr, la.CH["base_ble_tx"], BAUD, 1e6)
     tx = bytes(b for _, b in data if 32 <= b < 127 or b == 13)
     assert not accepted, "peer accepted without %SECURED%"
@@ -145,7 +145,7 @@ def test_unsecured_remote_link_kicked(remote_away):
 
 
 def test_connect_while_scanning_kicked(remote_away):
-    """%CONNECT% behem skenovani parovani (nikdo se k nam pripojovat nema) -> K,1, sken bezi dal."""
+    """%CONNECT% during the pairing scan (nobody is supposed to connect to us) -> K,1, the scan keeps running."""
     base = remote_away
     proc, sr = la.start(8, channels="D2,D3", samplerate="1M")
     time.sleep(1.0)
@@ -160,7 +160,7 @@ def test_connect_while_scanning_kicked(remote_away):
     finally:
         la.finish(proc, sr, 30)
         base.inject_status("DISCONNECT")
-        # pairing doběhne timeoutem (15 s), aby fixture mohla obnovit spojení s ovladačem
+        # pairing runs out by timeout (15 s), so that the fixture can restore the link to the controller
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") not in (1, 2, 3), 20, interval=0.5, what="pairing ended")
     tx = tx_text(sr)
     after_f = tx[tx.index(b"F\r"):]
@@ -169,19 +169,19 @@ def test_connect_while_scanning_kicked(remote_away):
     assert not accepted
 
 
-SETTINGS_REMOTE_ADDR_OFFSET = 8  # settings::ramCopy.remoteAddr (za 8 B dat verze 1, src/settings.cpp)
+SETTINGS_REMOTE_ADDR_OFFSET = 8  # settings::ramCopy.remoteAddr (after the 8 B of version 1 data, src/settings.cpp)
 
 
 def test_no_reconnect_without_stored_remote(remote_away):
-    """Prazdna adresa ovladace (upgrade z nastaveni v1, ruling R32 b): base se k nicemu nepripojuje (zadne Z/C kazdych
-    5 s). Adresa se smaze jen v RAM kopii nastaveni (flash beze zmeny) a na konci se vrati. Kladna kontrola: po
-    vraceni adresy prijde "C" do ~6 s. Napoveda "Sparuj ovladac" v titulku hlavniho menu se kontroluje okem."""
+    """Empty controller address (upgrade from settings v1, ruling R32 b): the base does not connect to anything (no Z/C every
+    5 s). The address is erased only in the RAM copy of the settings (flash unchanged) and restored at the end. Positive check: after
+    the address is restored a "C" arrives within ~6 s. The "Sparuj ovladac" hint in the main menu title is checked by eye."""
     base = remote_away
     addr = base.sym("settings::ramCopy") + SETTINGS_REMOTE_ADDR_OFFSET
     saved = base.read(addr, 13)
     assert saved[:12].decode(errors="replace") == REMOTE, f"stored remote {saved!r}"
     proc, sr = la.start(20, channels="D2,D3", samplerate="1M")
-    time.sleep(1.0)  # zachyt bezi ~1 s pred smazanim
+    time.sleep(1.0)  # the capture runs ~1 s before the erase
     try:
         base.write(addr, b"\0")
         time.sleep(12.0)
@@ -195,10 +195,10 @@ def test_no_reconnect_without_stored_remote(remote_away):
     def text(t0, t1):
         return bytes(b for t, b in data if t0 <= t < t1)
 
-    # 2.5 s: rezerva na start zachytu a pokus o pripojeni rozbehnuty tesne pred smazanim.
-    # Adresa se vraci v ~13.0 s pythonovskeho casu, ale zachyt (sigrok) startuje pozdeji nez hodiny Pythonu, takze
-    # okamzity reconnect po vraceni vychazi v case zachytu uz kolem 12.98 s. Zaporne okno proto konci o 1 s driv
-    # (12.0) a kladne okno od nej zacina; zaporne okno (9.5 s) stale pokryva vic nez jeden 5 s interval pripojeni.
+    # 2.5 s: margin for the capture start and for a connection attempt started just before the erase.
+    # The address is restored at ~13.0 s of Python time, but the capture (sigrok) starts later than the Python clock, so
+    # the immediate reconnect after the restore lands at around 12.98 s of capture time. The negative window therefore ends 1 s earlier
+    # (12.0) and the positive window starts from there; the negative window (9.5 s) still covers more than one 5 s connection interval.
     assert b"C\r" not in text(2.5, 12.0), f"reconnect attempt while no remote was stored: {text(2.5, 12.0)!r}"
     assert b"C\r" in text(12.0, 21.0), f"no reconnect after the address was restored: {text(12.0, 21.0)!r}"
 
@@ -211,10 +211,10 @@ def test_pairing_ignores_foreign_connect(remote_away):
         assert base.call("Bluetooth::startPairing()") == 0
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") == dbg.PAIR_SCANNING, 2, what="SCANNING")
         time.sleep(0.5)
-        base.inject_status(f"{REMOTE},0,MIDIControlRemote,,F5")  # reklama remote -> X, C,0,<remote>
+        base.inject_status(f"{REMOTE},0,MIDIControlRemote,,F5")  # remote advertisement -> X, C,0,<remote>
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") == dbg.PAIR_CONNECTING, 2, what="CONNECTING")
         time.sleep(0.5)
-        base.inject_status(f"CONNECT,0,{STRANGER}")  # pripoji se nekdo jiny
+        base.inject_status(f"CONNECT,0,{STRANGER}")  # somebody else connects
         time.sleep(1.5)
         state = base.read_u8("Bluetooth::_pairingState")
     finally:
@@ -229,10 +229,10 @@ def test_pairing_ignores_foreign_connect(remote_away):
 
 
 def test_command_queued_during_exit_survives(base):
-    """Prikaz pridany do fronty, kdyz automat ceka na END po '---' (EXIT_CMD), se musi odeslat.
-    Stav se nastavi pres sondu v bezpecnem miste smycky: uloha "V" dobehla (_jobIndex = _jobCount = 1, EXIT_CMD,
-    END jeste neprisel) a za ni je pridany "D" (_jobCount = 2) - presne to, co udela queueCommand() v tu chvili.
-    Casove razitko automatu je stare, takze EXIT_TIMEOUT vyprsi hned po pokracovani."""
+    """A command added to the queue while the state machine waits for END after '---' (EXIT_CMD) must be sent.
+    The state is set via the probe at a safe point of the loop: job "V" has finished (_jobIndex = _jobCount = 1, EXIT_CMD,
+    END has not arrived yet) and a "D" is added after it (_jobCount = 2) - exactly what queueCommand() does at that moment.
+    The state machine's timestamp is old, so EXIT_TIMEOUT expires right after resuming."""
     jobs, count, index = base.sym("Bluetooth::_jobCommands"), base.sym("Bluetooth::_jobCount"), base.sym("Bluetooth::_jobIndex")
     state, saw_end = base.sym("Bluetooth::_engineState"), base.sym("Bluetooth::_sawEnd")
     proc, sr = la.start(5, channels="D2,D3", samplerate="1M")

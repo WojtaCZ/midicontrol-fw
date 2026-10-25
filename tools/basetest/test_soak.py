@@ -1,16 +1,16 @@
-"""Soak celeho systemu (Task 7C): remote (klavesy pres ST-Link) <-> base <-> PC harness, `SOAK_SECONDS` (default 600).
-Cyklus (~3 s): PLAY z remote (klavesy 406 + ENTER) -> harness potvrdi, SIGNAL_PLAYING, 3x SIGNAL_ANCHOR, NOW_PLAYING_INFO,
-USB-MIDI noty na base (DIN nelze overit, bench DIN link je rozbity: jen se pozoruje, ze zapis projde a log je cisty),
-SIGNAL_STOPPED. Kazdych 10 s DIAG_GET na remote s merenim latence DIAG_GET -> DIAG_RESP (R28). Pocitadla po iteracich
-jdou do CSV (`SOAK_OUT`, default <tmp>/basetest-soak/soak.csv), na konci se vypise souhrn.
-CRC: base BLE strana se NEMERI (bluetooth.cpp nema pocitadlo); CDC PC -> base: router::_badFrames se po hlaseni nuluje, chyby
-prichazi jako W radek "cdc: N bad frames dropped" (CRC, delka i neuplne ramce dohromady; log ma kladnou kontrolu);
-CDC base -> PC: pocitadla parseru harnessu (crc_errors, bad_frames, overflows) jako rozdil od otevreni okna (pc_crc_errors,
-pc_bad_frames, pc_overflows; Link.attach() parser nahrazuje, novy parser se zapocita cely); remote: zaznamy CRC_ERRORS
-z DIAG. Jediny ztraceny DIAG poll soak shodi (zamer).
-Pass = vsechna pocitadla chyb nulova, boot_id remote stejny, base log v okne bez jedineho E/W radku (zadny seznam
-"znamych" radku; STATUS_RESP se proto potvrzuje, jinak by base po 3 opakovanich zalogovala W "retries exhausted"),
-uptime base monotonni, zadne jadro nezastavene/lockup. Latence se jen hlasi (hranice 2 s se pocita, ale neni podminkou)."""
+"""Whole-system soak (Task 7C): remote (keys via ST-Link) <-> base <-> PC harness, `SOAK_SECONDS` (default 600).
+Cycle (~3 s): PLAY from the remote (keys 406 + ENTER) -> the harness acknowledges, SIGNAL_PLAYING, 3x SIGNAL_ANCHOR, NOW_PLAYING_INFO,
+USB-MIDI notes to the base (DIN cannot be verified, the bench DIN link is broken: it is only observed that the write goes through and the log is clean),
+SIGNAL_STOPPED. Every 10 s a DIAG_GET to the remote with latency measurement DIAG_GET -> DIAG_RESP (R28). Per-iteration counters
+go to a CSV (`SOAK_OUT`, default <tmp>/basetest-soak/soak.csv), a summary is printed at the end.
+CRC: the base BLE side is NOT measured (bluetooth.cpp has no counter); CDC PC -> base: router::_badFrames is zeroed after being reported, the errors
+arrive as a W line "cdc: N bad frames dropped" (CRC, length and incomplete frames together; the log has a positive check);
+CDC base -> PC: the harness parser counters (crc_errors, bad_frames, overflows) as a difference from the window opening (pc_crc_errors,
+pc_bad_frames, pc_overflows; Link.attach() replaces the parser, the new parser is counted in full); remote: CRC_ERRORS records
+from DIAG. A single lost DIAG poll fails the soak (intentional).
+Pass = all error counters zero, remote boot_id the same, the base log in the window without a single E/W line (no list of
+"known" lines; STATUS_RESP is therefore acknowledged, otherwise after 3 retries the base would log W "retries exhausted"),
+base uptime monotonic, no core halted/lockup. Latency is only reported (the 2 s threshold is counted but is not a condition)."""
 
 import csv
 import os
@@ -35,8 +35,8 @@ ADDR_PC, ADDR_BASE, ADDR_REMOTE = proto.ADDR_PC, proto.ADDR_BASE, proto.ADDR_REM
 DIAG_PERIOD = 10.0
 CYCLE = 3.0
 SLOW_S = 2.0
-CODE_CRC_ERRORS = 11  # diag zaznam remote: CRC chyby na BLE lince
-MAX_REMOTE_AGE_MS = 3000  # base -> remote keepalive po 2 s (+ rezerva); 6000 ms je az prah ztraty spojeni
+CODE_CRC_ERRORS = 11  # remote diag record: CRC errors on the BLE link
+MAX_REMOTE_AGE_MS = 3000  # base -> remote keepalive every 2 s (+ margin); 6000 ms is only the link-loss threshold
 LOG_TS = re.compile(r"^\[ *(\d+)\.(\d{3})\] ([EWID]) ([a-z]{1,6}): (.*)$")
 
 
@@ -48,12 +48,12 @@ def paired(base):
 
 
 def parser_errors(parser):
-    """Pocitadla chyb parseru PC strany (ramce base -> PC): CRC, delka/neuplne, preteceni."""
+    """PC-side parser error counters (base -> PC frames): CRC, length/incomplete, overflow."""
     return parser.crc_errors, parser.bad_frames, parser.overflows
 
 
 def diag_timed(link, cursor, rv=None):
-    """DIAG_GET -> (ack_s, resp_s, resp); None kdyz chybi. Cas DIAG_RESP od odeslani DIAG_GET (do 8 s, bez opakovani)."""
+    """DIAG_GET -> (ack_s, resp_s, resp); None when missing. Time of the DIAG_RESP since the DIAG_GET was sent (up to 8 s, no retries)."""
     link.drain()
     t0 = time.monotonic()
     pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.DIAG_GET, proto.diag_encode_get(cursor)))
@@ -83,15 +83,15 @@ def test_soak(paired, link, remote_probe):
     lat_ack, lat_resp = [], []
     errors = []
 
-    # okno mereni = smycka cyklu: t_start se prepise tesne pred ni; mezery mezi vzorky a jejich pocet se pocitaji jen v okne,
-    # stari remote a systick se kontroluji u kazdeho vzorku (i v priprave pred smyckou)
+    # measurement window = the cycle loop: t_start is overwritten just before it; gaps between samples and their count are counted only in the window,
+    # the remote age and systick are checked at every sample (also in the preparation before the loop)
     t_start = time.monotonic()
     win = dict(on=False, last=None)
     last_ticks = None
     last_age = [0.0]
 
     def sample():
-        """Systick (reset detekce) a stari posledniho paketu od remote; v okne se vola >= 4x/s i behem cekani cyklu."""
+        """Systick (reset detection) and the age of the last packet from the remote; in the window it is called >= 4x/s, also while the cycle waits."""
         nonlocal last_ticks
         tnow = time.monotonic()
         if win["on"]:
@@ -111,7 +111,7 @@ def test_soak(paired, link, remote_probe):
         c["max_remote_age_ms"] = max(c["max_remote_age_ms"], age)
 
     def recv_s(timeout, pred=None):
-        """link.recv po <= 0.2 s dilech, mezi nimi sample(): cekani na odpoved nezakryje ztracene keepalive."""
+        """link.recv in chunks of <= 0.2 s with sample() in between: waiting for a reply does not hide a lost keepalive."""
         end = time.monotonic() + timeout
         while True:
             sample()
@@ -132,7 +132,7 @@ def test_soak(paired, link, remote_probe):
             time.sleep(min(0.2, left))
 
     def key_timed(row, col, *keys):
-        """remote.key() je gdb batch (nejde rozdelit): kazde volani se meri (CSV sloupec col, max_key_s)."""
+        """remote.key() is a gdb batch (cannot be split): every call is timed (CSV column col, max_key_s)."""
         tk = time.monotonic()
         remote.key(*keys)
         d = time.monotonic() - tk
@@ -155,11 +155,11 @@ def test_soak(paired, link, remote_probe):
     if n:
         remote.key(*([dbg.BACK] * n))
     link.drain()
-    # kladna kontrola logu: bez ni by "zadne E/W" nic neznamenalo (default uroven je tiha)
-    # vychozi uroven je INFO (src/debug.cpp), po kontrole se vraci `level i`
+    # positive log check: without it "no E/W" would mean nothing (the default level is quiet)
+    # the default level is INFO (src/debug.cpp), after the check `level i` is restored
     try:
         assert log.command("level d") == ["level D"], "log CDC not answering"
-        # STATUS_RESP potvrdit: nepotvrzenou base 3x opakuje a pak zaloguje W "retries exhausted" uz v okne mereni
+        # acknowledge STATUS_RESP: an unacknowledged one the base repeats 3x and then logs W "retries exhausted" already in the measurement window
         ack_status(link)
         got = log.lines(3.0, pred=lambda l: loglink.is_log_line(l) and " D " in l)
         assert any(loglink.is_log_line(l) and " D " in l for l in got), "no D line on the log CDC at level d"
@@ -168,13 +168,13 @@ def test_soak(paired, link, remote_probe):
     c["log_alive"] = 1
     log.skip()
     link.drain()
-    fault0 = base.fault_record()  # zbytek z drivejsich testu (.noinit): nesmi se zmenit
-    # pocatecni stav
+    fault0 = base.fault_record()  # leftover from earlier tests (.noinit): must not change
+    # initial state
     t_ack, t_resp, resp = diag_timed(link, 0xFFFF)
     assert resp is not None, "no DIAG_RESP at start"
     boot_id, cur, _ = decode(resp)
     ka_sent0, ka_ack0 = link.keepalives_sent, link.keepalive_acks
-    parser0 = link.parser  # Link.attach() ho nahrazuje
+    parser0 = link.parser  # Link.attach() replaces it
     perr0 = parser_errors(parser0)
     log_start = len(log.history)
     rows = []
@@ -182,13 +182,13 @@ def test_soak(paired, link, remote_probe):
     t_start = time.monotonic()
     next_poll = t_start
     win["on"] = True
-    sample()  # prvni vzorek okna: i prvni remote.key() je mezi dvema vzorky
+    sample()  # first sample of the window: even the first remote.key() lies between two samples
     try:
         while time.monotonic() - t_start < duration:
             t_cycle = time.monotonic()
             now = t_cycle - t_start
             row = dict(t=round(now, 1), cycle=c["cycles"])
-            # --- PLAY z remote
+            # --- PLAY from the remote
             link.drain()
             key_timed(row, "key_s", "4", "0", "6", dbg.ENTER)
             pkt = recv_s(2.5, from_remote(MT.PLAY_SONG))
@@ -211,18 +211,18 @@ def test_soak(paired, link, remote_probe):
                 errors.append(f"{now:.0f}s: MIDI write {e}")
             nap(0.4)
             ack_for(MT.SIGNAL_STOPPED)
-            # opakovane PLAY_SONG (remote nedostal ACK) a zbytek provozu, ktery se nemel objevit
+            # repeated PLAY_SONG (the remote got no ACK) and the rest of the traffic that should not have appeared
             nap(0.2)
             extra = [p for p in link.drain() if p.src == ADDR_REMOTE and p.mtype == MT.PLAY_SONG]
             c["play_retrans"] += len(extra)
             if extra:
                 errors.append(f"{now:.0f}s: {len(extra)} PLAY_SONG retransmissions")
-            # stav remote: cislice smazane?
+            # remote state: digits cleared?
             n = remote.u("GUI::playerScreen.digitCount_", 1)
             if n:
                 c["digits_stale"] += 1
                 key_timed(row, "back_key_s", *([dbg.BACK] * n))
-            # --- zdravi: jadra, spojeni
+            # --- health: cores, link
             for name, tgt in (("base", base), ("remote", remote)):
                 st = tgt.core_state()
                 if st["halted"]:
@@ -269,7 +269,7 @@ def test_soak(paired, link, remote_probe):
             rows.append(row)
             nap(max(0.0, CYCLE - (time.monotonic() - t_cycle)))
     finally:
-        c["elapsed_s"] = round(time.monotonic() - t_start, 2)  # posledni nap() konci vzorkem
+        c["elapsed_s"] = round(time.monotonic() - t_start, 2)  # the last nap() ends with a sample
         win["on"] = False
         writer_ctx.close()
         time.sleep(0.5)
@@ -280,9 +280,9 @@ def test_soak(paired, link, remote_probe):
                 w.writeheader()
                 w.writerows(rows)
 
-    # --- vyhodnoceni
+    # --- evaluation
     ka_sent = link.keepalives_sent - ka_sent0
-    wait_end = time.monotonic() + 1.5  # posledni keepalive dostane cas na ACK
+    wait_end = time.monotonic() + 1.5  # the last keepalive gets time for its ACK
     while time.monotonic() < wait_end and link.keepalive_acks - ka_ack0 < ka_sent:
         time.sleep(0.05)
     ka_ack = link.keepalive_acks - ka_ack0
@@ -301,7 +301,7 @@ def test_soak(paired, link, remote_probe):
     banners = [l for l in hist if "MIDIControl base" in l and " I sys:" in l]
     c["log_lines"], c["log_ew"], c["log_nonmono"], c["log_markers"], c["log_banners"] = len(hist), len(lines_ew), nonmono, len(markers), len(banners)
     rec = base.fault_record()
-    c["base_fault_record"] = 0 if rec == fault0 else 1  # novy/zmeneny zaznam od startu
+    c["base_fault_record"] = 0 if rec == fault0 else 1  # a new/changed record since the start
     _, _, final = diag_timed(link, 0xFFFF)
     assert final is not None, "no DIAG_RESP at the end"
     assert decode(final)[0] == boot_id

@@ -1,6 +1,6 @@
-"""Zivotni cyklus spojeni (Task 7A): ztrata PC keepalive, reset base, vypadek BLE u remote, reset RN4870 na base,
-a duvod NAK pro PC -> Remote, kdyz base nemuze predat (UNREACHABLE hned, BUSY jen pri zaplnene TX ceste).
-Predpoklad: base a remote jsou sparovane (test_pairing.py). Remote se nevypina, jen se drzi jeho RN4870 v resetu."""
+"""Link lifecycle (Task 7A): loss of the PC keepalive, base reset, BLE dropout at the remote, RN4870 reset on the base,
+and the NAK reason for PC -> Remote when the base cannot forward (UNREACHABLE immediately, BUSY only when the TX path is full).
+Precondition: the base and the remote are paired (test_pairing.py). The remote is not switched off, only its RN4870 is held in reset."""
 
 import time
 
@@ -17,7 +17,7 @@ KEEPALIVE_LOSS_MS = 6000  # lib/protocol constants.hpp
 
 
 def pc_alive(base) -> bool:
-    """router::isPcAlive() (LTO ji vyhodi): _pcEverSeen a posledni paket z CDC mladsi nez KEEPALIVE_LOSS."""
+    """router::isPcAlive() (LTO drops it): _pcEverSeen and the last packet from the CDC younger than KEEPALIVE_LOSS."""
     res = base.u("stmcpp::systick::resolution_")
     now = (res * base.u("stmcpp::systick::ticks_")) & 0xFFFFFFFF
     age_ms = ((now - base.u("router::_lastPcRx")) & 0xFFFFFFFF) / res
@@ -71,7 +71,7 @@ def test_remote_power_cycle_midsong(paired, link, remote_probe):
         remote.hold_ble_reset(False)
     wait_until(lambda: link_ready(base), 25, interval=0.5, what="remote link back after release")
     time.sleep(0.5)
-    pc_signal(link, MT.SIGNAL_ANCHOR, b"Sloka 2\0")  # nasledujici SIGNAL_ANCHOR potvrdi remote
+    pc_signal(link, MT.SIGNAL_ANCHOR, b"Sloka 2\0")  # the following SIGNAL_ANCHOR is acknowledged by the remote
     pc_signal(link, MT.SIGNAL_STOPPED)
 
 
@@ -89,7 +89,7 @@ def test_rn4870_reset_on_base(paired, link):
 
 
 def probe_nak(link, mtype, payload=b""):
-    """PC -> Remote; (reply, doba [s]) nebo (None, ..) - reply = ACK/NAK od base (src 2) nebo remote (src 3)."""
+    """PC -> Remote; (reply, duration [s]) or (None, ..) - reply = ACK/NAK from the base (src 2) or the remote (src 3)."""
     link.drain()
     pid = to_remote(link, mtype, payload)
     t = time.monotonic()
@@ -98,8 +98,8 @@ def probe_nak(link, mtype, payload=b""):
 
 
 def check_naks(base, link, until, what, samples):
-    """Posila SIGNAL_STOPPED a DIAG_GET dokud `until()`; kazdy NAK od base musi prijit do 200 ms a byt UNREACHABLE.
-    BUSY je povolen jen kdyz je spojeni pouzitelne (pripojeno a stream otevreny; modul je chvilku v prikazovem rezimu)."""
+    """Sends SIGNAL_STOPPED and DIAG_GET until `until()`; every NAK from the base must arrive within 200 ms and be UNREACHABLE.
+    BUSY is allowed only when the link is usable (connected and stream open; the module is briefly in command mode)."""
     bad = []
     while not until():
         for mt, pl in ((MT.SIGNAL_STOPPED, b""), (MT.DIAG_GET, proto.diag_encode_get(0))):
@@ -118,7 +118,7 @@ def test_pc_to_remote_nak_reason_ble_down(paired, link, remote_probe):
     samples = []
     try:
         remote.hold_ble_reset(True)
-        # Base to vi az po %DISCONNECT% / ztrate spojeni; od te doby jen UNREACHABLE
+        # The base knows only after %DISCONNECT% / loss of the link; from then on only UNREACHABLE
         wait_until(lambda: not base.read_bool("Bluetooth::_connected"), 12, what="base sees the remote gone")
         t_end = time.monotonic() + 6.0
         check_naks(base, link, lambda: time.monotonic() > t_end, "BLE down", samples)
@@ -134,7 +134,7 @@ def test_pc_to_remote_nak_reason_after_base_reset(paired, link, log):  # noqa: F
     samples = []
     log, _ = reboot(link, log, base.reset, gone_within=3.0, back_within=5.0)
     try:
-        # od prvniho okamziku po novem CDC az do otevreni zabezpeceneho streamu
+        # from the first moment after the new CDC until the secured stream opens
         t_end = time.monotonic() + 25
         check_naks(base, link, lambda: link_ready(base) or time.monotonic() > t_end, "after base reset", samples)
         assert samples, "no NAK seen while the link was coming back"

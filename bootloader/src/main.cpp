@@ -107,8 +107,8 @@ namespace {
 		}
 	}
 
-	// Hodiny a piny pro OLED (I2C1 na APB1, zdroj PCLK1 = HSI16 - odpovida TIMINGR nize).
-	// Cekani na napajeni panelu dela boot::oled::init sam.
+	// Clocks and pins for the OLED (I2C1 on APB1, source PCLK1 = HSI16 - matches TIMINGR below).
+	// Waiting for the panel power-up is done by boot::oled::init itself.
 	void displayInit() {
 		using namespace stmcpp;
 		reg::set(std::ref(RCC->AHB2ENR), RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN);
@@ -122,8 +122,8 @@ namespace {
 		boot::oled::show("Aktualizace", "Cekam na PC", 0);
 	}
 
-	// Casovac vypadku PC: SysTick v bootloaderu nebezi, tak DWT->CYCCNT (jadro zustava na HSI16 = 16 MHz,
-	// 20 s = 320 M taktu < 2^32). Rozdil uint32_t je odolny proti preteceni.
+	// PC dropout timer: SysTick does not run in the bootloader, so DWT->CYCCNT is used (the core stays on HSI16 = 16 MHz,
+	// 20 s = 320 M cycles < 2^32). The uint32_t difference is overflow-safe.
 	constexpr uint32_t kStallCycles = 20u * 16000000u;
 	uint32_t s_lastPacketCycles = 0;
 	bool s_stallShown = false;
@@ -243,7 +243,7 @@ extern "C" int main(void) {
 	NVIC_EnableIRQ(USB_HP_IRQn);
 
 	while (1) {
-		boot::wdg::kick(); // IWDG z aplikace běží i po ENTER_BOOTLOADER a nejde zastavit
+		boot::wdg::kick(); // the application's IWDG keeps running after ENTER_BOOTLOADER and cannot be stopped
 		tud_task();
 
 		if (tud_cdc_available()) {
@@ -256,8 +256,8 @@ extern "C" int main(void) {
 			}
 		}
 
-		// PC se odmlcel uprostred prenosu (kabel, zruseni): vyzvat k opakovani, ukazatel zustane.
-		// Dalsi paket se vrati na "Nevypinejte" v onPacket().
+		// The PC went silent in the middle of a transfer (cable, cancellation): prompt for a retry, the pointer stays.
+		// The next packet returns to "Nevypinejte" in onPacket().
 		if (s_rx.active() && !s_stallShown && DWT->CYCCNT - s_lastPacketCycles > kStallCycles) {
 			s_stallShown = true;
 			showProgress("Chyba, opakujte", progressPercent());

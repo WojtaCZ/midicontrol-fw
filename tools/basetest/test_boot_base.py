@@ -1,8 +1,8 @@
-"""Odolnost bootloaderu base (plan docs/superpowers/plans/2026-10-24-bootloader-robustness-tests.md, Tasks 2-4).
+"""Robustness of the base bootloader (plan docs/superpowers/plans/2026-10-24-bootloader-robustness-tests.md, Tasks 2-4).
 
-Kazdy test konci s base v aplikaci build/midicontrol-fw-update.bin; zustane-li v bootloaderu, fixture `recover` ji
-nahraje PC updaterem (produktova cesta obnovy, BASETEST_UPDATER) nebo fwclientem; visi-li (NMI/HardFault/lockup),
-obnovi se SWD a test selze. Harness link (session `link`) se zde nepouziva: kazdy test si otevira port sam."""
+Every test ends with the base in the application build/midicontrol-fw-update.bin; if it stays in the bootloader, the `recover` fixture
+flashes it with the PC updater (the product recovery path, BASETEST_UPDATER) or with fwclient; if it hangs (NMI/HardFault/lockup),
+it is restored over SWD and the test fails. The harness link (session `link`) is not used here: each test opens the port itself."""
 
 import os
 import re
@@ -43,8 +43,8 @@ def wait_ids(want: str, timeout=10.0):
 
 
 def enter_bootloader() -> usblink.Link:
-    """App -> ENTER_BOOTLOADER -> Link na portu bootloaderu. Je-li base uz v bootloaderu (predchozi beh), nejdriv dobry
-    obraz."""
+    """App -> ENTER_BOOTLOADER -> Link on the bootloader port. If the base is already in the bootloader (previous run), a good
+    image first."""
     if usb_ids() == {"abcd:1235"}:
         assert flash_good() == "ok"
     wait_ids("abcd:1234", 15)
@@ -62,7 +62,7 @@ def bl_link() -> usblink.Link:
 
 
 def flash_good(link=None) -> str:
-    """Dobry obraz do bootloaderu fwclientem; ceka na aplikaci."""
+    """A good image into the bootloader via fwclient; waits for the application."""
     L = link or bl_link()
     try:
         res = fwclient.Client(L, proto.ADDR_BASE).send_image(IMG)
@@ -74,7 +74,7 @@ def flash_good(link=None) -> str:
 
 
 def pc_updater_recover():
-    """Base v bootloaderu: PC updater (produkt) ji obnovi."""
+    """Base in the bootloader: the PC updater (the product) restores it."""
     assert UPDATER and os.path.exists(UPDATER), "BASETEST_UPDATER required"
     from test_ota import Updater
     up = Updater("base", bootfi.BOARDS["base"]["update_bin"], "base-bootrobust-recover")
@@ -94,11 +94,11 @@ def board():
 
 
 def base_healthy(board):
-    """(ok, popis): jadro v aplikaci, oblast = build, jen abcd:1234 na USB."""
+    """(ok, description): core in the application, region = build, only abcd:1234 on USB."""
     try:
         w = board.where()
         matches = board.app_matches()
-    except Exception as e:  # noqa: BLE001 - sonda / jadro nedostupne
+    except Exception as e:  # noqa: BLE001 - probe / core unavailable
         return False, f"probe error {e!r}"
     finally:
         board.stop()
@@ -109,9 +109,9 @@ def base_healthy(board):
 
 @pytest.fixture
 def recover(board):
-    """Teardown: base musi byt zdrava (aplikace z buildu, abcd:1234). Zustala-li v bootloaderu po ocekavanem
-    preruseni, nahraje se dobry obraz (produktova cesta). Cokoli jineho (visi, cizi obsah, nic na USB): SWD obnova a
-    test selze nahlas; nejde-li ani to, pytest.exit (BLOCKED), aby dalsi testy neselhavaly na nasledcich."""
+    """Teardown: the base must be healthy (application from the build, abcd:1234). If it stayed in the bootloader after the expected
+    interruption, a good image is flashed (the product path). Anything else (hangs, foreign content, nothing on USB): SWD recovery and the
+    test fails loudly; if even that fails, pytest.exit (BLOCKED), so that the following tests do not fail on the consequences."""
     yield
     board.stop()
     time.sleep(1.5)
@@ -135,7 +135,7 @@ def recover(board):
 
 
 def after_power_loss_expect_bootloader(board):
-    """Po 'vypadku' musi base skoncit v bootloaderu (abcd:1235), ne v aplikaci a ne viset."""
+    """After the 'power loss' the base must end up in the bootloader (abcd:1235), not in the application and not hung."""
     time.sleep(1.0)
     w = board.where()
     board.stop()
@@ -143,11 +143,11 @@ def after_power_loss_expect_bootloader(board):
     wait_ids("abcd:1235", 8)
 
 
-# --------------------------------------------------------------------------------------------- Task 2 (hrube)
+# --------------------------------------------------------------------------------------------- Task 2 (coarse)
 
 @pytest.mark.parametrize("pct", [0, 1, 50, 99, 100])
 def test_base_abort_at(board, recover, pct):
-    """Host prestane posilat po pct % (100 = vsechna data, bez END), pak reset: bootloader zustane, PC updater obnovi."""
+    """The host stops sending after pct % (100 = all data, without END), then reset: the bootloader stays, the PC updater restores."""
     L = enter_bootloader()
     try:
         res = fwclient.Client(L, proto.ADDR_BASE).send_image(IMG, stop_after=fwclient.offset_at(len(IMG), pct))
@@ -157,12 +157,12 @@ def test_base_abort_at(board, recover, pct):
     board.reset()
     after_power_loss_expect_bootloader(board)
     if pct == 50 and UPDATER:
-        pc_updater_recover()  # produktova cesta: PC updater nad base, ktera uz je v bootloaderu
+        pc_updater_recover()  # product path: the PC updater on a base that is already in the bootloader
 
 
 @pytest.mark.parametrize("pct", [0, 50, 99])
 def test_base_reset_at(board, recover, pct):
-    """Reset sondou behem prenosu (chunky v behu): bootloader zustane."""
+    """Probe reset during the transfer (chunks in flight): the bootloader stays."""
     L = enter_bootloader()
     target = fwclient.offset_at(len(IMG), pct)
     fired = []
@@ -175,7 +175,7 @@ def test_base_reset_at(board, recover, pct):
     try:
         try:
             res = fwclient.Client(L, proto.ADDR_BASE, retries=0).send_image(IMG, on_chunk=on_chunk)
-        except Exception as e:  # noqa: BLE001 - port zmizel pri resetu
+        except Exception as e:  # noqa: BLE001 - the port disappeared on reset
             res = f"exception {e!r}"
     finally:
         L.close()
@@ -194,7 +194,7 @@ BAD = {
 
 @pytest.mark.parametrize("kind", list(BAD))
 def test_base_bad_images(board, recover, kind):
-    """Vadny obraz se odmitne na END (CRC_FAIL/BAD_SIZE), base zustane v bootloaderu, pak dobry update projde."""
+    """A bad image is rejected at END (CRC_FAIL/BAD_SIZE), the base stays in the bootloader, then a good update goes through."""
     img = fwclient.make_image(IMG, **BAD[kind])
     L = enter_bootloader()
     try:
@@ -218,7 +218,7 @@ def test_base_oversize_rejected_at_start(board, recover):
 
 
 def test_base_wrong_target_keeps_app(board, recover):
-    """START s target 0x03 v bootloaderu base: NAK pred mazanim, po resetu nabehne puvodni aplikace."""
+    """START with target 0x03 in the base bootloader: NAK before the erase, the original application comes up after a reset."""
     L = enter_bootloader()
     try:
         acked, st = fwclient.Client(L, proto.ADDR_BASE, retries=0).start(len(IMG), zlib.crc32(IMG), target_byte=proto.ADDR_REMOTE)
@@ -239,8 +239,8 @@ DBGMCU_APB1FZR1 = 0xE0042008  # bit 12 DBG_IWDG_STOP
 
 
 def start_iwdg_2s(board):
-    """IWDG ~2 s (LSI 32 kHz /32, RLR 2000) spusteny sondou. IWDG aplikace reset do bootloaderu na G431 neprezije
-    (src/wdg.cpp), takze "bootloader s bezicim IWDG" (T7) se jinak na lavici nevyskytne: tady se vynuti."""
+    """IWDG ~2 s (LSI 32 kHz /32, RLR 2000) started via the probe. The application's IWDG does not survive a reset into the bootloader on the G431
+    (src/wdg.cpp), so a "bootloader with a running IWDG" (T7) would not otherwise occur on the bench: here it is forced."""
     board.tcl(f"write_memory 0x{IWDG:08x} 32 {{0xCCCC}}")
     board.tcl(f"write_memory 0x{IWDG:08x} 32 {{0x5555}}")
     board.tcl(f"write_memory 0x{IWDG + 4:08x} 32 {{3}}")
@@ -250,8 +250,8 @@ def start_iwdg_2s(board):
 
 
 def test_base_bootloader_kicks_iwdg(board, recover):
-    """T7: bootloader s bezicim IWDG (2 s) 30 s v necinnosti bez resetu, pak cely update (START maze ~1 s) bez resetu.
-    Kontrola, ze IWDG opravdu bezel: na konci DBG_IWDG_STOP pryc a jadro 3 s zastavit -> musi prijit reset."""
+    """T7: bootloader with a running IWDG (2 s) idle for 30 s without a reset, then a whole update (START erases ~1 s) without a reset.
+    A check that the IWDG really ran: at the end clear DBG_IWDG_STOP and halt the core for 3 s -> a reset must come."""
     L = enter_bootloader()
     L.close()
     start_iwdg_2s(board)
@@ -260,9 +260,9 @@ def test_base_bootloader_kicks_iwdg(board, recover):
     time.sleep(30)
     n1 = usb_devnum("1235")
     assert n0 is not None and n1 == n0, f"bootloader reset while idle with IWDG running: devnum {n0} -> {n1}"
-    # update s bezicim IWDG; aplikace po nem IWDG spusti sama (wdg::start)
+    # update with a running IWDG; after it the application starts the IWDG itself (wdg::start)
     assert flash_good() == "ok"
-    # negativni kontrola na nove bootloaderu: IWDG spustit, DBG_IWDG_STOP shodit, jadro 3 s zastavit -> reset
+    # negative check on a fresh bootloader: start the IWDG, clear DBG_IWDG_STOP, halt the core for 3 s -> reset
     L = enter_bootloader()
     L.close()
     start_iwdg_2s(board)
@@ -287,10 +287,10 @@ def test_base_update_x10(board, recover):
     assert board.app_matches()
 
 
-# --------------------------------------------------------------------------------- Task 3 (presne kroky, bp/wp)
+# --------------------------------------------------------------------------------- Task 3 (exact steps, bp/wp)
 
 class Bg:
-    """Klient bezi ve vlakne (jadro stoji na bp, ACK nechodi); vysledek nebo vyjimka v .res."""
+    """The client runs in a thread (the core is stopped at a bp, no ACK arrives); the result or exception in .res."""
 
     def __init__(self, fn):
         self.res = None
@@ -300,7 +300,7 @@ class Bg:
     def _run(self, fn):
         try:
             self.res = fn()
-        except Exception as e:  # noqa: BLE001 - port zmizi pri resetu
+        except Exception as e:  # noqa: BLE001 - the port disappears on reset
             self.res = f"exception {e!r}"
 
     def join(self, t=30):
@@ -316,12 +316,12 @@ def expect_after_reset(board, kind):
     wait_ids("abcd:1235" if kind == "bootloader" else "abcd:1234", 10)
 
 
-# Bootloader base je LTO: erasePageAt je inline, zustal jen flashprog::waitBusy (2x na stranku: pred STRT a po nem).
-# Pri STARTu se jen maze, takze vstup do mazani stranky n (od 1) = (2n-1). zasah waitBusy.
-# n = 1: nic jeste nesmazano -> stara aplikace nabehne; 2: vektorova stranka smazana; 24: uprostred; 47: posledni
-# stranka oblasti (0x0801F000).
-# Reset sondou (hla, reset_config none) dopadne az par us po rozbehu jadra: pri hit 1 se tak mazani page0 casto jeste
-# spusti (bench: 2/2 bootloader). Obojí je bezpecne: hit 1 = aplikace nebo bootloader.
+# The base bootloader is LTO: erasePageAt is inline, only flashprog::waitBusy remains (2x per page: before STRT and after it).
+# START only erases, so entering the erase of page n (from 1) = the (2n-1)-th waitBusy hit.
+# n = 1: nothing erased yet -> the old application comes up; 2: vector page erased; 24: in the middle; 47: the last
+# page of the region (0x0801F000).
+# A probe reset (hla, reset_config none) lands only a few us after the core starts running: at hit 1 the page0 erase thus often still
+# starts (bench: 2/2 bootloader). Both are safe: hit 1 = application or bootloader.
 @pytest.mark.parametrize("hit,expect", [(1, ("app", "bootloader")), (2, ("bootloader",)), (24, ("bootloader",)), (47, ("bootloader",))])
 def test_base_bp_erase(board, recover, hit, expect):
     L = enter_bootloader()
@@ -329,7 +329,7 @@ def test_base_bp_erase(board, recover, hit, expect):
         board.arm(board.bl_sym("boot::flashprog::waitBusy"))
         bg = Bg(lambda: fwclient.Client(L, proto.ADDR_BASE, retries=0).send_image(IMG))
         pnb = []
-        # zasah 2n-1 = pred STRT stranky n: v CR je jeste PNB predchozi stranky (16 + n - 2); n = 1: zadna
+        # hit 2n-1 = before STRT of page n: CR still holds the PNB of the previous page (16 + n - 2); n = 1: none
         check = lambda: pnb.append((board.u32(0x40022014) >> 3) & 0x7F)  # noqa: E731
         assert board.break_then_reset(0, hits=2 * hit - 1, armed=True, timeout=20, before_reset=check), "bp not hit"
         if hit > 1:
@@ -352,10 +352,10 @@ def _send_all_but_end(L):
     assert res == "stopped", res
 
 
-# Vypadek pri zapisu vektorove stranky (page0 z RAM, programuje se az ve finish()): wp na dvojslove k zastavi jadro
-# az po nekolika dalsich instrukcich (DWT na M4 je nepresny; k = 255 uz stihne cele page0) a reset pak trefi
-# programovani nektereho dvojslova. Pozadavek: bootloader nebo nova aplikace, nikdy viset (bench 2026-10-24: k = 0
-# -> ECC dvojita chyba v page0 -> NMI v bootloaderu -> Default_Handler, i po kazdem dalsim resetu; nalez F4).
+# Power loss while writing the vector page (page0 from RAM, programmed only in finish()): a wp on double-word k halts the core
+# only after a few more instructions (DWT on the M4 is imprecise; k = 255 already lets the whole page0 finish) and the reset then hits
+# the programming of some double-word. Requirement: bootloader or new application, never hung (bench 2026-10-24: k = 0
+# -> ECC double error in page0 -> NMI in the bootloader -> Default_Handler, even after every further reset; finding F4).
 F4 = "F4: interrupted page0 programming -> ECC double error -> bootloader NMI -> Default_Handler forever (no USB)"
 F5 = "F5: trailer page lost -> NoTrailer accepted (BOOT_REQUIRE_TRAILER=0) -> truncated app boots and faults"
 
@@ -377,7 +377,7 @@ def test_base_bp_commit_page0(board, recover, k):
     print(f"k={k}: after reset {w}, ECCR {board.eccr():#x}, app[0:16] {board.flash_read(APP, 16).hex()}")
     if w["kind"] == "hang":
         eccr = board.eccr()
-        board.swd_restore()  # sama obnovit: recover pak hlida jen chyby harnessu
+        board.swd_restore()  # recover it ourselves: `recover` then guards only against harness errors
         board.stop()
         raise bootfi.ProductDefect(f"after a reset during the page0 commit: {w}, ECCR {eccr:#x}")
     board.stop()
@@ -385,8 +385,8 @@ def test_base_bp_commit_page0(board, recover, k):
 
 
 def test_base_bp_after_commit(board, recover):
-    """Vypadek hned po zapisu vektorove stranky (wp na druhem slove posledniho dvojslova page0: jadro stoji po zapisu,
-    programovani dvojslova 85 us dobehne), pred zaverecnou kontrolou CRC a ACK: nova aplikace nabehne."""
+    """Power loss right after writing the vector page (wp on the second word of the last double-word of page0: the core stops after the write,
+    the 85 us double-word programming finishes), before the final CRC check and ACK: the new application comes up."""
     L = enter_bootloader()
     try:
         _send_all_but_end(L)
@@ -400,12 +400,12 @@ def test_base_bp_after_commit(board, recover):
     assert board.app_matches()
 
 
-# ------------------------------------------------------------------------ Task 4 (preruseni flash operace, T1)
+# ------------------------------------------------------------------------ Task 4 (interrupting a flash operation, T1)
 
 OUT = os.environ.get("BASETEST_OUT", "/tmp")
-SCRATCH = 0x0801F000  # posledni stranka oblasti aplikace pred nastavenim; obraz ji nepouziva (prazdna)
-# Podil zmerene doby operace (glitch delay a mereni maji od 2026-10-25 stejne telo smycky). Huste v cele dobe operace,
-# aby kratke okno ECC chyby (u dvojslova ~25-50 %) trefil kazdy beh.
+SCRATCH = 0x0801F000  # the last page of the application region before the settings; the image does not use it (empty)
+# Fractions of the measured operation time (glitch delay and measurement have had the same loop body since 2026-10-25). Dense over the whole operation,
+# so that every run hits the short ECC error window (for a double-word ~25-50 %).
 FRACTIONS = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0, 1.1]
 
 
@@ -416,7 +416,7 @@ def glitch_log(name, rows):
 
 
 def settle_and_probe(board):
-    """Po glitch resetu: kde jadro je, ECCR, prvnich 8 B oblasti aplikace."""
+    """After a glitch reset: where the core is, ECCR, the first 8 B of the application region."""
     time.sleep(1.5)
     w = board.where()
     return dict(where=w["kind"], pc=hex(w["pc"]), ipsr=w["ipsr"], eccr=hex(board.eccr()), usb=sorted(usb_ids()),
@@ -424,8 +424,8 @@ def settle_and_probe(board):
 
 
 def measure(board, op, addr, **kw):
-    """Doba operace v iteracich glitch smycky, merena ve stejnem stavu (aplikace 144 MHz / bootloader HSI16), ve kterem
-    se pak glitchuje. Chybove priznaky z predchoziho stavu (bench: jednou SR 0xa8) -> jeden opakovany pokus."""
+    """Operation time in glitch loop iterations, measured in the same state (application 144 MHz / bootloader HSI16) in which
+    the glitching is then done. Error flags from a previous state (bench: once SR 0xa8) -> one retry."""
     n = board.glitch(op, addr, **kw)
     if n >= 0x80000000:
         print(f"measure: flash error {n:#x}, retrying")
@@ -450,7 +450,7 @@ def _sweep(board, name, prepare, op, addr, n_full, w=(0, 0)):
 
 
 def test_base_glitch_erase_vector_page(board, recover):
-    """Reset v prubehu mazani vektorove stranky platne aplikace (0..120 % doby mazani). Nikdy nesmi viset."""
+    """Reset during the erase of the vector page of a valid application (0..120 % of the erase time). Must never hang."""
     n_erase = measure(board, bootfi.OP_MEASURE_ERASE, SCRATCH)
     print(f"erase takes {n_erase} iterations")
 
@@ -467,8 +467,8 @@ def test_base_glitch_erase_vector_page(board, recover):
 
 @pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4)
 def test_base_glitch_program_vector(board, recover):
-    """Vektorova stranka smazana a hned reset v prubehu programovani 1. dvojslova (SP, reset vektor), vse z jedne glitch
-    rutiny ve stavu aplikace (0..120 % doby programovani). Nikdy nesmi viset."""
+    """Vector page erased and then an immediate reset during the programming of the 1st double-word (SP, reset vector), all from a single glitch
+    routine in the application state (0..120 % of the programming time). Must never hang."""
     w0, w1 = int.from_bytes(IMG[:4], "little"), int.from_bytes(IMG[4:8], "little")
     n_prog = measure(board, bootfi.OP_MEASURE_ERASE_THEN_PROGRAM, SCRATCH, w0=w0, w1=w1)
     measure(board, bootfi.OP_MEASURE_ERASE, SCRATCH)
@@ -487,7 +487,7 @@ def test_base_glitch_program_vector(board, recover):
 
 @pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F5)
 def test_base_glitch_erase_trailer_page(board, recover):
-    """Reset v prubehu mazani posledni pouzite stranky (trailer) platne aplikace: bootloader nebo aplikace, nikdy viset."""
+    """Reset during the erase of the last used page (trailer) of a valid application: bootloader or application, never hung."""
     last = APP + (len(IMG) - 1) // 2048 * 2048
     n_erase = measure(board, bootfi.OP_MEASURE_ERASE, SCRATCH)
 

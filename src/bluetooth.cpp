@@ -20,7 +20,7 @@ PA2 - TX
 PA3 - RX
 PA0 - MODE
 PA1 - RST
-RTS/CTS nejsou zapojené → hardwarové řízení toku musí být v modulu vypnuté (SR bez bitu 0x8000).
+RTS/CTS are not wired → hardware flow control must be disabled in the module (SR without bit 0x8000).
 */
 using namespace std;
 using namespace stmcpp::units;
@@ -29,52 +29,52 @@ namespace Bluetooth{
 
 	Mode _mode = Mode::DATA;
 
-	// Stav spojení; testy (tools/basetest) je čtou přes sondu podle tabulky symbolů — proto used/volatile
+	// Connection state; tests (tools/basetest) read it through the probe via the symbol table — hence used/volatile
 	[[gnu::used]] volatile bool _connected = false;
 	[[gnu::used]] volatile bool _bonded = false;
 	[[gnu::used]] volatile bool _streamOpen = false;
 	[[gnu::used]] volatile PairingState _pairingState = PairingState::IDLE;
-	// Přijatý protějšek: spojení zabezpečené (%SECURED%/%BONDED%) se zařízením, jehož adresa z %CONNECT% odpovídala
-	// uloženému ovladači (nebo adrese párování). Bez něj se přijaté rámce zahazují a nic se neodesílá.
+	// Accepted peer: link secured (%SECURED%/%BONDED%) with a device whose address from %CONNECT% matched
+	// the stored remote (or the pairing address). Without it received frames are dropped and nothing is sent.
 	[[gnu::used]] volatile bool _peerAccepted = false;
-	static bool _dropLogged = false; // jeden řádek logu o zahozených rámcích na spojení
+	static bool _dropLogged = false; // one log line about dropped frames per connection
 	static duration _pairingStart = 0_ms;
 	duration _dataReceivedTimestamp = 0_ms;
 
-	// ── Příjem (ISR → hlavní smyčka), bez haldy ──────────────────────────
-	// Stavová zpráva modulu ohraničená '%'. Výsledky skenování mají až ~80 znaků
-	// (adresa, typ, jméno, 128bit UUID, RSSI), proto 96.
+	// ── Receive (ISR → main loop), no heap ───────────────────────────────
+	// Module status message delimited by '%'. Scan results are up to ~80 characters
+	// (address, type, name, 128-bit UUID, RSSI), hence 96.
 	struct StatusLine {
 		char text[96];
 	};
 
 	static RingBuffer<StatusLine, 8> _statusQueue;
-	static RingBuffer<uint8_t, 512> _rxRing; // ~44 ms při 115200 Bd
+	static RingBuffer<uint8_t, 512> _rxRing; // ~44 ms at 115200 Bd
 	static StatusLine _rxStatus = {};
 	static uint8_t _rxStatusIndex = 0;
 	static bool _receivingStatus = false;
 	static volatile bool _rebootSeen = false;
 
-	// Přijaté protokolové pakety (plní process())
+	// Received protocol packets (filled by process())
 	static RingBuffer<protocol::Packet, 4> _rxPackets;
 	static protocol::Parser _protocolParser;
 	static bool _inFrame = false;
 
-	// ── Vysílání (hlavní smyčka → DMA) ───────────────────────────────────
+	// ── Transmit (main loop → DMA) ───────────────────────────────────────
 	static RingBuffer<uint8_t, 1024> _txRing;
 	static volatile size_t _txDmaLen = 0;
 
-	// ── Odpovědi příkazového režimu ──────────────────────────────────────
-	// Posuvné okno posledních přijatých znaků mimo protokolové rámce
+	// ── Command mode responses ───────────────────────────────────────────
+	// Sliding window of the last received characters outside protocol frames
 	static char _respWindow[5] = {};
 	static bool _sawPrompt = false; // "CMD> "
 	static bool _sawAok = false;
 	static bool _sawErr = false;
-	static bool _sawEnd = false;    // odpověď na "---"
-	// "Trying" (C) a "Scanning" (F): modul za ně prompt "CMD> " neposílá, jsou to celé odpovědi
+	static bool _sawEnd = false;    // response to "---"
+	// "Trying" (C) a "Scanning" (F): the module does not send the "CMD> " prompt after them, they are complete responses
 	static bool _sawProgress = false;
 
-	// ── Neblokující automat příkazového režimu ───────────────────────────
+	// ── Non-blocking command mode state machine ──────────────────────────
 	static constexpr uint8_t MAX_JOB_COMMANDS = 8;
 	static constexpr uint8_t MAX_COMMAND_LEN = 32;
 	static constexpr duration CMD_TIMEOUT = 1000_ms;
@@ -83,11 +83,11 @@ namespace Bluetooth{
 
 	enum class EngineState : uint8_t {
 		IDLE,
-		ENTER_CMD,   // odesláno "$$$", čekáme na "CMD> "
-		SEND,        // odeslat další příkaz
-		WAIT_RESP,   // čekáme na "CMD> " (případně AOK/ERR před ním)
-		WAIT_REBOOT, // po "R,1" čekáme na %REBOOT%
-		EXIT_CMD,    // odesláno "---", čekáme na "END"
+		ENTER_CMD,   // "$$$" sent, waiting for "CMD> "
+		SEND,        // send the next command
+		WAIT_RESP,   // waiting for "CMD> " (possibly AOK/ERR before it)
+		WAIT_REBOOT, // after "R,1" waiting for %REBOOT%
+		EXIT_CMD,    // "---" sent, waiting for "END"
 	};
 
 	static char _jobCommands[MAX_JOB_COMMANDS][MAX_COMMAND_LEN];
@@ -96,13 +96,13 @@ namespace Bluetooth{
 	static EngineState _engineState = EngineState::IDLE;
 	static duration _engineTimestamp = 0_ms;
 
-	// Stav konfigurace a zdraví modulu (čte hlavní smyčka): konfigurace je hotová až s %REBOOT% po "R,1"
+	// Configuration and health state of the module (read by the main loop): configuration is done only with %REBOOT% after "R,1"
 	static bool _configJob = false;
 	static ConfigState _configState = ConfigState::NONE;
-	static uint8_t _dollarTimeouts = 0; // po sobě jdoucí timeouty "$$$" (modul mlčí)
+	static uint8_t _dollarTimeouts = 0; // consecutive "$$$" timeouts (module is silent)
 	static constexpr uint8_t WEDGED_TIMEOUTS = 3;
 
-	// Neblokující restart modulu přes RST (PA1, aktivní v nule): RST dole 100 ms → nahoru → čekání na %REBOOT% ≤ 1 s
+	// Non-blocking module restart via RST (PA1, active low): RST low 100 ms → high → wait for %REBOOT% ≤ 1 s
 	static RestartState _restartState = RestartState::IDLE;
 	static duration _restartTimestamp = 0_ms;
 	static bool _restartRstHigh = false;
@@ -110,9 +110,9 @@ namespace Bluetooth{
 	static bool _moduleUp = false;
 	static void _runRestart();
 
-	// Spustí DMA nad souvislým úsekem TX bufferu (volat se zakázaným přerušením DMA nebo z ISR)
+	// Starts DMA over a contiguous section of the TX buffer (call with the DMA interrupt disabled or from the ISR)
 	static void _kickTx() {
-		if (_txDmaLen != 0) return; // DMA právě běží
+		if (_txDmaLen != 0) return; // DMA is running right now
 		size_t len = 0;
 		const uint8_t *data = _txRing.contiguousData(len);
 		if (len == 0) return;
@@ -124,7 +124,7 @@ namespace Bluetooth{
 		stmcpp::reg::set(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
 	}
 
-	// Zařadí celý blok do TX bufferu (vše, nebo nic) a případně spustí DMA
+	// Queues the whole block into the TX buffer (all or nothing) and starts DMA if needed
 	static bool _sendBytes(const uint8_t *data, size_t len) {
 		if (len == 0 || _txRing.freeSpace() < len) return false;
 		for (size_t i = 0; i < len; ++i) {
@@ -142,7 +142,7 @@ namespace Bluetooth{
 		return _sendBytes(reinterpret_cast<const uint8_t *>(str), strlen(str));
 	}
 
-	// Vyhodnocení textových odpovědí modulu (AOK, ERR, CMD>, END) bez strcmp nad neukončeným bufferem
+	// Evaluation of the module's text responses (AOK, ERR, CMD>, END) without strcmp over an unterminated buffer
 	static void _matchResponse(uint8_t c) {
 		memmove(_respWindow, _respWindow + 1, sizeof(_respWindow) - 1);
 		_respWindow[sizeof(_respWindow) - 1] = static_cast<char>(c);
@@ -187,8 +187,8 @@ namespace Bluetooth{
 		_engineState = EngineState::IDLE;
 	}
 
-	// Konec relace příkazového režimu: příkazy od indexu `keepFrom` (zařazené až během EXIT_CMD / WAIT_REBOOT, kdy
-	// je už automat neposílá) se posunou na začátek a provede je další relace "$$$" — nesmí se ztratit.
+	// End of a command mode session: commands from index `keepFrom` (queued only during EXIT_CMD / WAIT_REBOOT, when
+	// the state machine no longer sends them) are moved to the start and executed by the next "$$$" session — they must not be lost.
 	static void _finishJobKeepQueued(uint8_t keepFrom) {
 		uint8_t remaining = (keepFrom < _jobCount) ? static_cast<uint8_t>(_jobCount - keepFrom) : 0;
 		for (uint8_t i = 0; i < remaining; ++i) {
@@ -210,7 +210,7 @@ namespace Bluetooth{
 				if (_mode == Mode::COMMAND) {
 					_engineState = EngineState::SEND;
 				} else {
-					// "$$$" se nesmí smíchat s protokolovým rámcem — DMA musí mít prázdnou frontu
+					// "$$$" must not mix with a protocol frame — the DMA queue must be empty
 					if (!_txRing.empty()) break;
 					_sendString("$$$");
 					_engineTimestamp = now;
@@ -223,7 +223,7 @@ namespace Bluetooth{
 					_dollarTimeouts = 0;
 					_engineState = EngineState::SEND;
 				} else if ((now - _engineTimestamp) > CMD_TIMEOUT) {
-					// Modul nepřešel do příkazového režimu — zahodit úlohu
+					// The module did not enter command mode — drop the job
 					Debug::log(Debug::Level::WARNING, "ble", "$$$ timeout");
 					if (_dollarTimeouts < 255) _dollarTimeouts++;
 					if (_configJob) { _configJob = false; _configState = ConfigState::FAILED; }
@@ -237,7 +237,7 @@ namespace Bluetooth{
 				snprintf(line, sizeof(line), "%s\r", cmd);
 				_clearResponseFlags();
 				_rebootSeen = false;
-				if (!_sendString(line)) break; // TX fronta plná, zkusit příště
+				if (!_sendString(line)) break; // TX queue full, try next time
 				Debug::log(Debug::Level::DEBUG, "ble", "cmd %s", cmd);
 				_engineTimestamp = now;
 				_engineState = (strcmp(cmd, "R,1") == 0) ? EngineState::WAIT_REBOOT : EngineState::WAIT_RESP;
@@ -247,14 +247,14 @@ namespace Bluetooth{
 			case EngineState::WAIT_RESP:
 				if (_sawPrompt || _sawProgress || (now - _engineTimestamp) > CMD_TIMEOUT) {
 					if (_sawErr || !(_sawPrompt || _sawProgress)) {
-						// Samotný příkaz ("C", "Z") by v logu nic neříkal — doplnit kontext
+						// The bare command ("C", "Z") would say nothing in the log — add context
 						Debug::log(Debug::Level::WARNING, "ble", "cmd failed: %s", _jobCommands[_jobIndex]);
 					}
 					_jobIndex++;
 					if (_jobIndex < _jobCount) {
 						_engineState = EngineState::SEND;
 					} else {
-						// Návrat do datového režimu
+						// Return to data mode
 						_clearResponseFlags();
 						_sendString("---\r");
 						_engineTimestamp = now;
@@ -264,7 +264,7 @@ namespace Bluetooth{
 				break;
 
 			case EngineState::WAIT_REBOOT:
-				// Po restartu je modul v datovém režimu; zbytek úlohy se zahazuje
+				// After the restart the module is in data mode; the rest of the job is discarded
 				if (_rebootSeen || (now - _engineTimestamp) > REBOOT_TIMEOUT) {
 					if (_configJob) {
 						_configJob = false;
@@ -274,7 +274,7 @@ namespace Bluetooth{
 					_connected = false;
 					_streamOpen = false;
 					resetPeer();
-					// Zbytek této úlohy za R,1 se zahazuje; co se zařadilo až po R,1, zůstává
+					// The rest of this job after R,1 is discarded; whatever was queued after R,1 stays
 					_finishJobKeepQueued(static_cast<uint8_t>(_jobIndex + 1));
 				}
 				break;
@@ -282,7 +282,7 @@ namespace Bluetooth{
 			case EngineState::EXIT_CMD:
 				if (_sawEnd || (now - _engineTimestamp) > EXIT_TIMEOUT) {
 					_mode = Mode::DATA;
-					// Příkazy zařazené během čekání na END (např. X + C po reklamě, B po %CONNECT%) → další relace
+					// Commands queued while waiting for END (e.g. X + C after advertising, B after %CONNECT%) → next session
 					_finishJobKeepQueued(_jobIndex);
 				}
 				break;
@@ -366,10 +366,10 @@ namespace Bluetooth{
 
 		else if (!strcmp(rxCmd, "ERR_CONN")) return make_unique<Command>(Command::Type::ERR_CONN);
 
-		// --- Výsledky skenování (F) ---
-		// Připojitelná:    <adresa 12 hex>,<typ 0/1>,<jméno>,<UUID>,<RSSI hex>   (jméno i UUID mohou být prázdné)
-		// Nepřipojitelná:  <adresa 12 hex>,<typ 0/1>,<RSSI hex>,Brcst:<data hex>
-		// Na lavici např. "D88039FE5996,0,MIDIControlRemote,,F5" a "CAD46E49E827,1,AD,Brcst:07FF4C0012020001".
+		// --- Scan results (F) ---
+		// Connectable:      <address 12 hex>,<type 0/1>,<name>,<UUID>,<RSSI hex>   (name and UUID may be empty)
+		// Non-connectable:  <address 12 hex>,<type 0/1>,<RSSI hex>,Brcst:<data hex>
+		// On the bench e.g. "D88039FE5996,0,MIDIControlRemote,,F5" and "CAD46E49E827,1,AD,Brcst:07FF4C0012020001".
 		else {
 			const char *field[5] = {};
 			size_t fieldLen[5] = {};
@@ -434,7 +434,7 @@ namespace Bluetooth{
             (0b1 << DMA_CCR_TCIE_Pos)   // Transfer complete interrupt enable
         );
 
-        // Set up the DMA peripheral (adresa paměti se nastavuje při každém spuštění v _kickTx)
+        // Set up the DMA peripheral (the memory address is set on every start in _kickTx)
         stmcpp::reg::write(std::ref(DMA1_Channel2->CPAR), reinterpret_cast<uint32_t>(&USART2->TDR));
         NVIC_EnableIRQ(DMA1_Channel2_IRQn);
 
@@ -464,9 +464,9 @@ namespace Bluetooth{
 		// Bring RN487x out of reset
 		rst_n.set();
 
-		// Jednorázové čekání na %REBOOT% při startu (před spuštěním hlavní smyčky)
+		// One-time wait for %REBOOT% at startup (before the main loop starts)
 		duration timestamp = stmcpp::systick::getDuration();
-		// Až ~1,1 s spolu se 100 ms výše: kick, jinak by smyčkový watchdog (1000 ms) zaznamenal LOOP_STALL
+		// Up to ~1.1 s together with the 100 ms above: kick, otherwise the loop watchdog (1000 ms) would record LOOP_STALL
 		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT)){ wdg::kick(); }
 
 		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
@@ -476,14 +476,14 @@ namespace Bluetooth{
 		}else return 1;
 	}
 
-	// noinline + used: test_fault.py ji volá přes gdb (rekonfigurace pod watchdogem)
+	// noinline + used: test_fault.py calls it via gdb (reconfiguration under the watchdog)
 	[[gnu::used, gnu::noinline]] uint8_t configure() {
-		// SA,2: NoInputNoOutput (Just Works) — Base nemá klávesnici ani nezobrazuje passkey; bond vzniká jen
-		//       párováním z menu (B po %CONNECT% od nalezeného ovladače), bez dotazu na OLED.
-		// SR,0000: 16bit bitmapa funkcí; bez řízení toku (0x8000), RTS/CTS nejsou zapojené.
-		//          Prompt "CMD> " zůstává zapnutý, automat na něj čeká.
+		// SA,2: NoInputNoOutput (Just Works) — the Base has no keyboard and does not display a passkey; a bond is created only
+		//       by pairing from the menu (B after %CONNECT% from the found remote), without an OLED prompt.
+		// SR,0000: 16-bit feature bitmap; no flow control (0x8000), RTS/CTS are not wired.
+		//          The "CMD> " prompt stays enabled, the state machine waits for it.
 		// SS,C0: Device Information + UART Transparent.
-		// R,1: restart, aby se změny projevily; po %REBOOT% je modul v datovém režimu.
+		// R,1: restart so the changes take effect; after %REBOOT% the module is in data mode.
 		static const char *const commands[] = {"SN,MIDIControlBase", "SA,2", "SR,0000", "SS,C0", "R,1"};
 		if (!_queueJob(commands, sizeof(commands) / sizeof(commands[0]))) return 1;
 		_configJob = true;
@@ -493,13 +493,13 @@ namespace Bluetooth{
 
 	uint8_t reconnect() {
 		if (_engineState != EngineState::IDLE || _jobCount != 0) return 1;
-		// Z: zrušit případný probíhající pokus (ERR, když žádný neběží — nevadí)
-		// C: připojit se k poslednímu bondovanému zařízení (link se automaticky zabezpečí)
+		// Z: cancel a possible attempt in progress (ERR when none is running — harmless)
+		// C: connect to the last bonded device (the link is secured automatically)
 		static const char *const commands[] = {"Z", "C"};
 		return _queueJob(commands, 2) ? 0 : 1;
 	}
 
-	// noinline + used: testy ji volají přes gdb (Release ELF bez DWARF, symbol musí zůstat)
+	// noinline + used: tests call it via gdb (Release ELF without DWARF, the symbol must remain)
 	[[gnu::used, gnu::noinline]] bool queueCommand(const char *command) {
 		const char *const commands[] = {command};
 		return _queueJob(commands, 1);
@@ -512,9 +512,9 @@ namespace Bluetooth{
 
 	[[gnu::used, gnu::noinline]] uint8_t startPairing() {
 		if (isPairing()) return 1;
-		// Při spojení nejdřív odpojit (K,1) — Remote během spojení neadvertisuje.
-		// Z: zrušit probíhající pokus o připojení (auto-reconnect "C"), jinak modul nic nenaskenuje.
-		// F: skenování (výsledky chodí jako %...% i v datovém režimu, každé zařízení jednou).
+		// If connected, disconnect first (K,1) — the Remote does not advertise while connected.
+		// Z: cancel a connection attempt in progress (auto-reconnect "C"), otherwise the module scans nothing.
+		// F: scan (results arrive as %...% even in data mode, each device once).
 		static const char *const withDisconnect[] = {"K,1", "Z", "F"};
 		const char *const *commands = _connected ? withDisconnect : withDisconnect + 1;
 		uint8_t count = _connected ? 3 : 2;
@@ -543,10 +543,10 @@ namespace Bluetooth{
 	void setPairingState(PairingState state) { _pairingState = state; }
 	duration pairingElapsed() { return stmcpp::systick::getDuration() - _pairingStart; }
 
-	// noinline: bezpečné místo hlavní smyčky pro zastavení testy (dbg.Target.call)
+	// noinline: a safe place in the main loop for tests to halt at (dbg.Target.call)
 	[[gnu::noinline]] void process() {
 		uint8_t c;
-		// Dokud je místo ve frontě paketů; zbytek zůstane v RX bufferu na příště
+		// While there is room in the packet queue; the rest stays in the RX buffer for next time
 		while (_rxPackets.freeSpace() > 0 && _rxRing.pop(c)) {
 			if (c == protocol::FRAME_START) _inFrame = true;
 
@@ -555,7 +555,7 @@ namespace Bluetooth{
 					if (_peerAccepted) {
 						_rxPackets.push(_protocolParser.getPacket());
 					} else if (!_dropLogged) {
-						// Nezabezpečený nebo cizí protějšek: rámec se neprovede (Remote po %SECURED% opakuje)
+						// Unsecured or foreign peer: the frame is not executed (the Remote retries after %SECURED%)
 						_dropLogged = true;
 						Debug::log(Debug::Level::INFO, "ble", "frame from unaccepted peer dropped");
 					}
@@ -575,7 +575,7 @@ namespace Bluetooth{
 		duration now = stmcpp::systick::getDuration();
 		if (!_restartRstHigh) {
 			if ((now - _restartTimestamp) < RESTART_RST_LOW) return;
-			GPIOA->BSRR = (1u << 1); // RST nahoru
+			GPIOA->BSRR = (1u << 1); // RST high
 			_rebootSeen = false;
 			_restartRstHigh = true;
 			_restartTimestamp = now;
@@ -588,7 +588,7 @@ namespace Bluetooth{
 	}
 
 	void restart() {
-		// Zahodit rozpracované příkazy a stav spojení; USART/DMA zůstávají z init()
+		// Discard commands in progress and the connection state; USART/DMA stay as set up by init()
 		_finishJob();
 		_configJob = false;
 		_configState = ConfigState::NONE;
@@ -598,7 +598,7 @@ namespace Bluetooth{
 		_streamOpen = false;
 		_bonded = false;
 		resetPeer();
-		GPIOA->BSRR = (1u << (1 + 16)); // RST dolů
+		GPIOA->BSRR = (1u << (1 + 16)); // RST low
 		_restartRstHigh = false;
 		_restartTimestamp = stmcpp::systick::getDuration();
 		_restartState = RestartState::RUNNING;
@@ -658,7 +658,7 @@ namespace Bluetooth{
 	}
 
 	bool getProtocolPacket(protocol::Packet &pkt) {
-		// Pojistka: bez přijatého protějšku nic z fronty neprovádět
+		// Safeguard: without an accepted peer do not execute anything from the queue
 		if (!_peerAccepted) {
 			_rxPackets.clear();
 			return false;
@@ -683,7 +683,7 @@ namespace Bluetooth{
 			stmcpp::reg::set(std::ref(DMA1->IFCR), DMA_IFCR_CTCIF2);
 			stmcpp::reg::clear(std::ref(DMA1_Channel2->CCR), DMA_CCR_EN);
 
-			// Uvolnit odeslaný úsek a pokračovat dalším
+			// Release the sent section and continue with the next one
 			_txRing.consume(_txDmaLen);
 			_txDmaLen = 0;
 			_kickTx();
@@ -701,23 +701,23 @@ namespace Bluetooth{
 		if(isr & USART_ISR_RXNE){
 			char c = static_cast<char>(USART2->RDR);
 			if (!_receivingStatus && c == STATUS_DELIMITER){
-				// Začátek stavové zprávy
+				// Start of a status message
 				_receivingStatus = true;
 				_rxStatusIndex = 0;
 			}else if (_receivingStatus && c == STATUS_DELIMITER){
-				// Konec stavové zprávy → fronta (bez haldy)
+				// End of a status message → queue (no heap)
 				_rxStatus.text[_rxStatusIndex] = '\0';
 				_receivingStatus = false;
 				if (strcmp(_rxStatus.text, "REBOOT") == 0) _rebootSeen = true;
 				if (!_statusQueue.push(_rxStatus)) Debug::logFromIsr(Debug::ISR_BLE_STATUS_OVERFLOW);
 				_rxStatusIndex = 0;
 			}else if (_receivingStatus){
-				// Příliš dlouhé zprávy (např. výsledky skenování) se zkrátí
+				// Messages that are too long (e.g. scan results) are truncated
 				if (_rxStatusIndex < sizeof(_rxStatus.text) - 1) {
 					_rxStatus.text[_rxStatusIndex++] = c;
 				}
 			}else{
-				// Data (protokolové rámce i textové odpovědi) zpracuje hlavní smyčka
+				// Data (protocol frames and text responses) is processed by the main loop
 				_dataReceivedTimestamp = stmcpp::systick::getDuration();
 				if (!_rxRing.push(static_cast<uint8_t>(c))) Debug::logFromIsr(Debug::ISR_BLE_RX_OVERFLOW);
 			}

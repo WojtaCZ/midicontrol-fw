@@ -5,10 +5,10 @@
 #include <cstddef>
 #include <cmsis_compiler.h>
 
-// Lock-free kruhový buffer pro jednoho producenta a jednoho konzumenta (SPSC).
-// Producent zapisuje jen _head, konzument jen _tail, takže stačí, aby jeden z nich
-// běžel v přerušení a druhý v hlavní smyčce. Kapacita musí být mocnina dvou.
-// Žádná alokace na haldě — vhodné pro ISR.
+// Lock-free ring buffer for a single producer and a single consumer (SPSC).
+// The producer writes only _head, the consumer only _tail, so it is enough for one of them
+// to run in an interrupt and the other in the main loop. The capacity must be a power of two.
+// No heap allocation — suitable for ISRs.
 template<typename T, size_t N>
 class RingBuffer {
 	static_assert(N >= 2 && (N & (N - 1)) == 0, "Kapacita musi byt mocnina dvou");
@@ -17,16 +17,16 @@ public:
 	bool push(const T &item) {
 		size_t head = _head;
 		size_t next = (head + 1) & (N - 1);
-		if (next == _tail) return false; // Plno
+		if (next == _tail) return false; // Full
 		_buffer[head] = item;
-		__DMB(); // Data musí být zapsána dříve než index
+		__DMB(); // Data must be written before the index
 		_head = next;
 		return true;
 	}
 
 	bool pop(T &item) {
 		size_t tail = _tail;
-		if (tail == _head) return false; // Prázdno
+		if (tail == _head) return false; // Empty
 		__DMB();
 		item = _buffer[tail];
 		__DMB();
@@ -34,7 +34,7 @@ public:
 		return true;
 	}
 
-	// Ukazatel na nejstarší prvek bez vyjmutí (nullptr, když je prázdno)
+	// Pointer to the oldest element without removing it (nullptr when empty)
 	T *peek() {
 		size_t tail = _tail;
 		if (tail == _head) return nullptr;
@@ -42,7 +42,7 @@ public:
 		return &_buffer[tail];
 	}
 
-	// Zahození nejstaršího prvku (po peek())
+	// Drops the oldest element (after peek())
 	void drop() {
 		if (_tail == _head) return;
 		_tail = (_tail + 1) & (N - 1);
@@ -53,10 +53,10 @@ public:
 	size_t freeSpace() const { return N - 1 - size(); }
 	static constexpr size_t capacity() { return N - 1; }
 
-	// Smí volat jen konzument (nebo obě strany se zakázaným přerušením)
+	// May be called only by the consumer (or by both sides with interrupts disabled)
 	void clear() { _tail = _head; }
 
-	// Přímý přístup pro DMA: souvislý úsek od _tail (konzument)
+	// Direct access for DMA: contiguous run starting at _tail (consumer)
 	const T *contiguousData(size_t &len) const {
 		size_t tail = _tail;
 		size_t head = _head;
@@ -64,7 +64,7 @@ public:
 		return &_buffer[tail];
 	}
 
-	// Posun _tail o len prvků po dokončení DMA (konzument)
+	// Advances _tail by len elements after the DMA completes (consumer)
 	void consume(size_t len) { _tail = (_tail + len) & (N - 1); }
 
 private:

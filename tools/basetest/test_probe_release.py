@@ -1,6 +1,6 @@
-"""Harness pri odpojeni sondy uvolni DHCSR.C_DEBUGEN (jinak by skutecny fault na lavici skoncil na bkpt v fault::finish()
-a s DBG_IWDG_STOP by viselo i IWDG). Hodnota DHCSR pred pripojenim se cte z logu noveho openocd (-d3): examine ji cte
-jako prvni vec a teprve pak C_DEBUGEN nastavi sam (Target.dhcsr_on_attach)."""
+"""When detaching the probe the harness releases DHCSR.C_DEBUGEN (otherwise a real fault on the bench would end at a bkpt in fault::finish()
+and with DBG_IWDG_STOP the IWDG would hang too). The DHCSR value before attaching is read from the log of a new openocd (-d3): examine reads it
+as the first thing and only then sets C_DEBUGEN itself (Target.dhcsr_on_attach)."""
 
 import pytest
 
@@ -28,14 +28,14 @@ def test_stop_releases_debugen(target):
 
 def test_stop_all_atexit_releases_debugen(target):
     target.core_state()
-    dbg.stop_all()  # cesta atexit
+    dbg.stop_all()  # the atexit path
     d = target.dhcsr_on_attach()
     assert not d & C_DEBUGEN, f"C_DEBUGEN still set after stop_all(): DHCSR 0x{d:08x}"
     assert not d & S_HALT
 
 
 def test_halted_core_is_resumed_and_released(target):
-    """Zastavene jadro (jako po bkpt) se pri uvolneni rozbehne a C_DEBUGEN se vynuluje."""
+    """A halted core (as after a bkpt) is resumed on release and C_DEBUGEN is cleared."""
     target.tcl("halt")
     assert target.core_state()["halted"]
     target.stop()

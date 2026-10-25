@@ -1,14 +1,14 @@
-"""Offline testy dbg.Target bez sondy: sirka pristupu pri cteni cisel (ruling R36).
+"""Offline tests of dbg.Target without a probe: access width when reading numbers (ruling R36).
 
-600 s soak 2026-10-24 hlasil "base systick went back (271871 -> 271819)": u() skladalo 4 B hodnotu z bajtovych cteni
-(`read_memory addr 8 4`), ktera se roztrhla pres prenos, zatimco ISR inkrementoval ticks_. Zarovnane 2/4 B hodnoty se
-proto ctou jednim 16/32bit pristupem."""
+The 600 s soak of 2026-10-24 reported "base systick went back (271871 -> 271819)": u() assembled a 4 B value from byte-wise reads
+(`read_memory addr 8 4`), which got torn across the transfer while an ISR was incrementing ticks_. Aligned 2/4 B values are
+therefore read with a single 16/32-bit access."""
 
 import dbg
 
 
 class FakeTarget(dbg.Target):
-    """Target bez openocd: tcl() jen zaznamena prikaz a vrati odpoved z pameti `mem` (bajty little-endian)."""
+    """Target without openocd: tcl() only records the command and returns an answer from the memory `mem` (little-endian bytes)."""
 
     def __init__(self, mem: dict, syms: dict):
         self.name = "fake"

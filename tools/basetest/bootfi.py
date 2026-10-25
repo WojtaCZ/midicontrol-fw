@@ -1,12 +1,12 @@
-"""Vkladani poruch do bootloaderu base a remote (testy test_boot_*.py, plan docs/superpowers/plans/2026-10-24-...).
+"""Fault injection into the base and remote bootloaders (tests test_boot_*.py, plan docs/superpowers/plans/2026-10-24-...).
 
-Vypadek napajeni se na lavici napodobi tremi zpusoby (od hrubeho k presnemu):
-  * reset sondou v danem okamziku prenosu (`Board.reset()`),
-  * HW breakpoint / DWT watchpoint na danem kroku bootloaderu a pak reset (`break_then_reset`): FPB a DWT patri do
-    ladici domeny, systemovy reset je nemaze, takze lze bp nastavit v bezici aplikaci a zachyti se az v bootloaderu,
-  * glitch rutina v SRAM (`glitch/glitch.c`): spusti skutecne mazani/programovani flash a po N iteracich SYSRESETREQ,
-    tj. prerusi samotnou flash operaci.
-Skutecne odpojeni napajeni lavice neumi (base je napajena i mimo USB port, viz plan Task 0)."""
+A power loss is imitated on the bench in three ways (from coarse to precise):
+  * a probe reset at a given moment of the transfer (`Board.reset()`),
+  * an HW breakpoint / DWT watchpoint at a given bootloader step and then a reset (`break_then_reset`): FPB and DWT belong to the
+    debug domain, a system reset does not clear them, so the bp can be set in the running application and is caught only in the bootloader,
+  * a glitch routine in SRAM (`glitch/glitch.c`): starts a real flash erase/program and after N iterations SYSRESETREQ,
+    i.e. interrupts the flash operation itself.
+The bench cannot do a real power disconnect (the base is also powered outside the USB port, see plan Task 0)."""
 
 import os
 import re
@@ -38,12 +38,12 @@ BOARDS = {
 
 
 class ProductDefect(AssertionError):
-    """Prokazana vada produktu (ne harnessu): jen tuto vyjimku prijimaji xfail(raises=ProductDefect) testy F4/F4b/F5,
-    jakakoli jina chyba v nich je normalni selhani."""
+    """A proven product defect (not a harness one): only this exception is accepted by the xfail(raises=ProductDefect) tests F4/F4b/F5,
+    any other error in them is a normal failure."""
 
 
 def glitch_bin() -> str:
-    """Prelozi glitch.c (Thumb-1, bezi na M0+ i M4) do glitch/build/glitch.bin, je-li starsi nez zdroj."""
+    """Compiles glitch.c (Thumb-1, runs on M0+ and M4) into glitch/build/glitch.bin if it is older than the source."""
     src = os.path.join(GLITCH_DIR, "glitch.c")
     out_dir = os.path.join(GLITCH_DIR, "build")
     elf, binf = os.path.join(out_dir, "glitch.elf"), os.path.join(out_dir, "glitch.bin")
@@ -57,8 +57,8 @@ def glitch_bin() -> str:
 
 
 def _retry(fn, timeout=8.0, restart=None):
-    """Probe cteni behem resetu / kopirovani bootloaderem obcas selze ("read_memory: failed to read memory"). Po resetu
-    remote bezici openocd (hla) uz cist nemusi vubec, novy ano (bench 2026-10-24): po 1 s chyb se openocd restartuje."""
+    """Probe reads during a reset / during copying by the bootloader sometimes fail ("read_memory: failed to read memory"). After a reset of the
+    remote, the running openocd (hla) may not be able to read at all, while a new one can (bench 2026-10-24): after 1 s of errors openocd is restarted."""
     end = time.monotonic() + timeout
     first_fail = None
     while True:
@@ -81,10 +81,10 @@ class Board:
         self.b = BOARDS[name]
         self.t = dbg.Target(name)
         self._syms = None
-        self._armed = []  # [(addr, watch_write)]: novy openocd pri examine FPB/DWT vymaze, restart_server je obnovi
+        self._armed = []  # [(addr, watch_write)]: a new openocd clears FPB/DWT on examine, restart_server restores them
 
     def restart_server(self):
-        """openocd znovu (bez uvolneni ladeni: jen ukoncit proces), novy se k jadru pripoji znovu."""
+        """openocd again (without releasing debug: just terminate the process), the new one reattaches to the core."""
         p = dbg._servers.pop(self.name, None)
         if p and p.poll() is None:
             p.terminate()
@@ -93,9 +93,9 @@ class Board:
         for addr, watch in self._armed:
             self._arm_hw(addr, watch)
 
-    # -- symboly bootloaderu
+    # -- bootloader symbols
     def bl_sym(self, name: str) -> int:
-        """Adresa funkce bootloaderu podle demanglovaneho jmena bez parametru (napr. 'boot::flashprog::erasePageAt')."""
+        """Address of a bootloader function by its demangled name without parameters (e.g. 'boot::flashprog::erasePageAt')."""
         if self._syms is None:
             out = subprocess.run(["arm-none-eabi-nm", "-C", self.b["bl_elf"]], capture_output=True, text=True, check=True).stdout
             self._syms = {}
@@ -105,7 +105,7 @@ class Board:
                     self._syms.setdefault(parts[2].split("(")[0], int(parts[0], 16))
         return self._syms[name]
 
-    # -- jadro
+    # -- core
     def tcl(self, cmd: str, timeout: float = 5.0) -> str:
         if timeout <= 5.0:
             return self.t.tcl(cmd)
@@ -138,21 +138,21 @@ class Board:
         self.tcl("halt 500")
 
     def reg(self, name: str) -> int:
-        out = self.tcl(f"reg {name} force")  # vzdy z jadra, ne z cache openocd
+        out = self.tcl(f"reg {name} force")  # always from the core, not from the openocd cache
         m = re.search(r"0x[0-9a-fA-F]+", out)
         if not m:
             raise RuntimeError(f"reg {name}: {out!r}")
         return int(m.group(0), 16)
 
     def reset(self):
-        """Reset sondou (SYSRESETREQ, reset_config none); jadro bezi dal."""
+        """Probe reset (SYSRESETREQ, reset_config none); the core keeps running."""
         self.t.reset()
 
     def stop(self):
         try:
             if dbg.probe_holder(self.name) is None and dbg._servers.get(self.name):
                 self.disarm_all()
-        except Exception:  # noqa: BLE001 - jadro/sonda nedostupne
+        except Exception:  # noqa: BLE001 - core/probe unavailable
             pass
         self.t.stop()
 
@@ -172,8 +172,8 @@ class Board:
         return self.u32(FLASH_ECCR)
 
     def where(self) -> dict:
-        """Kde jadro je: kind = app | bootloader | hang (fault exception nebo lockup kdekoli) | unknown.
-        Kratce zastavi jadro (pc, xPSR) a pusti ho dal."""
+        """Where the core is: kind = app | bootloader | hang (fault exception or lockup anywhere) | unknown.
+        Briefly halts the core (pc, xPSR) and lets it run on."""
         def snap():
             st = self.core_state()
             was_halted = st["halted"]
@@ -186,8 +186,8 @@ class Board:
                     self.t.resume()
         st, pc, xpsr = _retry(snap)
         ipsr = xpsr & 0x1FF
-        # NMI, HardFault, MemManage, BusFault, UsageFault: v bootloaderu nekonecna smycka, v aplikaci s probem bkpt
-        # (bez proby reset a znovu totez) -> pro testy vzdy "hang"
+        # NMI, HardFault, MemManage, BusFault, UsageFault: an infinite loop in the bootloader, in the application with a probe bkpt
+        # (without a probe a reset and the same again) -> always "hang" for the tests
         if st["lockup"] or ipsr in (2, 3, 4, 5, 6):
             kind = "hang"
         elif 0x08000000 <= pc < self.b["app"]:
@@ -200,10 +200,10 @@ class Board:
             kind = "hang"
         return dict(kind=kind, pc=pc, ipsr=ipsr, lockup=st["lockup"])
 
-    # -- breakpointy / watchpointy
+    # -- breakpoints / watchpoints
     def arm(self, addr: int, watch_write=False):
-        """HW bp / DWT write watchpoint. wp nastaveny za behu jadra (hla) se tise neprojevi: nastavuje se pri zastavenem
-        jadru (bench 2026-10-24)."""
+        """HW bp / DWT write watchpoint. A wp set while the core runs (hla) silently has no effect: it is set while the
+        core is halted (bench 2026-10-24)."""
         self._arm_hw(addr, watch_write)
         self._armed.append((addr, watch_write))
 
@@ -219,8 +219,8 @@ class Board:
             raise RuntimeError(f"arm 0x{addr:08x}: {out}")
 
     def disarm_all(self):
-        """Zrusi vsechny bp/wp i primo v FPB/DWT: ty prezivaji systemovy reset i konec openocd (jen POR je nuluje) a
-        openocd 0.12 nema `rwp all`. Zapomenuty FPB bp bez ladeni (C_DEBUGEN = 0) = HardFault (bench 2026-10-24)."""
+        """Removes all bp/wp, directly in FPB/DWT as well: those survive a system reset and the end of openocd (only POR clears them) and
+        openocd 0.12 has no `rwp all`. A forgotten FPB bp without debug (C_DEBUGEN = 0) = HardFault (bench 2026-10-24)."""
         self._armed = []
         self.tcl("capture {rbp all}")
         for line in self.tcl("wp").splitlines():
@@ -235,9 +235,9 @@ class Board:
             self.tcl(f"write_memory 0x{0xE0001028 + 16 * i:08x} 32 {{0}}")
 
     def wait_halt(self, timeout: float) -> bool:
-        """Ceka na zastaveni (bp/wp). Behem mazani interni flash sbernice stoji a cteni DHCSR ~1 s selhava; obnova
-        spojeni (hla) pritom FPB/DWT vymaze (bench 2026-10-24: FP_COMP0 = 0 po chybach). Proto: chyby prezit bez
-        restartu openocd a po prvnim uspesnem cteni nastavit bp/wp znovu. BOOTFI_TRACE=<soubor> zapisuje prubeh."""
+        """Waits for a halt (bp/wp). While the internal flash is being erased the bus stalls and DHCSR reads fail for ~1 s; connection
+        recovery (hla) then clears FPB/DWT (bench 2026-10-24: FP_COMP0 = 0 after errors). Hence: survive the errors without
+        restarting openocd and set the bp/wp again after the first successful read. BOOTFI_TRACE=<file> logs the progress."""
         end = time.monotonic() + timeout
         t0 = time.monotonic()
         trace = os.environ.get("BOOTFI_TRACE")
@@ -266,8 +266,8 @@ class Board:
         return False
 
     def break_then_reset(self, addr: int, *, hits=1, watch_write=False, timeout=30.0, armed=False, before_reset=None) -> bool:
-        """Ceka na `hits`-ty zasah bp/wp na `addr` (nastavi ho, neni-li `armed`), pak zrusi bp/wp a resetuje jadro
-        (= vypadek napajeni presne tady). False, kdyz se bp do `timeout` nezasahl (bp se zrusi, jadro bezi)."""
+        """Waits for the `hits`-th hit of the bp/wp at `addr` (sets it unless `armed`), then removes the bp/wp and resets the core
+        (= a power loss exactly here). False if the bp was not hit within `timeout` (the bp is removed, the core runs)."""
         if not armed:
             self.arm(addr, watch_write)
         try:
@@ -288,8 +288,8 @@ class Board:
 
     # -- glitch
     def glitch(self, op: int, addr: int, delay: int = 0, w0=0, w1=0, timeout=5.0):
-        """Spusti glitch rutinu ze zastaveneho jadra. op 0/1: flash operace + reset po `delay` iteracich (vraci None);
-        op 2/3: mereni, vraci pocet iteraci do konce operace (bit 31 = chyba, SR v dolnich bitech)."""
+        """Runs the glitch routine from a halted core. op 0/1: flash operation + reset after `delay` iterations (returns None);
+        op 2/3: measurement, returns the number of iterations until the operation ends (bit 31 = error, SR in the low bits)."""
         page = (addr - 0x08000000) // self.b["page"]
         self.halt()
         self.tcl(f"load_image {glitch_bin()} 0x{GLITCH_ADDR:08x} bin")
@@ -306,14 +306,14 @@ class Board:
             self.tcl("reset run")
             time.sleep(0.2)
             return r
-        time.sleep(0.3)  # reset uz probehl
+        time.sleep(0.3)  # the reset has already happened
         if self.halted():
             self.t.resume()
         return None
 
-    # -- obnova
+    # -- recovery
     def swd_restore(self, hexfile=None):
-        """Nahraje -update.hex (cela oblast aplikace, 0xFF az do APP_END) a spusti; posledni zachrana."""
+        """Flashes -update.hex (the whole application region, 0xFF up to APP_END) and runs it; the last resort."""
         hexfile = hexfile or self.b["update_hex"]
         self.halt()
         for attempt in range(2):
@@ -328,6 +328,6 @@ class Board:
         return out
 
     def app_matches(self, image=None) -> bool:
-        """Oblast aplikace ve flash = update soubor (vcetne traileru); `image` = cesta nebo bajty, default build."""
+        """The application region in flash = the update file (including the trailer); `image` = path or bytes, default the build."""
         img = image if isinstance(image, (bytes, bytearray)) else open(image or self.b["update_bin"], "rb").read()
         return self.flash_read(self.b["app"], len(img)) == img

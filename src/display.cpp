@@ -36,11 +36,11 @@ namespace display {
     uint8_t txBuffer[9];
     volatile bool connected = false;
     volatile bool changed = true;
-    volatile bool txBusy = false;        // TX DMA právě vysílá rámec
-    volatile bool rxFrameReady = false;  // ISR přijal rámec z displeje → ozvěna do USB
+    volatile bool txBusy = false;        // TX DMA is currently transmitting a frame
+    volatile bool rxFrameReady = false;  // ISR received a frame from the display → echo to USB
     static bool midiEchoPending = false;
 
-    static constexpr uint8_t BLANK = 0xE0; // Zhasnutá číslice (0xE v horním nibblu)
+    static constexpr uint8_t BLANK = 0xE0; // Blank digit (0xE in the upper nibble)
 
     static stmcpp::gpio::pin<stmcpp::gpio::port::portc, 13> disp_sense (stmcpp::gpio::mode::input);
 
@@ -114,8 +114,8 @@ namespace display {
         stmcpp::reg::set(std::ref(DMA2_Channel3->CCR), DMA_CCR_EN); 
     }
 
-    // Odeslání jednoho rámce na displej. Volá se jen z process() a jen když TX DMA neběží,
-    // takže se rozpracovaný rámec (9 B při 1200 Bd ≈ 75 ms) nikdy nepřeruší.
+    // Sends one frame to the display. Called only from process() and only when the TX DMA is not running,
+    // so a frame in progress (9 B at 1200 Bd ≈ 75 ms) is never interrupted.
     static void startFrame(){
         LED::notifyActivity(LED::PIXEL_DISPLAY);
         memcpy(txBuffer, currentState, sizeof(txBuffer));
@@ -132,15 +132,15 @@ namespace display {
         changed = false;
     }
 
-    // Periodické odeslání stavu (obnova displeje + SysEx ozvěna do PC). Neblokuje, jen naplánuje.
+    // Periodic sending of the state (display refresh + SysEx echo to the PC). Does not block, only schedules.
     void sendState(){
         changed = true;
         midiEchoPending = true;
     }
 
-    // Hlavní smyčka: odeslání nejvýše jednoho rámce, SysEx ozvěna (TinyUSB se nesmí volat z ISR)
+    // Main loop: sends at most one frame, SysEx echo (TinyUSB must not be called from an ISR)
     void process(){
-        // Připojení/odpojení displeje (příznak mění EXTI) do logu
+        // Display connect/disconnect (the flag is changed by EXTI) into the log
         static bool loggedConnected = false;
         bool nowConnected = connected;
         if (nowConnected != loggedConnected) {
@@ -162,7 +162,7 @@ namespace display {
         }
     }
 
-    // Zápis číslice: 0-9 = číslice, cokoliv jiného (BCD nibble 0xF) = zhasnuto
+    // Digit write: 0-9 = digit, anything else (BCD nibble 0xF) = blank
     static uint8_t digitState(uint8_t nibble){
         return (nibble <= 9) ? nibble : BLANK;
     }
@@ -172,7 +172,7 @@ namespace display {
             clear();
             return;
         }
-        if (len < 5) return; // Neplatná délka — NOW_PLAYING_INFO se nepotvrzuje, jen ignorujeme
+        if (len < 5) return; // Invalid length — NOW_PLAYING_INFO is not acknowledged, just ignored
 
         uint8_t song_h = payload[0];
         uint8_t song_l = payload[1];
@@ -180,18 +180,18 @@ namespace display {
         uint8_t letter = payload[3];
         uint8_t led    = payload[4];
 
-        // Číslo písně: každá číslice zvlášť, zobrazená přesně na své pozici (" 401", "513 ")
+        // Song number: each digit separately, shown exactly at its position (" 401", "513 ")
         if (song_h == protocol::NPI_BLANK) {
             for (uint8_t i = 3; i <= 6; ++i) currentState[i] = BLANK;
         } else if (!(song_h == protocol::NPI_NO_CHANGE && song_l == protocol::NPI_NO_CHANGE)) {
-            // "Beze změny" jen při song_h = song_l = 0xFF; 0xFF 0x12 je krátké číslo "  12"
-            currentState[6] = digitState(song_h >> 4);   // tisíce
-            currentState[5] = digitState(song_h & 0x0F); // stovky
-            currentState[4] = digitState(song_l >> 4);   // desítky
-            currentState[3] = digitState(song_l & 0x0F); // jednotky
+            // "No change" only when song_h = song_l = 0xFF; 0xFF 0x12 is the short number "  12"
+            currentState[6] = digitState(song_h >> 4);   // thousands
+            currentState[5] = digitState(song_h & 0x0F); // hundreds
+            currentState[4] = digitState(song_l >> 4);   // tens
+            currentState[3] = digitState(song_l & 0x0F); // ones
         }
 
-        // Sloka: desítky a jednotky, opět po číslicích ("1 " ≠ " 1")
+        // Verse: tens and ones, again digit by digit ("1 " ≠ " 1")
         if (verse == protocol::NPI_BLANK) {
             currentState[2] = BLANK;
             currentState[1] = BLANK;
@@ -200,12 +200,12 @@ namespace display {
             currentState[1] = digitState(verse & 0x0F);
         }
 
-        // Písmeno: 0x0A-0x0D = A-D, ostatní = zhasnuto
+        // Letter: 0x0A-0x0D = A-D, anything else = blank
         if (letter != protocol::NPI_NO_CHANGE) {
             currentState[7] = (letter >= 0x0A && letter <= 0x0D) ? letter : BLANK;
         }
 
-        // LED: 1 červená, 2 zelená, 3 modrá, 4 žlutá, 0x00/0x0F zhasnuto
+        // LED: 1 red, 2 green, 3 blue, 4 yellow, 0x00/0x0F off
         if (led != protocol::NPI_NO_CHANGE) {
             switch (led) {
                 case 0x01: currentState[8] = RED; break;
@@ -216,7 +216,7 @@ namespace display {
             }
         }
 
-        // Jeden rámec na celou zprávu
+        // One frame for the whole message
         sendState();
     }
 
@@ -269,7 +269,7 @@ namespace display {
         sendState();
     }
 
-    // Znak číslice pro OLED: '0'-'9' nebo mezera
+    // Digit character for the OLED: '0'-'9' or space
     static char digitChar(uint8_t state){
         return ((state & 0xF0) == 0 && (state & 0x0F) <= 9) ? static_cast<char>('0' + (state & 0x0F)) : ' ';
     }
@@ -305,12 +305,12 @@ namespace display {
         return changed;
     }
 
-    // Převod interního stavu číslice na SysEx byte (0x00-0x09 nebo 0x0F=off)
+    // Converts the internal digit state to a SysEx byte (0x00-0x09 or 0x0F=off)
     static uint8_t stateToSysexDigit(uint8_t state) {
         return (state & 0xF0) == 0xE0 ? 0x0F : (state & 0x0F);
     }
 
-    // Převod interního stavu LED na SysEx byte
+    // Converts the internal LED state to a SysEx byte
     static uint8_t stateToSysexLed(uint8_t state) {
         switch(state) {
             case RED:    return 0x01;
@@ -321,28 +321,28 @@ namespace display {
         }
     }
 
-    // Převod interního stavu písmene na SysEx byte
+    // Converts the internal letter state to a SysEx byte
     static uint8_t stateToSysexLetter(uint8_t state) {
         uint8_t val = state & 0x0F;
         return (val >= 0x0A && val <= 0x0D) ? val : 0x0F;
     }
 
     // Send display state to MIDI as SysEx
-    // Formát: F0 4D 43 01 00 S3 S2 S1 S0 V1 V0 LETTER LED F7
-    // Všechny datové byty jsou v rozsahu 0x00-0x0F (7-bit safe)
-    // Výrobce 0x4D zůstává záměrně: stejný rámec "F0 4D 43 01 00 ..." je kotva v souborech písní,
-    // kterou PC parsuje, a ozvěna slouží právě k nahrání stavu displeje do souboru.
-    // Změna jen ozvěny na 0x7D by rozdělila formát; přechod na 0x7D musí proběhnout naráz v souborech i PC.
+    // Format: F0 4D 43 01 00 S3 S2 S1 S0 V1 V0 LETTER LED F7
+    // All data bytes are in the range 0x00-0x0F (7-bit safe)
+    // Manufacturer 0x4D stays on purpose: the same frame "F0 4D 43 01 00 ..." is the anchor in the song files
+    // that the PC parses, and the echo exists precisely to record the display state into a file.
+    // Changing only the echo to 0x7D would split the format; the switch to 0x7D must happen at once in both the files and the PC.
     static constexpr uint8_t SYSEX_MANUFACTURER = 0x4D;
 
     bool sendToMIDI(){
 
-        uint8_t s3 = stateToSysexDigit(currentState[6]); // tisíce
-        uint8_t s2 = stateToSysexDigit(currentState[5]); // stovky
-        uint8_t s1 = stateToSysexDigit(currentState[4]); // desítky
-        uint8_t s0 = stateToSysexDigit(currentState[3]); // jednotky
-        uint8_t v1 = stateToSysexDigit(currentState[2]); // desítky sloky
-        uint8_t v0 = stateToSysexDigit(currentState[1]); // jednotky sloky
+        uint8_t s3 = stateToSysexDigit(currentState[6]); // thousands
+        uint8_t s2 = stateToSysexDigit(currentState[5]); // hundreds
+        uint8_t s1 = stateToSysexDigit(currentState[4]); // tens
+        uint8_t s0 = stateToSysexDigit(currentState[3]); // ones
+        uint8_t v1 = stateToSysexDigit(currentState[2]); // verse tens
+        uint8_t v0 = stateToSysexDigit(currentState[1]); // verse ones
         uint8_t letter = stateToSysexLetter(currentState[7]);
         uint8_t led = stateToSysexLed(currentState[8]);
 
@@ -355,14 +355,14 @@ namespace display {
             {0x06, led,  0xF7, 0x00},      // LED, SysEx end (CIN=6: 2-byte end)
         };
 
-        // Do USB jde až z hlavní smyčky (midi::process), celá zpráva bez prokládání
+        // It goes to USB only from the main loop (midi::process), the whole message without interleaving
         return midi::queueUsbSysex(packets, sizeof(packets) / sizeof(packets[0]));
     }
 
     extern "C" void EXTI15_10_IRQHandler(){
         display::disp_sense.clearInterruptFlag(); // Clear the interrupt flag
         bool nowConnected = !disp_sense.read(); // Update the connected state based on the pin state
-        if (nowConnected && !display::connected) display::changed = true; // Po připojení poslat aktuální stav
+        if (nowConnected && !display::connected) display::changed = true; // After connecting, send the current state
         display::connected = nowConnected;
         NVIC_ClearPendingIRQ(EXTI15_10_IRQn);  
     }
@@ -385,7 +385,7 @@ namespace display {
         if(stmcpp::reg::read(std::ref(DMA2->ISR)) & DMA_ISR_TCIF3){
             stmcpp::reg::set(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF3); 
             memcpy(display::currentState, display::rxBuffer, sizeof(display::rxBuffer)); // Copy the received data to the current state
-            // SysEx ozvěnu pošle hlavní smyčka (TinyUSB není ISR-safe)
+            // The SysEx echo is sent by the main loop (TinyUSB is not ISR-safe)
             display::rxFrameReady = true;
         }
 

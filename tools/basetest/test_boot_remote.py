@@ -1,11 +1,11 @@
-"""Odolnost OTA remote a jeho bootloaderu (plan docs/superpowers/plans/2026-10-24-bootloader-robustness-tests.md,
-Tasks 5-6). OTA jde fwclientem pres base (protokolovy CDC, keepalive). Dva rozlisitelne obrazy se stejnym kodem:
-A = build/midicontroller-fw-update.bin, B = totez s jinou verzi v traileru (jiny trailer -> jiny obsah flash), takze
-je z flash videt, ktery obraz remote ma. Na zacatku a konci kazdeho testu ma remote A nebo B, je spojen s base a
-jadro nevisi; jinak fixture obnovi A pres SWD a test selze.
+"""Robustness of the remote OTA and its bootloader (plan docs/superpowers/plans/2026-10-24-bootloader-robustness-tests.md,
+Tasks 5-6). OTA goes via fwclient through the base (protocol CDC, keepalive). Two distinguishable images with the same code:
+A = build/midicontroller-fw-update.bin, B = the same with a different version in the trailer (different trailer -> different flash content), so
+the flash shows which image the remote has. At the start and end of every test the remote has A or B, is linked to the base and the
+core is not hung; otherwise the fixture restores A over SWD and the test fails.
 
-Bp v bootloaderu remote: FPB/DWT systemovy reset neprezije jen POR, proto se bp nastavi v bezici aplikaci a zachyti
-se po jejim resetu (OTA END -> NVIC_SystemReset -> bootloader aplikuje)."""
+Bp in the remote bootloader: FPB/DWT survive a system reset, only POR clears them, so the bp is set in the running application and caught
+after its reset (OTA END -> NVIC_SystemReset -> the bootloader applies)."""
 
 import os
 import time
@@ -27,8 +27,8 @@ OUT = os.environ.get("BASETEST_OUT", "/tmp")
 
 
 def installed(rb, settle=20.0) -> str:
-    """A | B | other. Behem aplikace bootloaderem (kopie ~ sekundy) se obsah meni: dokud neni A ani B a jadro neni v
-    aplikaci, pockat (max `settle` s)."""
+    """A | B | other. While the bootloader is applying (copy ~ seconds) the content changes: as long as it is neither A nor B and the core is not in
+    the application, wait (max `settle` s)."""
     end = time.monotonic() + settle
     while True:
         for name, img in (("A", IMG_A), ("B", IMG_B)):
@@ -68,8 +68,8 @@ def _remote_sym(suffix: str) -> int:
 
 
 def remote_never_received() -> bool:
-    """Remote od bootu od base nic neprijal: link::s_lastRx == 0 a link::s_keepaliveSeen == 0 (base posila keepalive
-    kazde 2 s)."""
+    """The remote has received nothing from the base since boot: link::s_lastRx == 0 and link::s_keepaliveSeen == 0 (the base sends keepalive
+    every 2 s)."""
     rb = bootfi.Board("remote")
     try:
         last = rb.u32(_remote_sym("link::(anonymous namespace)::s_lastRx"))
@@ -80,9 +80,9 @@ def remote_never_received() -> bool:
 
 
 def linked(base_board, timeout=40):
-    """Spojeni s remote. Nalez F6: po rebootu remote muze base hlasit spojeni zabezpecene, ale remote od bootu nic
-    neprijme ani neposle a nikdo to neopravi (ani odpojeni/pripojeni z base). To se tu pozna (30 s ticha pri secured linku), zapise do F6_LOG a remote se
-    resetuje, aby mohly bezet dalsi testy; pocet vyskytu je v reportu."""
+    """Link to the remote. Finding F6: after a remote reboot the base can report a secured link, but the remote neither receives nor sends anything since
+    boot and nothing fixes it (not even a disconnect/connect from the base). It is recognized here (30 s of silence on a secured link), written to F6_LOG and the remote is
+    reset so that further tests can run; the number of occurrences is in the report."""
     t = base_board.t
     ok = lambda: t.read_bool("Bluetooth::_streamOpen") and remote_alive(t)  # noqa: E731
     try:
@@ -111,14 +111,14 @@ def link(base):
 
 @pytest.fixture
 def remote_ok(rb, base):
-    """Pred testem: A nebo B, spojeni. Po testu: A nebo B nainstalovane, jadro v aplikaci, spojeni zpet."""
+    """Before the test: A or B, linked. After the test: A or B installed, core in the application, link back."""
     linked(base)
     yield
     hung = None
     try:
         w = rb.where()
         if w["kind"] != "app":
-            time.sleep(15)  # mozna jeste aplikuje (kopie trva sekundy)
+            time.sleep(15)  # it may still be applying (the copy takes seconds)
             w = rb.where()
         if w["kind"] != "app" or installed(rb) == "other":
             hung = dict(where=w, installed=installed(rb))
@@ -140,7 +140,7 @@ def ota(link, img, **kw) -> str:
 
 
 def wait_app(rb, timeout=30):
-    """Po resetu remote: ceka, az jadro bezi v aplikaci (bootloader muze kopirovat ~ sekundy)."""
+    """After a remote reset: waits until the core runs in the application (the bootloader may copy for ~ seconds)."""
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         w = rb.where()
@@ -151,7 +151,7 @@ def wait_app(rb, timeout=30):
 
 
 def no_reapply(rb, timeout=4.0) -> bool:
-    """Reset remote s bp na flashprog::eraseRange: nezasazeny = pending je smazany (zadna dalsi kopie)."""
+    """Remote reset with a bp on flashprog::eraseRange: not hit = pending is cleared (no further copy)."""
     rb.arm(rb.bl_sym("boot::flashprog::eraseRange"))
     rb.reset()
     hit = rb.wait_halt(timeout)
@@ -161,11 +161,11 @@ def no_reapply(rb, timeout=4.0) -> bool:
     return not hit
 
 
-# ------------------------------------------------------------------------------- Task 5: preruseny staging
+# ------------------------------------------------------------------------------- Task 5: interrupted staging
 
 @pytest.mark.parametrize("how", ["stop_50", "no_end", "ble_reset_50", "base_reset_50", "remote_reset_50"])
 def test_remote_staging_abort(rb, base, link, remote_ok, how):
-    """Preruseny prenos: remote dal bezi se starym obrazem, reset ho neaplikuje; pak cely OTA projde."""
+    """Interrupted transfer: the remote keeps running the old image, a reset does not apply it; then a full OTA goes through."""
     before = installed(rb)
     assert before in ("A", "B")
     img = other(before)
@@ -192,12 +192,12 @@ def test_remote_staging_abort(rb, base, link, remote_ok, how):
 
         try:
             res = fwclient.Client(link, proto.ADDR_REMOTE, retries=1).send_image(img, on_chunk=on_chunk)
-        except Exception as e:  # noqa: BLE001 - base reset -> CDC zmizi
+        except Exception as e:  # noqa: BLE001 - base reset -> the CDC disappears
             res = f"exception {e!r}"
         assert fired
     print(f"{how}: {res}")
     if res == "ok":
-        # prenos vydrzel (napr. 3 s RN4870 v resetu: retry PC + znovupripojeni): pak musi byt novy obraz nainstalovany
+        # the transfer survived (e.g. 3 s of RN4870 in reset: PC retry + reconnection): then the new image must be installed
         assert how in ("ble_reset_50",), f"{how}: transfer reported ok"
         time.sleep(2)
         assert wait_app(rb, 40)["kind"] == "app" and installed(rb) == ("B" if before == "A" else "A")
@@ -208,10 +208,10 @@ def test_remote_staging_abort(rb, base, link, remote_ok, how):
     if how == "base_reset_50":
         link.detach()
         link.attach(settle=2.0)
-        link.error = None  # vlakno spadlo pri zmizeni CDC (ocekavane); attach ho nahradil
+        link.error = None  # the thread died when the CDC disappeared (expected); attach replaced it
     rb.stop()
     base.stop()
-    # reset remote: bootloader nesmi nic aplikovat
+    # remote reset: the bootloader must not apply anything
     assert no_reapply(rb), "bootloader applied an interrupted staging"
     assert wait_app(rb)["kind"] == "app"
     assert installed(rb) == before
@@ -236,7 +236,7 @@ BAD = {
 
 @pytest.mark.parametrize("kind", list(BAD))
 def test_remote_bad_images(rb, base, link, remote_ok, kind):
-    """Vadny obraz: END NAK (CRC_FAIL/BAD_SIZE), remote se nerestartuje, pending se nenastavi."""
+    """Bad image: END NAK (CRC_FAIL/BAD_SIZE), the remote does not restart, pending is not set."""
     before = installed(rb)
     rb.stop()
     res = ota(link, fwclient.make_image(other(before), **BAD[kind]))
@@ -247,13 +247,13 @@ def test_remote_bad_images(rb, base, link, remote_ok, kind):
     assert wait_app(rb)["kind"] == "app" and installed(rb) == before
 
 
-# ------------------------------------------------------------------- Task 5: vypadek pri aplikaci v bootloaderu
+# ------------------------------------------------------------------- Task 5: power loss during apply in the bootloader
 
 def stage_halted_at_reboot(rb, link):
-    """OTA druheho obrazu az po END, aplikace zastavena na fwupdate::reboot() (jeste pred svym resetem; pending = 1 je
-    zapsany). Bp bootloaderu se pak nastavi pri zastavenem jadru a reset udela openocd sam ("reset run"): po resetu,
-    ktery si remote udela sam, openocd (hla) jadro ztrati a novy openocd pri examine FPB/DWT smaze (bench 2026-10-24),
-    takze pozdni bp v bootloaderu se minuly. Vraci (pred, cil)."""
+    """OTA of the other image up to and including END, application halted at fwupdate::reboot() (before its own reset; pending = 1 is
+    written). The bootloader bp is then set while the core is halted and openocd does the reset itself ("reset run"): after a reset
+    that the remote does by itself, openocd (hla) loses the core and a new openocd clears FPB/DWT on examine (bench 2026-10-24),
+    so late bps in the bootloader were missed. Returns (before, target)."""
     before = installed(rb)
     img = other(before)
     rb.stop()
@@ -269,14 +269,14 @@ def stage_halted_at_reboot(rb, link):
 
 
 def boot_bootloader(rb):
-    """Ze zastavene aplikace (stage_halted_at_reboot) reset sondou -> bootloader aplikuje; bp uz nastavene."""
+    """From the halted application (stage_halted_at_reboot) a probe reset -> the bootloader applies; the bp is already set."""
     rb.tcl("reset run")
 
 
 def stage_and_break(rb, link, addr, *, hits=1, watch_write=False, timeout=60, before_reset=None, expect_r0=None):
-    """Bp v bootloaderu na `addr` (hits-ty zasah), pak reset = vypadek tam. Vraci (pred, cil). `expect_r0`: prvni
-    argument funkce na zasahu (adresa stranky/bloku) - kontrola, ze pocitany zasah nepreskocil (po obnove spojeni se
-    FPB maze a znovu nastavuje; review 2026-10-25)."""
+    """A bp in the bootloader at `addr` (the hits-th hit), then reset = a power loss there. Returns (before, target). `expect_r0`: the first
+    argument of the function at the hit (page/block address) - a check that the counted hit did not skip (after a connection recovery
+    FPB is cleared and set again; review 2026-10-25)."""
     before, want = stage_halted_at_reboot(rb, link)
     rb.arm(addr, watch_write)
     boot_bootloader(rb)
@@ -314,9 +314,9 @@ def test_remote_bp_erase(rb, base, link, remote_ok, hit):
     converged(rb, want)
 
 
-# Kopie: copyRange(2048, size) a pak copyRange(0, 2048) po 256 B = jedno volani flashprog::program na blok. Bp na
-# program s poctem zasahu (DWT watchpointy na adresy flash byly na M0+ s hla nespolehlive: 2 z 4 behu minuly).
-PROG_REST = (len(IMG_A) - 2048 + 255) // 256  # volani pred vektorovou strankou
+# Copy: copyRange(2048, size) and then copyRange(0, 2048) in 256 B steps = one flashprog::program call per block. A bp on
+# program with a hit count (DWT watchpoints on flash addresses were unreliable on the M0+ with hla: 2 of 4 runs missed).
+PROG_REST = (len(IMG_A) - 2048 + 255) // 256  # calls before the vector page
 
 
 def test_remote_bp_copy_mid(rb, base, link, remote_ok):
@@ -325,8 +325,8 @@ def test_remote_bp_copy_mid(rb, base, link, remote_ok):
     converged(rb, want)
 
 
-# j = blok vektorove stranky (0..7), pred jehoz zapisem prijde "vypadek": 0 = nic z vektorove stranky, 1 = prvni
-# blok (SP, reset vektor, prvni vektory) uz zapsany, 7 = vse krome posledniho bloku.
+# j = vector page block (0..7) before whose write the "power loss" comes: 0 = nothing of the vector page, 1 = the first
+# block (SP, reset vector, first vectors) already written, 7 = everything except the last block.
 @pytest.mark.parametrize("j", [0, 1, 7])
 def test_remote_bp_vector_copy(rb, base, link, remote_ok, j):
     _, want = stage_and_break(rb, link, rb.bl_sym("boot::flashprog::program"), hits=PROG_REST + 1 + j, expect_r0=APP + 256 * j)
@@ -339,9 +339,9 @@ def test_remote_bp_before_clear(rb, base, link, remote_ok):
 
 
 def test_remote_bp_clear_between(rb, base, link, remote_ok):
-    """Reset mezi smazanim a zapisem hlavicky v clearStagePending (writeData vola jen ono): bez magic -> zadna kopie.
-    Bp na writeData se po resetu remote spolehlive minul (3/3); proto zastavit na clearStagePending (to chodi), pak
-    pri zastavenem jadru nastavit writeData a dojet k nemu."""
+    """Reset between the erase and the header write in clearStagePending (only it calls writeData): without magic -> no copy.
+    A bp on writeData reliably missed after a remote reset (3/3); so halt at clearStagePending (that works), then
+    set writeData while the core is halted and run up to it."""
     wd = rb.bl_sym("boot::w25q::writeData")
     reached = []
 
@@ -357,7 +357,7 @@ def test_remote_bp_clear_between(rb, base, link, remote_ok):
 
 
 def test_remote_reset_every_boot_converges(rb, base, link, remote_ok):
-    """Reset uprostred kopie na 3 bootech po sobe; 4. boot dokonci."""
+    """Reset in the middle of the copy on 3 boots in a row; the 4th boot completes it."""
     copy = rb.bl_sym("boot::copyRange")
     _, want = stage_and_break(rb, link, copy, hits=1)
     for i in range(2):
@@ -365,23 +365,23 @@ def test_remote_reset_every_boot_converges(rb, base, link, remote_ok):
     converged(rb, want)
 
 
-# --------------------------------------------------------------- Task 5: chyby SPI / flash pri aplikaci
+# --------------------------------------------------------------- Task 5: SPI / flash errors during apply
 
 def _force_return_false(rb):
-    """Funkce na svem prvnim instrukci hned vrati 0: r0 = 0 a pokracovat na lr. `resume <adr>` primo (dbg resume =
-    halt + resume by upravene registry z cache zahodil)."""
+    """The function returns 0 right at its first instruction: r0 = 0 and continue at lr. `resume <adr>` directly (dbg resume =
+    halt + resume would discard the modified registers from the cache)."""
     lr = rb.reg("lr") & ~1
     rb.tcl("reg r0 0")
     rb.tcl(f"resume 0x{lr:08x}")
 
 
 def _run_with_forced_failures(rb, should_fail, timeout=6.0):
-    """Bp (uz nastaveny pred END) na funkci: pri kazdem zasahu, kde should_fail(lr), funkce hned vrati false. Konci po
-    `timeout` bez zasahu. Vraci pocet vynucenych chyb."""
+    """A bp (already set before END) on a function: at every hit where should_fail(lr), the function returns false immediately. Ends after
+    `timeout` without a hit. Returns the number of forced failures."""
     forced = 0
     try:
         while rb.wait_halt(timeout):
-            rb.tcl("halt")  # openocd po restartu o zastaveni nemusi vedet: registry by byly prazdne
+            rb.tcl("halt")  # openocd after a restart may not know about the halt: the registers would be empty
             lr = rb.reg("lr")
             if should_fail(lr):
                 _force_return_false(rb)
@@ -401,9 +401,9 @@ def _in_apply(rb):
 
 
 def test_remote_spi_read_error_transient(rb, base, link, remote_ok):
-    """SPI cteni pri overeni obrazu jednou selze (prvni cteni traileru ve stagedImageGood): WriteError, druhy pokus ve
-    stejnem bootu obraz aplikuje. (Varianta "selze ve vsech 3 pokusech" se na lavici spolehlive vynutit nepodarila:
-    resume po bp na hla obcas zastaveni nepredal; neni pokryta.)"""
+    """An SPI read during image verification fails once (the first trailer read in stagedImageGood): WriteError, a second attempt in the
+    same boot applies the image. (The variant "fails in all 3 attempts" could not be forced reliably on the bench:
+    resume after a bp on hla sometimes did not pass on the halt; it is not covered.)"""
     before, want = stage_halted_at_reboot(rb, link)
     rb.arm(rb.bl_sym("boot::w25q::read"))
     boot_bootloader(rb)
@@ -422,8 +422,8 @@ def test_remote_spi_read_error_transient(rb, base, link, remote_ok):
         if rb.halted():
             rb.tcl("resume")
     assert forced == 1
-    # Bench: po vynucene chybe dalsi bp v tomtez bootu nezastavil a nabehl stary obraz s pending = 1 (dalsi reset ho
-    # aplikoval); "3 pokusy v jednom bootu" se tak overit nepodarilo. Pozadavek: nikdy ztraceny ani rozbity obraz.
+    # Bench: after a forced failure the next bp in the same boot did not halt and the old image came up with pending = 1 (the next reset
+    # applied it); "3 attempts in one boot" could thus not be verified. Requirement: never a lost or broken image.
     w = wait_app(rb, 40)
     assert w["kind"] == "app", w
     now = installed(rb)
@@ -434,8 +434,8 @@ def test_remote_spi_read_error_transient(rb, base, link, remote_ok):
 
 
 def test_remote_bad_staged_image(rb, base, link, remote_ok):
-    """Bajt obrazu se pri overeni v bootloaderu precte spatne (preklopeny v s_buf pred CRC): BadImage -> pending smazan,
-    stara aplikace netknuta."""
+    """An image byte is read wrongly during verification in the bootloader (flipped in s_buf before the CRC): BadImage -> pending cleared,
+    the old application untouched."""
     before, _ = stage_halted_at_reboot(rb, link)
     rb.arm(rb.bl_sym("boot::Crc32::update"))
     boot_bootloader(rb)
@@ -443,7 +443,7 @@ def test_remote_bad_staged_image(rb, base, link, remote_ok):
     try:
         while not flipped and rb.wait_halt(20):
             rb.tcl("halt")
-            if rb.reg("r2") == 256:  # chunk s_buf ve stagedImageGood (trailer CRC ma 16 B)
+            if rb.reg("r2") == 256:  # an s_buf chunk in stagedImageGood (the trailer CRC is 16 B)
                 p = rb.reg("r1")
                 b = rb.flash_read(p, 4)
                 rb.tcl(f"write_memory 0x{p:08x} 8 {{0x{b[0] ^ 0xFF:02x}}}")
@@ -475,9 +475,9 @@ def test_remote_ota_x3(rb, base, link, remote_ok):
 
 
 def test_remote_program_error(rb, base, link, remote_ok):
-    """flashprog::program pri kopii jednou selze (oblast uz smazana): pending zustane. Bud druhy pokus v tomtez bootu
-    obraz dokonci, nebo bootloader nema bootovatelnou aplikaci -> pusti PA1 (napajeni) a ceka; dalsi reset obraz
-    aplikuje. Nikdy ztraceny obraz ani visici jadro."""
+    """flashprog::program fails once during the copy (the region is already erased): pending stays. Either a second attempt in the same boot
+    completes the image, or the bootloader has no bootable application -> it releases PA1 (power) and waits; the next reset applies
+    the image. Never a lost image or a hung core."""
     before, want = stage_halted_at_reboot(rb, link)
     rb.arm(rb.bl_sym("boot::flashprog::program"))
     boot_bootloader(rb)
@@ -500,7 +500,7 @@ def test_remote_program_error(rb, base, link, remote_ok):
     converged(rb, want)
 
 
-# ------------------------------------------------------------------------- Task 6: preruseni flash operace (T1)
+# ------------------------------------------------------------------------- Task 6: interrupting a flash operation (T1)
 
 SCRATCH = 0x0801F000
 FRACTIONS = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0, 1.1]
@@ -512,7 +512,7 @@ def _probe(rb):
         w = rb.where()
         return dict(where=w["kind"], pc=hex(w["pc"]), ipsr=w["ipsr"], eccr=hex(rb.eccr()), head=rb.flash_read(APP, 8).hex(),
                     pa1=bool(rb.u32(0x50000014) & 2))
-    except Exception as e:  # noqa: BLE001 - remote se mohl vypnout (PA1)
+    except Exception as e:  # noqa: BLE001 - the remote may have switched off (PA1)
         rb.stop()
         return dict(where="off?", error=repr(e)[:120])
 
@@ -554,9 +554,9 @@ F4B = ("F4b: interrupted program of the app vector page (no pending image) -> EC
 
 @pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4B)
 def test_remote_glitch_program_vector(rb, base, remote_ok):
-    """Vektorova stranka smazana a reset v prubehu programovani 1. dvojslova, vse z jedne glitch rutiny ze stavu
-    aplikace (programovani ze zastaveneho bootloaderu hlasi PGAERR|PGSERR, jako u base). Bez pending obrazu: ocekava
-    se bootloader (PA1 pusteny) nebo aplikace; nikdy viset (ECC -> NMI, F4 na base)."""
+    """Vector page erased and a reset during the programming of the 1st double-word, all from a single glitch routine from the application
+    state (programming from a halted bootloader reports PGAERR|PGSERR, as on the base). Without a pending image: a bootloader
+    (PA1 released) or the application is expected; never hung (ECC -> NMI, F4 on the base)."""
     img = IMG_A if installed(rb) == "A" else IMG_B
     w0, w1 = int.from_bytes(img[:4], "little"), int.from_bytes(img[4:8], "little")
     n_prog = rb.glitch(bootfi.OP_MEASURE_ERASE_THEN_PROGRAM, SCRATCH, w0=w0, w1=w1)

@@ -1,7 +1,7 @@
 set(GIT_PATH ${CMAKE_SOURCE_DIR}/inc/git.hpp)
 	
-# Hlavicka se musi vygenerovat PRED kompilaci (PRE_BUILD na .elf bezi az pred linkem, takze obraz nesl revizi
-# predchoziho buildu): vlastni cil, na kterem .elf zavisi.
+# The header must be generated BEFORE compilation (PRE_BUILD on the .elf runs only before linking, so the image carried the revision
+# of the previous build): a dedicated target that the .elf depends on.
 add_custom_target(git_header
     BYPRODUCTS ${GIT_PATH}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

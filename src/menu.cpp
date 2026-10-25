@@ -24,7 +24,7 @@ extern Oled::OledBuffer frameBuffer;
 
 using router::isPcAlive;
 
-// Schedulery — definovány na konci tohoto souboru
+// Schedulers — defined at the end of this file
 extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler songListDelayScheduler;
 
@@ -175,13 +175,13 @@ static ui::SplashScreen nowPlayingScreen(
     "Prehravani", "", "[STOP]", onNowPlayingDismiss
 );
 
-// ── Párování s ovladačem z menu (průběh a výsledek) ───────────────────
+// ── Pairing with the remote from the menu (progress and result) ───────
 
 static bool _pairStatusShown = false;
 
 static void onPairStatusDismiss(void* userData) {
     (void)userData;
-    // Zavře jen obrazovku; párování doběhne (nebo vyprší) samo
+    // Closes only the screen; the pairing finishes (or times out) on its own
     _pairStatusShown = false;
     nav.pop();
 }
@@ -212,14 +212,14 @@ static void onSongSelected(ui::MenuItem* item, void* userData) {
     if (_playSongCallback && item) {
         _playSongCallback(item->title());
     }
-    // Pop song list — NowPlaying bude pushed existujícím PLAY_SONG handlerem
+    // Pop song list — NowPlaying will be pushed by the existing PLAY_SONG handler
     nav.pop();
 }
 
-// ── Obrazovka aktualizace Remote (relay z PC) ──────────────────────────
+// ── Remote update screen (relayed from the PC) ─────────────────────────
 
 static ui::ProgressScreen fwProgressScreen("Aktualizace", "");
-static bool fwPushed = false; // obrazovka je ve stacku navigatoru (vzdy jako jediná nad hlavním menu)
+static bool fwPushed = false; // the screen is in the navigator stack (always as the only one above the main menu)
 
 // ── Callbacks ─────────────────────────────────────────────────────────
 
@@ -262,8 +262,8 @@ static void firmwareCallback(ui::MenuItem* item, void* userData) {
 
 static void pairCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
-    // Z, F → sken; připojení k MIDIControlRemote, B a timeout řídí hlavní smyčka (main.cpp)
-    // RN4870 nefunguje (běh bez BLE, spec R21): okamžitá zpráva místo čekání na timeout
+    // Z, F → scan; connecting to MIDIControlRemote, B and the timeout are handled by the main loop (main.cpp)
+    // RN4870 is not working (running without BLE, spec R21): immediate message instead of waiting for the timeout
     bool up = Bluetooth::isUp();
     if (up && Bluetooth::startPairing() != 0) return;
     pairStatusScreen.setComment(up ? "Hledam ovladac..." : "BLE nefunguje");
@@ -325,7 +325,7 @@ void init() {
     initTheme();
     nav.setTheme(theme);
 
-    // Splash: revize a větev na samostatných řádcích (dlouhá větev roluje)
+    // Splash: revision and branch on separate lines (a long branch name scrolls)
     splashScreen = ui::SplashScreen(
         base::DEVICE_NAME.c_str(),
         base::DEVICE_TYPE.c_str(),
@@ -334,7 +334,7 @@ void init() {
     );
     splashScreen.setComment2(git::branch.c_str());
 
-    // Synchronizace checkboxů z uložených nastavení
+    // Synchronize the checkboxes from the saved settings
     settingsItems[0].setChecked(settings::ledMasterEnable());
     settingsItems[1].setChecked(settings::midiRoleIdentifier());
 
@@ -346,12 +346,12 @@ void render() {
 
     bool dirty = nav.render(frameBuffer);
 
-    // Status ikony pouze na menu obrazovkách (ne na SplashScreen, ParagraphScreen, ConfirmScreen)
+    // Status icons only on menu screens (not on SplashScreen, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
 
-    // Bez uloženého ovladače (nová base, upgrade z nastavení v1): nápověda místo titulku hlavního menu.
-    // Base se v tom stavu k ničemu nepřipojuje, dokud uživatel nespáruje ovladač z menu Nastaveni.
-    // 14 znaků 7x10 = 98 px, vejde se vlevo od ikony PC (x = 104).
+    // Without a stored remote (new base, upgrade from settings v1): a hint instead of the main menu title.
+    // In this state the Base connects to nothing until the user pairs a remote from the Nastaveni menu.
+    // 14 characters of 7x10 = 98 px, fits to the left of the PC icon (x = 104).
     if (dirty && cur == &mainScreen && settings::remoteAddr()[0] == '\0') {
         gfx::drawFilledRect(frameBuffer, 0, 0, theme.displayWidth, theme.titleBarHeight, (uint8_t)0);
         gfx::text::drawText(frameBuffer, *theme.titleFont, "Sparuj ovladac", 0, 0, gfx::Anchor::TopLeft, (uint8_t)1);
@@ -383,9 +383,9 @@ void render() {
         dirty = true;
     }
 
-    // Ikona PC připojení (vlevo od BLE ikony)
+    // PC connection icon (to the left of the BLE icon)
     if (showStatusIcons && isPcAlive()) {
-        int pcIconX = theme.displayOffsetX + theme.displayWidth - 14 - 2 - 10; // 14=BLE šířka, 2=mezera, 10=PC šířka
+        int pcIconX = theme.displayOffsetX + theme.displayWidth - 14 - 2 - 10; // 14=BLE width, 2=gap, 10=PC width
         int pcIconY = 1;
         gfx::drawFilledRect(frameBuffer, pcIconX, pcIconY, 10, 8, (uint8_t)0);
         gfx::drawIcon(frameBuffer, pc_monitor, pcIconX, pcIconY, gfx::Anchor::TopLeft, (uint8_t)1);
@@ -445,7 +445,7 @@ void keypress(ui::InputEvent event) {
     nav.forceRender();
 }
 
-// noinline + used: test_fault.py ji volá přes gdb (vynucené překreslení OLED)
+// noinline + used: test_fault.py calls it via gdb (forced OLED redraw)
 [[gnu::used, gnu::noinline]] void renderForce() {
     nav.forceRender();
 }
@@ -480,11 +480,11 @@ void showNowPlaying(const char* songName) {
     _nowPlayingInfo[0] = '\0';
     _nowPlayingAnchor[0] = '\0';
 
-    // Pri aktualizaci Remote zustava nahore obrazovka s postupem; Now Playing se nepushuje
-    // (po aktualizaci se neukaze, dalsi SIGNAL_PLAYING ji zobrazi)
+    // During a Remote update the progress screen stays on top; Now Playing is not pushed
+    // (it will not show after the update, the next SIGNAL_PLAYING will display it)
     if (fwPushed) return;
 
-    // Opakovaný SIGNAL_PLAYING jen aktualizuje obrazovku, nepřidává ji znovu na zásobník
+    // A repeated SIGNAL_PLAYING only updates the screen, it does not push it onto the stack again
     if (!_nowPlayingActive) {
         _nowPlayingActive = true;
         nav.push(&nowPlayingScreen);
@@ -495,7 +495,7 @@ void showNowPlaying(const char* songName) {
 void dismissNowPlaying() {
     if (_nowPlayingActive) {
         _nowPlayingActive = false;
-        // Odebrat jen pokud je navrchu (nad ní může být např. dotaz na párování)
+        // Remove only if it is on top (above it there may be e.g. a pairing prompt)
         if (nav.current() == &nowPlayingScreen) {
             nav.pop();
         }
@@ -507,14 +507,14 @@ void showFwProgress(const char* hint, uint8_t percent) {
     fwProgressScreen.setHint(hint);
     fwProgressScreen.setPercent(percent);
     if (!fwPushed) {
-        // Rozjety dotaz na seznam pisni a stavove flagy obrazovek, ktere reset stacku odstrani
+        // A song list request in progress and the screen state flags that the stack reset removes
         _songListState = SongListState::Idle;
         _loadingScreenShown = false;
         songListTimeoutScheduler.stop();
         songListDelayScheduler.stop();
         _pairStatusShown = false;
         _nowPlayingActive = false;
-        // Stack = hlavni menu + obrazovka aktualizace (zadny splash/podmenu pod ni)
+        // Stack = main menu + update screen (no splash/submenu below it)
         nav.reset(&mainScreen);
         nav.push(&fwProgressScreen);
         fwPushed = true;
@@ -529,7 +529,7 @@ void hideFwProgress() {
     if (nav.current() == &fwProgressScreen) {
         nav.pop();
     } else {
-        nav.reset(&mainScreen); // nemelo by nastat: nad ni se nic nepushuje
+        nav.reset(&mainScreen); // should not happen: nothing is pushed above it
     }
     Oled::wakeupCallback();
     nav.forceRender();
@@ -545,10 +545,10 @@ void updateNowPlayingInfo() {
     if (!_nowPlayingActive) return;
 
     if (_nowPlayingAnchor[0] != '\0') {
-        // Sekce od PC ("Predehra", "Sloka 2")
+        // Section from the PC ("Predehra", "Sloka 2")
         std::snprintf(_nowPlayingInfo, sizeof(_nowPlayingInfo), "%s [STOP]", _nowPlayingAnchor);
     } else {
-        // Stav displeje po číslicích, tak jak je zobrazen v kostele (" 401", "1 ")
+        // Display state digit by digit, as shown in the church (" 401", "1 ")
         char song[5];
         char verse[3];
         display::formatSong(song);
@@ -589,14 +589,14 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
         songListDelayScheduler.stop();
     }
 
-    // Uložení aktuální pozice pro append
+    // Save the current position for append
     int savedIndex = isFirstPage ? 0 : songListScreen.selectedIndex();
 
     if (isFirstPage) {
         _songCount = 0;
     }
 
-    // Parsování středníkem oddělených jmen písní
+    // Parse the semicolon-separated song names
     int nameStart = 0;
     for (int i = 0; i <= len && _songCount < MAX_SONGS; ++i) {
         if (i == len || payload[i] == ';') {
@@ -612,10 +612,10 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
         }
     }
 
-    // Prázdná složka (pouze pro první stránku)
+    // Empty folder (first page only)
     if (isFirstPage && _songCount == 0) {
         if (!_loadingScreenShown) {
-            // Loading screen ještě nebyla zobrazena — zobrazíme ji s chybou
+            // The loading screen has not been shown yet — show it with the error
             songListLoadingScreen.setSubtitle("Zadne pisne");
             songListLoadingScreen.setComment("Stiskni pro navrat");
             nav.push(&songListLoadingScreen);
@@ -628,27 +628,27 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
         return;
     }
 
-    // Přidání položky Zpět
+    // Add the Back item
     _songListItems[_songCount] = ui::MenuItem::back("Zpet");
 
-    // Rekonstrukce song list screen s aktuálním počtem
+    // Rebuild the song list screen with the current count
     songListScreen = ui::MenuScreen("Pisne", _songListItems, _songCount + 1);
     songListScreen.setSelectedIndex(savedIndex);
 
     if (isFirstPage) {
-        // Pop loading screen pokud byla zobrazena, push song list
+        // Pop the loading screen if it was shown, push the song list
         if (_loadingScreenShown) {
             nav.pop();
             _loadingScreenShown = false;
         }
         nav.push(&songListScreen);
     }
-    // Pro append: screen je již na stacku, stačí forceRender
+    // For append: the screen is already on the stack, forceRender is enough
 
     nav.forceRender();
 }
 
-// Voláno z delay scheduleru (500ms) — zobrazí loading screen pokud stále čekáme
+// Called from the delay scheduler (500ms) — shows the loading screen if we are still waiting
 void songListDelayShow() {
     if (_songListState == SongListState::WaitingFirst && !_loadingScreenShown) {
         songListLoadingScreen.setSubtitle("Nacitani...");
@@ -659,7 +659,7 @@ void songListDelayShow() {
     }
 }
 
-// Voláno z timeout scheduleru (3s)
+// Called from the timeout scheduler (3s)
 void songListTimeout() {
     if (_songListState == SongListState::WaitingFirst) {
         songListDelayScheduler.stop();
@@ -685,5 +685,5 @@ stmcpp::scheduler::Scheduler guiRenderScheduler(30_ms, &GUI::render, true, true)
 // One-shot: delayed loading screen (500ms grace period)
 stmcpp::scheduler::Scheduler songListDelayScheduler(500_ms, GUI::songListDelayShow, false, false);
 
-// One-shot: timeout pro načítání seznamu písní (3s)
+// One-shot: timeout for loading the song list (3s)
 stmcpp::scheduler::Scheduler songListTimeoutScheduler(3000_ms, GUI::songListTimeout, false, false);

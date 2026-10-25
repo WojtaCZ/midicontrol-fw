@@ -1,5 +1,5 @@
-"""USB-MIDI <-> DIN pres Otraki USB-MIDI interface (fc02:0101) zapojeny na DIN IN/OUT base.
-PC -> base USB-MIDI -> DIN OUT -> Otraki -> PC a zpet. Zpozdeni se meri casovanym cteni rawmidi (midi.Reader, ~1 ms)."""
+"""USB-MIDI <-> DIN via the Otraki USB-MIDI interface (fc02:0101) wired to the base DIN IN/OUT.
+PC -> base USB-MIDI -> DIN OUT -> Otraki -> PC and back. The latency is measured by timed rawmidi reads (midi.Reader, ~1 ms)."""
 
 import threading
 import time
@@ -10,7 +10,7 @@ import midi
 from conftest import remote_alive, wait_until
 from proto import MT
 
-ECHO_PREFIX = bytes([0xF0, 0x4D, 0x43])  # ozvena displeje z base (kazdych 500 ms), neni predmetem testu
+ECHO_PREFIX = bytes([0xF0, 0x4D, 0x43])  # display echo from the base (every 500 ms), not the subject of the test
 MAX_GAP = 0.030
 
 
@@ -24,7 +24,7 @@ def msgs(data: bytes) -> list:
 
 
 def exchange(src, dst, hexstr, wait=0.5):
-    """Odeslat na `src`, vratit zpravy prijate na `dst` (reader bezi drive nez odeslani)."""
+    """Send to `src`, return the messages received on `dst` (the reader starts before sending)."""
     with midi.Reader(dst) as r:
         time.sleep(0.1)
         midi.send(src, hexstr)
@@ -37,7 +37,7 @@ NOTES = [bytes([0x90, 0x3C, 0x64]), bytes([0x80, 0x3C, 0x00])]
 
 def test_usb_to_din_notes(pr):
     got = exchange(pr["base"], pr["otraki"], "90 3C 64 80 3C 00")
-    # DIN vystup base posila plne statusy; running status (90 3C 64 3C 00) by byl taky platny
+    # The base DIN output sends full status bytes; running status (90 3C 64 3C 00) would also be valid
     assert msgs(got) == [bytes([0x90, 0x3C, 0x64]), bytes([0x80, 0x3C, 0x00])], got.hex()
 
 
@@ -66,8 +66,8 @@ def test_realtime_inside_sysex(pr):
 
 
 def stream(pr, count=600, period=0.010, during=None):
-    """Posle `count` NOTE ON (kazda jina velocity/nota) po `period` na base USB -> DIN; vraci (odeslano, prijate casy).
-    Cteni na Otraki; mezera = rozdil casu prijeti sousednich zprav (rozliseni ~1 ms, viz midi.py)."""
+    """Sends `count` NOTE ONs (each with a different velocity/note) every `period` to the base USB -> DIN; returns (sent, received times).
+    Read on the Otraki; gap = difference of the arrival times of adjacent messages (resolution ~1 ms, see midi.py)."""
     sent = []
     with midi.Reader(pr["otraki"]) as r, midi.Writer(pr["base"]) as w:
         time.sleep(0.2)
@@ -82,7 +82,7 @@ def stream(pr, count=600, period=0.010, during=None):
             w.write(msg)
         time.sleep(0.5)
         ev = list(r.events)
-    # zpravy s casem prvniho bajtu (note-on jsou po 3 bajtech, ruzne read() mohou zpravu deli)
+    # messages with the time of the first byte (note-ons are 3 bytes each, different read()s may split a message)
     buf, times, got = bytearray(), [], []
     for t, b in ev:
         for x in b:
@@ -105,7 +105,7 @@ def check_stream(sent, got, times):
 
 
 def test_midi_latency_during_reconnect(pr, base, remote_probe, link):
-    """Remote drzi RN4870 v resetu -> base se opakovane snazi pripojit (C kazdych 5 s). Stream nesmi zadrhavat."""
+    """The remote holds its RN4870 in reset -> the base repeatedly tries to connect (C every 5 s). The stream must not stutter."""
     remote = remote_probe
     remote.hold_ble_reset(True)
     try:
@@ -116,7 +116,7 @@ def test_midi_latency_during_reconnect(pr, base, remote_probe, link):
         check_stream(sent, got, times)
     finally:
         remote.hold_ble_reset(False)
-        try:  # po uvolneni se remote musi znovu zabezpecit, aby dalsi testy nebyly rusene
+        try:  # after the release the remote must re-secure, so that other tests are not disturbed
             wait_until(lambda: base.read_bool("Bluetooth::_streamOpen"), 40, what="BLE stream open again")
             wait_until(lambda: remote_alive(base), 20, interval=0.5, what="remote alive again")
         except AssertionError as e:
@@ -124,7 +124,7 @@ def test_midi_latency_during_reconnect(pr, base, remote_probe, link):
 
 
 def test_midi_with_display_and_cdc_traffic(pr, base, link):
-    """Stejny stream a zaroven NOW_PLAYING_INFO po 100 ms a KEEPALIVE po 50 ms na CDC (displej vynuceny jako display_on)."""
+    """The same stream plus NOW_PLAYING_INFO every 100 ms and KEEPALIVE every 50 ms on the CDC (display forced as in display_on)."""
     link.pause_keepalive(True)
     link.drain()
     addr = base.sym("display::connected")
@@ -140,7 +140,7 @@ def test_midi_with_display_and_cdc_traffic(pr, base, link):
                 n += 1
                 if n % 2 == 1:
                     link.send_msg(MT.KEEPALIVE)
-                if n % 4 == 0:  # kazdy 4. tik po 25 ms = 100 ms
+                if n % 4 == 0:  # every 4th tick of 25 ms = 100 ms
                     link.send_msg(MT.NOW_PLAYING_INFO, bytes([0xF4, 0x06, 0xF1, 0x0A, 0x02 if (n // 4) % 2 else 0x01]))
                 time.sleep(max(0, t0 + n * 0.025 - time.monotonic()))
         except Exception as e:  # noqa

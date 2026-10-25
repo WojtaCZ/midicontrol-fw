@@ -1,10 +1,10 @@
-"""OTA pod bezicimi watchdogy (Task 7B): remote pres base, base pres CDC, base s resetem sondou uprostred prenosu.
-IWDG + smyckovy watchdog bezi na obou deskach (6C/6D): ověřuje se, ze bootloader a aplikace pri mazani/staging kopou.
+"""OTA under running watchdogs (Task 7B): remote via the base, base via the CDC, base with a probe reset in the middle of the transfer.
+The IWDG + loop watchdog run on both boards (6C/6D): this verifies that the bootloader and the application kick them during erase/staging.
 
-PC updater (../midicontrolpy-sw `midicontrol --cmd "update <base|remote> <file>"`) se zvenci sestavuje proti lavicovemu
-RtMidi shimu; cesta v $BASETEST_UPDATER (povinne, bez defaultu). Updater drzi protokolovy CDC (flock/TIOCEXCL),
-proto se harness link na dobu updateru odpoji. Log CDC drzi harness (LogPort updateru ukazuje na neexistujici soubor).
-Remote: po OTA se restartuje; nevrati-li se do 30 s, test selze (a NEOPAKUJE se). Soubory: BASETEST_REMOTE_BIN
+The PC updater (../midicontrolpy-sw `midicontrol --cmd "update <base|remote> <file>"`) is built externally against the bench
+RtMidi shim; the path is in $BASETEST_UPDATER (mandatory, no default). The updater holds the protocol CDC (flock/TIOCEXCL),
+so the harness link is detached for the duration of the updater. The log CDC is held by the harness (the updater's LogPort points to a nonexistent file).
+Remote: it restarts after the OTA; if it does not come back within 30 s, the test fails (and is NOT repeated). Files: BASETEST_REMOTE_BIN
 (default ../midicontroller-fw/build/midicontroller-fw-update.bin), BASETEST_BASE_BIN (build/midicontrol-fw-update.bin)."""
 
 import os
@@ -30,8 +30,8 @@ REMOTE_FW = os.path.abspath(os.path.join(FW, "..", "midicontroller-fw"))
 UPDATER = os.environ.get("BASETEST_UPDATER", "")
 REMOTE_BIN = os.environ.get("BASETEST_REMOTE_BIN", os.path.join(REMOTE_FW, "build", "midicontroller-fw-update.bin"))
 BASE_BIN = os.environ.get("BASETEST_BASE_BIN", os.path.join(FW, "build", "midicontrol-fw-update.bin"))
-REMOTE_BACK_S = 30  # zpet do 30 s, jinak BLOCKED
-REMOTE_APP = 0x08004000  # za 16K bootloaderem remote
+REMOTE_BACK_S = 30  # back within 30 s, otherwise BLOCKED
+REMOTE_APP = 0x08004000  # after the 16K remote bootloader
 REMOTE_FLASH_END = 0x08020000
 
 
@@ -46,7 +46,7 @@ def git_revision() -> str:
 
 
 class Updater:
-    """Spusti updater jako podproces (vlastni XDG adresare, WEB vypnuty, bez log portu); vystup do souboru."""
+    """Starts the updater as a subprocess (own XDG directories, WEB disabled, no log port); output to a file."""
 
     def __init__(self, target: str, binfile: str, tag: str):
         assert UPDATER and os.path.exists(UPDATER), "set BASETEST_UPDATER to the midicontrol binary built against the shim"
@@ -104,13 +104,13 @@ def open_log_after_reboot(timeout=15.0):
     for _ in range(50):
         try:
             return loglink.LogLink(port)
-        except Exception:  # noqa: BLE001 - port jeste neni otevritelny
+        except Exception:  # noqa: BLE001 - the port is not openable yet
             time.sleep(0.1)
     raise AssertionError("log CDC not openable")
 
 
 def diag_try(link, cursor=0xFFFF, timeout=2.0):
-    """Jeden DIAG_GET bez vyjimky: (boot_id, head) nebo None, kdyz ACK/DIAG_RESP nedorazil (nic se nepolyka)."""
+    """A single DIAG_GET without an exception: (boot_id, head) or None when the ACK/DIAG_RESP did not arrive (nothing is swallowed silently)."""
     link.drain()
     pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.DIAG_GET, proto.diag_encode_get(cursor)))
     reply = link.recv(timeout, lambda p: p.src == ADDR_REMOTE and p.mtype in (MT.ACK, MT.NAK) and p.payload[:1] == bytes([pid]))
@@ -125,7 +125,7 @@ def diag_try(link, cursor=0xFFFF, timeout=2.0):
 
 
 def diag_head(link):
-    """(boot_id, head) pri stabilnim spojeni: nejvyse jeden opakovany pokus (R28), pocet se tiskne; jinak selhani."""
+    """(boot_id, head) on a stable link: at most one retry (R28), the count is printed; otherwise a failure."""
     r = diag_try(link)
     retries = 0
     if r is None:
@@ -137,7 +137,7 @@ def diag_head(link):
 
 
 def banner_and_cause(log, timeout=8.0):
-    """Banner noveho bootu (po pripadnem bloku "log before reset") + radek s pricinou resetu."""
+    """Banner of the new boot (after the optional "log before reset" block) + the line with the reset cause."""
     first = log.lines(timeout, pred=lambda l: l == PRE_START or re.search(BANNER_RE, l))
     if first and first[-1] == PRE_START:
         log.lines(timeout, pred=lambda l: l == PRE_END)
@@ -157,8 +157,8 @@ def poll_usb_ids(stop: threading.Event, seen: set):
 
 @pytest.fixture
 def base_recover(link, base):
-    """Teardown base testu: zustala-li base v bootloaderu (abcd:1235), nahraje se BASETEST_BASE_BIN; pak se obnovi link a
-    pocka na abcd:1234 s oběma CDC. Zaroven uvolni ladeni (C_DEBUGEN)."""
+    """Teardown of the base tests: if the base stayed in the bootloader (abcd:1235), BASETEST_BASE_BIN is flashed; then the link is restored and
+    waits for abcd:1234 with both CDCs. Also releases debug (C_DEBUGEN)."""
     yield
     base.stop()
     if "abcd:1235" in lsusb_ids():
@@ -170,7 +170,7 @@ def base_recover(link, base):
             up.kill()
         assert rc == 0, up.text()[-500:]
     wait_until(lambda: "abcd:1234" in lsusb_ids(), 20, interval=0.3, what="abcd:1234 back (recovery)")
-    link.detach()  # idempotentni: zavre pripadny stary port
+    link.detach()  # idempotent: closes any old port
     link.attach(settle=1.0)
     assert len(usblink._sysfs_ports()) == 2, usblink._sysfs_ports()
 
@@ -178,11 +178,11 @@ def base_recover(link, base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 def test_remote_ota_via_base(link, base, remote, log):
-    """update remote <-update.bin> pres base CDC; remote se restartuje, verify_image OK, kod v flash = nahrany obraz,
-    BOOT zaznam (novy boot_id) odpovida pres DIAG, BLE spojeni zpet (stream open + bonded + remote alive)."""
+    """update remote <-update.bin> via the base CDC; the remote restarts, verify_image OK, code in flash = the uploaded image,
+    the BOOT record (new boot_id) answers via DIAG, BLE link back (stream open + bonded + remote alive)."""
     wait_until(lambda: base.read_bool("Bluetooth::_streamOpen") and remote_alive(base), 15, what="remote link up first")
     boot_id0, _ = diag_head(link)
-    base.stop()  # C_DEBUGEN pryc
+    base.stop()  # C_DEBUGEN cleared
     link.detach()
     log.skip()
     up = Updater("remote", REMOTE_BIN, "remote")
@@ -195,19 +195,19 @@ def test_remote_ota_via_base(link, base, remote, log):
     print(f"remote OTA: rc={rc} duration={up.duration:.1f} s")
     assert rc == 0, txt[-800:]
     assert "Firmware update complete" in txt, txt[-800:]
-    # updater: CRC_OK od remote (= verify_image OK na remote) -> "Remote accepted the image"; zadny zalozni "assuming success"
+    # updater: CRC_OK from the remote (= verify_image OK on the remote) -> "Remote accepted the image"; no fallback "assuming success"
     assert "Remote accepted the image" in txt, txt[-800:]
     assert "assuming success" not in txt and "FAILED" not in txt, txt[-800:]
-    # base log CDC: base remote OTA jen preposila, nesmi se resetovat ani logovat chybu
+    # base log CDC: the base only forwards the remote OTA, it must neither reset nor log an error
     ota_lines = log.lines(1.0)
     print("base log during update:", ota_lines)
     assert not any(" E " in l[:20] or " I sys: reset: " in l for l in ota_lines), ota_lines
     assert not any(re.search(BANNER_RE, l) for l in ota_lines), "base rebooted during remote OTA"
-    # kladny dukaz: log port zustal otevreny po celou dobu (zavreni/otevreni protokoloveho portu = odpojeni/pripojeni linku harnessu)
+    # positive proof: the log port stayed open the whole time (closing/opening the protocol port = detaching/attaching the harness link)
     assert any("usb: protocol port closed" in l for l in ota_lines) and any("usb: protocol port opened" in l for l in ota_lines), ota_lines
 
-    # zpet do 30 s po konci updateru: novy boot_id v DIAG (remote se po verify restartuje), pak BLE spojeni zabezpecene.
-    # Behem restartu remote DIAG nemuze odpovidat (ocekavane, pocita se); po zmene boot_id je povolen max 1 opakovany pokus.
+    # back within 30 s after the updater finishes: a new boot_id in DIAG (the remote restarts after verify), then the BLE link secured.
+    # While the remote restarts DIAG cannot answer (expected, it is counted); after the boot_id changes at most 1 retry is allowed.
     t0 = time.monotonic()
     boot_id1 = None
     failed_while_rebooting = 0
@@ -224,7 +224,7 @@ def test_remote_ota_via_base(link, base, remote, log):
     back_s = time.monotonic() - t0
     print(f"DIAG attempts without answer while the remote rebooted: {failed_while_rebooting}")
     assert boot_id1 is not None, f"BLOCKED: remote did not come back with a new boot_id within {REMOTE_BACK_S} s"
-    boot_id2, _ = diag_head(link)  # potvrzeni: DIAG po restartu odpovida (max 1 opakovany pokus)
+    boot_id2, _ = diag_head(link)  # confirmation: DIAG answers after the restart (max 1 retry)
     assert boot_id2 == boot_id1, f"boot_id changed again: {boot_id1:#06x} -> {boot_id2:#06x}"
     print(f"remote boot_id {boot_id0:#06x} -> {boot_id1:#06x} {back_s:.1f} s after the updater returned")
     try:
@@ -237,7 +237,7 @@ def test_remote_ota_via_base(link, base, remote, log):
     reply, resp = get(link, ADDR_REMOTE, 0)
     assert resp is not None, "DIAG_RESP missing after OTA"
 
-    # kod: pc v aplikaci + prvnich 8 KiB flash aplikace = obraz (bez 24 B trailer)
+    # code: pc in the application + the first 8 KiB of the application flash = the image (without the 24 B trailer)
     with open(REMOTE_BIN, "rb") as f:
         img = f.read()
     n = 8192
@@ -259,7 +259,7 @@ def test_remote_ota_via_base(link, base, remote, log):
 
 
 def test_base_ota_over_cdc(link, base, log, base_recover):
-    """update base: abcd:1235 behem prenosu, pak abcd:1234 se OBEMA CDC, banner v logu s novou revizi (= inc/git.hpp)."""
+    """update base: abcd:1235 during the transfer, then abcd:1234 with BOTH CDCs, a banner in the log with the new revision (= inc/git.hpp)."""
     base.stop()
     link.detach()
     log.close()
@@ -295,14 +295,14 @@ def test_base_ota_over_cdc(link, base, log, base_recover):
 
 
 def test_base_ota_power_loss(link, base, log, base_recover):
-    """Reset base sondou uprostred prenosu -> zustane v bootloaderu (abcd:1235, ne :1234), druhy update projde."""
+    """Probe reset of the base in the middle of the transfer -> it stays in the bootloader (abcd:1235, not :1234), a second update goes through."""
     base.stop()
     link.detach()
     log.close()
     up = Updater("base", BASE_BIN, "base-powerloss")
     try:
         wait_until(lambda: "abcd:1235" in lsusb_ids(), 60, interval=0.1, what="bootloader appeared")
-        # prenos bezi: pockat na prvni znamky postupu (vystup updateru), pak reset
+        # the transfer is running: wait for the first signs of progress (updater output), then reset
         def progress() -> int:
             m = re.findall(r"(\d+)%\s+\((\d+)/(\d+)\)", up.text())
             return int(m[-1][0]) if m else 0

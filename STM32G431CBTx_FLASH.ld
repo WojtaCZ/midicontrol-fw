@@ -65,7 +65,7 @@ _Min_Stack_Size = 0x400;	/* required amount of stack */
 MEMORY
 {
   RAM	(xrw)	: ORIGIN = 0x20000000,	LENGTH = 30K
-  /* Blok bez inicializace: přežije reset (log, záznam chyby). Stejně v aplikaci i bootloaderu. */
+  /* Block without initialization: survives a reset (log, fault record). The same in the application and the bootloader. */
   NOINIT	(rw)	: ORIGIN = 0x20007800,	LENGTH = 2K
   FLASH	(rx)	: ORIGIN = 0x8008000,	LENGTH = 94K
 }
@@ -194,11 +194,11 @@ SECTIONS
   } >RAM
 
   /* Remove information from the compiler libraries */
-  /* Nenulovaná, nenačítaná data (zůstávají přes reset); startup je nesmí mazat */
+  /* Non-zeroed, non-loaded data (kept across a reset); startup must not clear it */
   .noinit (NOLOAD) :
   {
     . = ALIGN(4);
-    /* Pevné pořadí (tools/basetest/dbg.py, fault.cpp, debug.cpp): fault záznam první, pak log */
+    /* Fixed order (tools/basetest/dbg.py, fault.cpp, debug.cpp): fault record first, then the log */
     KEEP(*(.noinit.fault))
     KEEP(*(.noinit.log))
     *(.noinit)

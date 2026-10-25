@@ -33,32 +33,32 @@
 
 using namespace stmcpp::units;
 
-// Auto-reconnect stav (neblokující: příkazy provádí automat v Bluetooth::process)
+// Auto-reconnect state (non-blocking: commands are executed by the state machine in Bluetooth::process)
 static bool _reconnectNeeded = true;
 static duration _lastReconnectAttempt = 0_ms;
 static constexpr duration RECONNECT_INTERVAL = 5000_ms;
-// Po %CONNECT% z auto-reconnectu: zabezpečit (B) až po %STREAM_OPEN%
+// After %CONNECT% from auto-reconnect: secure (B) only after %STREAM_OPEN%
 static bool _secureOnStreamOpen = false;
-// Adresa z posledního %CONNECT% patří uloženému ovladači (mimo párování) nebo adrese párování (CONNECTING).
-// Jen pak %SECURED%/%BONDED% udělá z protějšku přijatý (Bluetooth::setPeerAccepted) a jeho rámce se provádějí.
+// The address from the last %CONNECT% belongs to the stored remote (outside pairing) or to the pairing address (CONNECTING).
+// Only then does %SECURED%/%BONDED% make the peer accepted (Bluetooth::setPeerAccepted) and its frames get executed.
 static bool _peerAddrMatched = false;
 
-// Bez uloženého ovladače (nová base, upgrade z nastavení v1) se k ničemu nepřipojuje (žádné "C" každých 5 s)
+// Without a stored remote (new base, upgrade from settings v1) it connects to nothing (no "C" every 5 s)
 static bool remoteKnown() { return settings::remoteAddr()[0] != '\0'; }
 
-// ── Párování s ovladačem (spouští menu "Sparovat ovladac" → Bluetooth::startPairing) ──
-// SCANNING:   reklama se jménem REMOTE_NAME → X, C,<typ>,<adresa>, CONNECTING (ostatní zařízení se ignorují)
-// CONNECTING: %CONNECT% → B (bez dotazu na OLED, párování spustil uživatel), BONDING
+// ── Pairing with the remote (started by the menu "Sparovat ovladac" → Bluetooth::startPairing) ──
+// SCANNING:   advertisement named REMOTE_NAME → X, C,<type>,<address>, CONNECTING (other devices are ignored)
+// CONNECTING: %CONNECT% → B (no OLED prompt, the user started the pairing), BONDING
 // BONDING:    %SECURED% / %BONDED% → DONE
-// Timeout PAIRING_TIMEOUT v kterémkoli neukončeném stavu, odpojení nebo %ERR_SEC% → FAILED.
-// Auto-reconnect během párování neběží.
+// PAIRING_TIMEOUT in any unfinished state, a disconnect or %ERR_SEC% → FAILED.
+// Auto-reconnect does not run during pairing.
 static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
 	using PS = Bluetooth::PairingState;
 	Bluetooth::setPairingState(ok ? PS::DONE : PS::FAILED);
 	if (ok) {
 		Debug::log(Debug::Level::INFO, "ble", "pairing done, remote %s", Bluetooth::pendingConnectAddr());
 		_reconnectNeeded = false;
-		// Adresa ovladače trvale do nastavení: jen s ní se po %CONNECT% zabezpečí spojení (i po resetu base)
+		// Store the remote's address permanently in the settings: only with it is the link secured after %CONNECT% (even after a base reset)
 		if (strcmp(settings::remoteAddr(), Bluetooth::pendingConnectAddr()) != 0) {
 			settings::setRemoteAddr(Bluetooth::pendingConnectAddr());
 			settings::save();
@@ -76,7 +76,7 @@ static void pairingTimeout() {
 	using PS = Bluetooth::PairingState;
 	PS state = Bluetooth::pairingState();
 	if (!Bluetooth::isPairing() || Bluetooth::pairingElapsed() < Bluetooth::PAIRING_TIMEOUT) return;
-	// Uklidit podle toho, kde automat uvízl: X = konec skenování, Z = zrušit pokus o připojení, K,1 = odpojit
+	// Clean up depending on where the state machine got stuck: X = end scan, Z = cancel connection attempt, K,1 = disconnect
 	bool queued = true;
 	if (state == PS::SCANNING) queued &= Bluetooth::stopScan();
 	if (state == PS::CONNECTING) queued &= Bluetooth::queueCommand("Z");
@@ -95,28 +95,28 @@ extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler songListDelayScheduler;
 [[noreturn]] void signalError(uint16_t code);
 
-// Stav RN4870 (spec R21): chyba = jeden záznam ERROR bez resetu, běh bez BLE, další pokus po BLE_RETRY_INTERVAL.
-// Restart je neblokující (Bluetooth::restart() řízený z Bluetooth::process()), hlavní smyčka neběží vteřinu naprázdno.
+// RN4870 state (spec R21): failure = one ERROR record without a reset, running without BLE, next attempt after BLE_RETRY_INTERVAL.
+// The restart is non-blocking (Bluetooth::restart() driven from Bluetooth::process()), the main loop does not idle for a second.
 static constexpr duration BLE_RETRY_INTERVAL = 60000_ms;
 enum class BleState : uint8_t { CONFIGURING, READY, DOWN, RESTARTING };
 static BleState _bleState = BleState::DOWN;
-static bool _bleWasDown = false; // po výpadku: hlášení návratu
-static bool _bleErrorRecorded = false; // záznam ERROR jen jednou
+static bool _bleWasDown = false; // after an outage: report the return
+static bool _bleErrorRecorded = false; // ERROR record only once
 static duration _bleRetryAt = 0_ms;
 static void bleFailed(uint16_t code, const char *what);
 static void bleBootStart();
 static void bleProcess();
 
-// Spojení bez přijatého protějšku (re-review I-1): mimo párování nesmí viset navždy (rámce se zahazují, PC dostává
-// NAK UNREACHABLE, ovladač se sám neodpojí). SECURE_KICK_TIMEOUT po %CONNECT%/%STREAM_OPEN% bez přijetí → u adresy
-// uloženého ovladače ještě jednou B, po dalším timeoutu K,1 (pak auto-reconnect za 5 s). Cizí adresa nikdy B, jen K,1.
-// Párování má vlastní 15s timeout. Neblokující: kontrola z hlavní smyčky (secureWatchdog), jeden řádek W na zásah.
+// A link without an accepted peer (re-review I-1): outside pairing it must not hang forever (frames are dropped, the PC gets
+// NAK UNREACHABLE, the remote does not disconnect by itself). SECURE_KICK_TIMEOUT after %CONNECT%/%STREAM_OPEN% without acceptance → for the address
+// of the stored remote B once more, after another timeout K,1 (then auto-reconnect in 5 s). A foreign address never gets B, only K,1.
+// Pairing has its own 15 s timeout. Non-blocking: checked from the main loop (secureWatchdog), one W line per intervention.
 static constexpr duration SECURE_KICK_TIMEOUT = 3000_ms;
 enum class SecureWatch : uint8_t { IDLE, WAIT_SECURE, WAIT_RETRY };
 static SecureWatch _secureWatch = SecureWatch::IDLE;
 static duration _secureWatchSince = 0_ms;
 
-// %CONNECT% / %STREAM_OPEN%: odpočet znovu od této události (B se posílá až po STREAM_OPEN)
+// %CONNECT% / %STREAM_OPEN%: restart the countdown from this event (B is sent only after STREAM_OPEN)
 static void secureWatchArm() {
 	_secureWatch = SecureWatch::WAIT_SECURE;
 	_secureWatchSince = stmcpp::systick::getDuration();
@@ -129,7 +129,7 @@ static void secureWatchdog() {
 	}
 	duration now = stmcpp::systick::getDuration();
 	if (_secureWatch == SecureWatch::IDLE) {
-		// Spojení bez přijetí, které nezačalo událostí (např. po neúspěšném párování) → také hlídat
+		// A link without acceptance that did not start with an event (e.g. after a failed pairing) → watch it too
 		_secureWatch = SecureWatch::WAIT_SECURE;
 		_secureWatchSince = now;
 		return;
@@ -142,13 +142,13 @@ static void secureWatchdog() {
 			Debug::log(Debug::Level::WARNING, "ble", "link not secured in 3 s, B again");
 			return;
 		}
-		// B neodešel → rovnou odpojit (auto-reconnect zkusí znovu)
+		// B was not sent → disconnect right away (auto-reconnect will try again)
 		Debug::log(Debug::Level::WARNING, "ble", "link not secured, B not queued, K,1");
 	} else {
 		_secureWatch = SecureWatch::WAIT_RETRY;
 		Debug::log(Debug::Level::WARNING, "ble", "link not accepted, K,1");
 	}
-	// Při neúspěchu (nebo když %DISCONNECT% nepřijde) se K,1 zkusí znovu po dalším timeoutu
+	// On failure (or when %DISCONNECT% does not arrive) K,1 is tried again after the next timeout
 	if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 }
 
@@ -160,15 +160,15 @@ stmcpp::scheduler::Scheduler ledScheduler(50_ms, [](){
 	LED::updateStatus();
 	LED::update();
 
-	// Odesílání stavu displeje každých 500ms (každý 10. tick)
+	// Send the display state every 500 ms (every 10th tick)
 	if (++ledSubCounter >= 10) {
 		ledSubCounter = 0;
 		display::sendState();
 	}
 }, true, false);
 
-// Callback: OLED menu požaduje seznam písní z PC (s offsetem pro paginaci).
-// Base je jen další žadatel: posílá dest=PC, SONG_LIST_RESP přijde zpět na Base.
+// Callback: the OLED menu requests the song list from the PC (with an offset for pagination).
+// The Base is just another requester: it sends dest=PC, SONG_LIST_RESP comes back to the Base.
 static void onRequestSongList(uint8_t offset) {
 	protocol::Packet pkt = {};
 	pkt.dest = protocol::ADDR_PC;
@@ -178,8 +178,8 @@ static void onRequestSongList(uint8_t offset) {
 	router::sendReliable(pkt);
 }
 
-// Callback: uživatel vybral píseň ze seznamu → PLAY_SONG na PC (ASCII kód bez terminátoru).
-// Obrazovku "Prehravani" otevře až SIGNAL_PLAYING od PC.
+// Callback: the user selected a song from the list → PLAY_SONG to the PC (ASCII code without a terminator).
+// The "Prehravani" screen is opened only by SIGNAL_PLAYING from the PC.
 static void onPlaySongSelected(const char* songName) {
 	protocol::Packet pkt = {};
 	pkt.dest = protocol::ADDR_PC;
@@ -193,8 +193,8 @@ static void onPlaySongSelected(const char* songName) {
 	router::sendReliable(pkt);
 }
 
-// Callback: uživatel stiskl encoder na "Now Playing" → STOP_SONG na PC.
-// Remote se o zastavení dozví od PC (SIGNAL_STOPPED).
+// Callback: the user pressed the encoder on "Now Playing" → STOP_SONG to the PC.
+// The Remote learns about the stop from the PC (SIGNAL_STOPPED).
 static void onUserStopPlayback() {
 	protocol::Packet stopPkt = {};
 	stopPkt.dest = protocol::ADDR_PC;
@@ -226,8 +226,8 @@ extern "C" void SystemInit(void) {
 
 }
 
-// SysTick: tik + smyčkový watchdog. Naked obal předá rámec přerušeného kontextu (zásobník podle EXC_RETURN bit 2)
-// a EXC_RETURN; SysTick_C se vrací přes bx lr = EXC_RETURN (lr obal nemění).
+// SysTick: tick + loop watchdog. The naked wrapper passes the frame of the interrupted context (stack according to EXC_RETURN bit 2)
+// and EXC_RETURN; SysTick_C returns via bx lr = EXC_RETURN (the wrapper does not change lr).
 extern "C" [[gnu::used, gnu::externally_visible]] void SysTick_C(const uint32_t *frame, uint32_t excReturn) {
 	stmcpp::systick::increment();
 	wdg::onTick(frame, excReturn);
@@ -246,18 +246,18 @@ extern "C" [[gnu::naked]] void SysTick_Handler(void) {
 extern "C" int main(void) {
 	stmcpp::systick::enable(144_MHz, 1_ms);
 
-	// Log v no-init RAM: ověřit hlavičku (platná → zachovat log z doby před resetem). Výchozí úroveň I.
+	// Log in no-init RAM: verify the header (valid → keep the log from before the reset). Default level I.
 	Debug::init();
 	fault::init();
 
-	// IWDG (~2 s) + smyčkový watchdog (1000 ms) hned po hodinách, před blokující inicializací periferií
+	// IWDG (~2 s) + loop watchdog (1000 ms) right after the clocks, before the blocking peripheral initialization
 	wdg::start();
 
-	// Úvodní řádky logu: firmware, revize, příčina resetu (RCC->CSR se tím smaže), uložený záznam o chybě.
-	// Před inicializací periferií: selhání inicializace (signalError) se tak zaloguje a zaznamená.
+	// Initial log lines: firmware, revision, reset cause (this clears RCC->CSR), saved fault record.
+	// Before peripheral initialization: an initialization failure (signalError) is thus logged and recorded.
 	Debug::banner();
 
-	// Načtení nastavení z flash (před LED a GUI)
+	// Load the settings from flash (before LED and GUI)
 	settings::init();
 
 	//Initialize the OLED
@@ -267,7 +267,7 @@ extern "C" int main(void) {
 	GUI::setRequestSongListCallback(onRequestSongList);
 	GUI::setPlaySongCallback(onPlaySongSelected);
 
-	// Splash hned na displej (před blokující inicializací BLE); 3 s se počítají od jeho zobrazení
+	// Splash straight to the display (before the blocking BLE initialization); the 3 s are counted from when it is shown
 	GUI::render();
 	Oled::flush(500);
 	splashDismissScheduler.start();
@@ -277,7 +277,7 @@ extern "C" int main(void) {
 	ledScheduler.start(); // Start the LED scheduler
 
 	//Initialize bluetooth
-	// Selhání RN4870 není fatální (spec R21): base běží dál bez BLE a po 60 s zkusí init znovu
+	// An RN4870 failure is not fatal (spec R21): the base keeps running without BLE and retries init after 60 s
 	bleBootStart();
 	
 	//Initialize LED display
@@ -286,52 +286,52 @@ extern "C" int main(void) {
 	NVIC_EnableIRQ(USB_LP_IRQn);
 	NVIC_EnableIRQ(USB_HP_IRQn);
 
-	// CRS: dolaďování HSI48 podle USB SOF (registry CR/CFGR, hodiny CRS povoleny v base::initClock).
-	// Pozn.: USB běží z PLLQ (HSE 48 MHz), HSI48 je tedy jen záloha.
+	// CRS: HSI48 trimming from USB SOF (CR/CFGR registers, CRS clock enabled in base::initClock).
+	// Note: USB runs from PLLQ (HSE 48 MHz), so HSI48 is only a backup.
 	CRS->CFGR = (CRS->CFGR & ~CRS_CFGR_SYNCSRC) | (0b10 << CRS_CFGR_SYNCSRC_Pos);
 	CRS->CR |= CRS_CR_AUTOTRIMEN;
 	CRS->CR |= CRS_CR_CEN;
 
 	usb::init();
 
-	// Konfigurace RN4870 se jen zařadí; provádí ji Bluetooth::process() bez blokování smyčky
+	// The RN4870 configuration is only queued; Bluetooth::process() carries it out without blocking the loop
 
 	uint8_t packet[4];
 
 	while (1) {
 
-		// Smyčkový watchdog + IWDG: jeden kick za průchod
+		// Loop watchdog + IWDG: one kick per pass
 		wdg::kick();
 
-		// Testovací injekce chyb (tools/basetest/test_fault.py): jedno čtení a porovnání za průchod
+		// Test fault injection (tools/basetest/test_fault.py): one read and compare per pass
 		if (uint8_t inject = fault::testInject; inject != 0) {
 			fault::testInject = 0;
-			if (inject == 1) (void)*reinterpret_cast<volatile uint32_t *>(0xFFFFFFF0); // BusFault (přesná, BFAR)
+			if (inject == 1) (void)*reinterpret_cast<volatile uint32_t *>(0xFFFFFFF0); // BusFault (precise, BFAR)
 			else if (inject == 2) fault::testSpin();                                    // loop stall
 			else if (inject == 3) fault::testSpinNoIrq();                               // IWDG
 		}
 
 		tud_task();
 
-		// USB → DIN (varhany)
+		// USB → DIN (organ)
 		while (tud_midi_available() && tud_midi_packet_read(&packet[0])) {
 			midi::send(packet);
 			LED::notifyActivity(LED::PIXEL_MIDIB);
 		}
 
-		// DIN → USB a SysEx ozvěna displeje (TinyUSB jen z hlavní smyčky)
+		// DIN → USB and the SysEx echo of the display (TinyUSB only from the main loop)
 		midi::process();
 
-		// Displej: nejvýše jeden rámec najednou
+		// Display: at most one frame at a time
 		display::process();
 
-		// BLE: příjem, automat příkazového režimu
+		// BLE: receive, command mode state machine
 		Bluetooth::process();
 
-		// Směrování paketů PC ↔ Remote, ACK/opakování, keepalive, odesílání CDC
+		// Packet routing PC ↔ Remote, ACK/retry, keepalive, CDC sending
 		router::process();
 
-		// Log → CDC 1 (jen s otevřeným portem), příkazy z logovacího portu
+		// Log → CDC 1 (only with the port open), commands from the log port
 		Debug::process();
 
 		keypressScheduler.dispatch();
@@ -346,10 +346,10 @@ extern "C" int main(void) {
 
 		bleProcess();
 
-		// Spojení bez přijatého protějšku mimo párování: B ještě jednou, pak K,1
+		// A link without an accepted peer outside pairing: B once more, then K,1
 		secureWatchdog();
 
-		// Auto-reconnect k bondovanému Remote zařízení (neblokující); během párování a bez uloženého ovladače ne
+		// Auto-reconnect to the bonded Remote device (non-blocking); not during pairing and not without a stored remote
 		if (_bleState == BleState::READY && _reconnectNeeded && remoteKnown() && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
 			_lastReconnectAttempt = stmcpp::systick::getDuration();
@@ -373,7 +373,7 @@ extern "C" int main(void) {
 							if (Bluetooth::stopScan() && Bluetooth::connectTo(static_cast<uint8_t>(adv->getConnected()), adv->getAddr().c_str())) {
 								Bluetooth::setPairingState(PS::CONNECTING);
 							} else {
-								// Plná fronta příkazů: X/C neodešly, nečekat 15 s na timeout
+								// Command queue full: X/C were not sent, do not wait 15 s for the timeout
 								Debug::log(Debug::Level::WARNING, "ble", "pairing: command queue full");
 								Bluetooth::stopScan();
 								pairingFinished(false, pairing);
@@ -385,7 +385,7 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::BONDED:
 				case Bluetooth::Command::Type::SECURED:
 					Debug::log(Debug::Level::INFO, "ble", "%s", command->getType() == Bluetooth::Command::Type::BONDED ? "bonded" : "secured");
-					// Rámce se provádějí jen od zabezpečeného spojení se správnou adresou (uložený ovladač / párování)
+					// Frames are executed only from a secured link with the correct address (stored remote / pairing)
 					if (_peerAddrMatched && (pairing == PS::BONDING || !Bluetooth::isPairing())) {
 						Bluetooth::setBonded(true);
 						Bluetooth::setPeerAccepted();
@@ -403,16 +403,16 @@ extern "C" int main(void) {
 						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 						pairingFinished(false, pairing);
 					} else if (!Bluetooth::isPairing() && Bluetooth::isConnected()) {
-						// Zabezpečení selhalo (protějšek nemá náš klíč, např. podvržená adresa) → odpojit
+						// Securing failed (the peer does not have our key, e.g. a spoofed address) → disconnect
 						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 					}
 					break;
 
 				case Bluetooth::Command::Type::CONNECT: {
-					// %CONNECT,<typ adresy 0/1>,<MAC>% — první parametr je typ adresy, ne stav spojení
+					// %CONNECT,<address type 0/1>,<MAC>% — the first parameter is the address type, not the connection state
 					const std::string &addr = static_cast<Bluetooth::ConnectCommand *>(command.get())->getAddr();
 					Debug::log(Debug::Level::INFO, "ble", "connect %s", addr.c_str());
-					// Nové spojení: nic z předchozího neplatí (přijetí protějšku, fronta rámců, B po STREAM_OPEN)
+					// New connection: nothing from the previous one applies (peer acceptance, frame queue, B after STREAM_OPEN)
 					_secureOnStreamOpen = false;
 					_peerAddrMatched = false;
 					Bluetooth::resetPeer();
@@ -421,13 +421,13 @@ extern "C" int main(void) {
 					_reconnectNeeded = false;
 					secureWatchArm();
 					if (pairing == PS::SCANNING) {
-						// Při skenování se k nám nikdo připojovat nemá (ovladač teprve hledáme) → odpojit, sken běží dál
+						// Nobody should connect to us while scanning (we are still looking for the remote) → disconnect, the scan keeps running
 						Debug::log(Debug::Level::WARNING, "ble", "pairing: unexpected connect %s, K,1", addr.c_str());
 						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 					} else if (pairing == PS::CONNECTING) {
 						if (addr == Bluetooth::pendingConnectAddr()) {
 							_peerAddrMatched = true;
-							// Párování spustil uživatel z menu → zabezpečit a uložit bond hned (bez dotazu na OLED)
+							// The user started pairing from the menu → secure and store the bond immediately (no OLED prompt)
 							if (Bluetooth::queueCommand("B")) {
 								Bluetooth::setPairingState(PS::BONDING);
 							} else {
@@ -436,7 +436,7 @@ extern "C" int main(void) {
 								pairingFinished(false, pairing);
 							}
 						} else {
-							// Během čekání na ovladač se připojil někdo jiný → odpojit, párování selhalo
+							// Someone else connected while waiting for the remote → disconnect, pairing failed
 							Debug::log(Debug::Level::WARNING, "ble", "pairing: foreign connect %s", addr.c_str());
 							Bluetooth::queueCommand("K,1");
 							pairingFinished(false, pairing);
@@ -445,13 +445,13 @@ extern "C" int main(void) {
 						const char *remote = settings::remoteAddr();
 						if (remote[0] != '\0' && addr == remote) {
 							_peerAddrMatched = true;
-							// Spárovaný ovladač (typicky náš auto-reconnect "C"). Spojení se samo nezabezpečí
-							// (DS50002466, příkaz B: po ztrátě spojení je nutné znovu B; na lavici bez B žádný
-							// %SECURED% a Remote ukázal dotaz "Sparovat?"). B až po %STREAM_OPEN%: B hned po
-							// %CONNECT% skončilo na lavici %DISCONNECT%.
+							// Paired remote (typically our auto-reconnect "C"). The link does not secure itself
+							// (DS50002466, command B: after losing the link B is needed again; on the bench without B there was no
+							// %SECURED% and the Remote showed the "Sparovat?" prompt). B only after %STREAM_OPEN%: B right after
+							// %CONNECT% ended in %DISCONNECT% on the bench.
 							_secureOnStreamOpen = true;
 						} else {
-							// Cizí zařízení (telefon, PC): bond vzniká jen párováním z menu → odpojit, žádný B
+							// Foreign device (phone, PC): a bond is created only by pairing from the menu → disconnect, no B
 							Debug::log(Debug::Level::WARNING, "ble", "unknown device %s, K,1", addr.c_str());
 							if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 						}
@@ -466,7 +466,7 @@ extern "C" int main(void) {
 					Bluetooth::setStreamOpen(true);
 					secureWatchArm();
 					if (_secureOnStreamOpen) {
-						// B s uloženým klíčem → %SECURED% za ~0,2 s, bez dotazu na OLED
+						// B with the stored key → %SECURED% within ~0.2 s, no OLED prompt
 						_secureOnStreamOpen = false;
 						if (!Bluetooth::queueCommand("B")) Debug::log(Debug::Level::WARNING, "ble", "B not queued, retry in 3 s");
 					}
@@ -493,7 +493,7 @@ extern "C" int main(void) {
 					break;
 
 				default:
-					// Ostatní stavové zprávy jen do debug logu (nikdy do CDC — ten nese protokol)
+					// Other status messages only into the debug log (never into the CDC — it carries the protocol)
 					Debug::log(Debug::Level::DEBUG, "ble", "status type %u", static_cast<unsigned>(command->getType()));
 					break;
 			}
@@ -507,7 +507,7 @@ static void bleFailed(uint16_t code, const char *what) {
 	_bleWasDown = true;
 	_bleRetryAt = stmcpp::systick::getDuration();
 	Bluetooth::setUp(false);
-	// Mrtvý modul: spojení neplatí (jinak by router "předával" do mrtvého modulu a STATUS_RESP hlásil ble=1)
+	// Dead module: the link is void (otherwise the router would "forward" into the dead module and STATUS_RESP would report ble=1)
 	Bluetooth::setConnected(false);
 	Bluetooth::setBonded(false);
 	_secureOnStreamOpen = false;
@@ -522,7 +522,7 @@ static void bleFailed(uint16_t code, const char *what) {
 	}
 }
 
-// Start při bootu (před USB): blokující init, pak konfigurace do automatu
+// Start at boot (before USB): blocking init, then the configuration goes into the state machine
 static void bleBootStart() {
 	if (Bluetooth::init()) {
 		bleFailed(fault::ERR_BLE_INIT, "init");
@@ -535,7 +535,7 @@ static void bleBootStart() {
 	_bleState = BleState::CONFIGURING;
 }
 
-// Jednou za průchod smyčkou; nic neblokuje
+// Once per pass through the loop; nothing blocks
 static void bleProcess() {
 	using RS = Bluetooth::RestartState;
 	using CS = Bluetooth::ConfigState;
@@ -572,17 +572,17 @@ static void bleProcess() {
 	}
 }
 
-// Čekání se kickem watchdogu (signalError: blikání trvá déle než smyčkový watchdog)
+// Wait with watchdog kicking (signalError: the blinking lasts longer than the loop watchdog)
 static void waitKicking(uint32_t ms) {
 	uint32_t start = stmcpp::systick::getTicks();
 	while (stmcpp::systick::getTicks() - start < ms) wdg::kick();
 }
 
-// Neopravitelná chyba: záznam ERROR s kódem (+ řádek logu), ~3 s blikání červenou, pak reset (se sondou bkpt)
+// Unrecoverable error: ERROR record with a code (+ log line), ~3 s of red blinking, then reset (with a probe bkpt)
 [[gnu::noinline]] void signalError(uint16_t code) {
 	uint32_t caller = reinterpret_cast<uint32_t>(__builtin_return_address(0));
 	Debug::log(Debug::Level::ERROR, "sys", "error %u, reset in 3 s", static_cast<unsigned>(code));
-	// Pseudo-rámec: r0 = kód, lr = pc = místo volání
+	// Pseudo-frame: r0 = code, lr = pc = call site
 	const uint32_t frame[8] = {code, 0, 0, 0, 0, caller, caller, 0x01000000};
 	fault::record(fault::Kind::ERROR, frame, 0, code);
 	for (int i = 0; i < 3; ++i) {
@@ -597,10 +597,10 @@ static void waitKicking(uint32_t ms) {
 }
 
 void stmcpp::error::globalFaultHandler(std::uint32_t hash, std::uint32_t code) {
-	// Chyba hlášená knihovnou stmcpp: r0 = hash modulu, r1 = kód chyby, lr = pc = místo volání
+	// Error reported by the stmcpp library: r0 = module hash, r1 = error code, lr = pc = call site
 	uint32_t caller = reinterpret_cast<uint32_t>(__builtin_return_address(0));
 	const uint32_t frame[8] = {hash, code, 0, 0, 0, caller, caller, 0x01000000};
 	fault::capture(fault::Kind::ERROR, frame, 0, static_cast<uint16_t>(fault::ERR_STMCPP | (code & 0x7FFF)));
 }
 
-// HardFault/MemManage/BusFault/UsageFault/NMI: naked stuby v fault.cpp → fault::capture
+// HardFault/MemManage/BusFault/UsageFault/NMI: naked stubs in fault.cpp → fault::capture

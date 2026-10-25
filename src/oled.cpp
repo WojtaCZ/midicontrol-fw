@@ -27,14 +27,14 @@ namespace Oled{
     volatile bool initialized;
     bool sleeping;
 
-    // Snímek odesílaného rámce: GUI dál kreslí do frameBuffer, DMA čte odsud, takže na displej
-    // nikdy nedojde napůl překreslená stránka. Zároveň odpovídá obsahu RAM displeje, posílají
-    // se jen změněné stránky.
+    // Snapshot of the frame being sent: the GUI keeps drawing into frameBuffer, DMA reads from here, so a half-redrawn
+    // page never reaches the display. It also matches the content of the display RAM, only
+    // changed pages are sent.
     uint8_t txBuffer[OledBuffer::BUFFER_SIZE];
-    // Obsah RAM displeje neznámý (po inicializaci): poslat všechny stránky
+    // Display RAM content unknown (after initialization): send all pages
     bool fullFrame = true;
 
-    // Adresa stránky (page start, sloupec 0), jeden 4bajtový blok na stránku
+    // Page address (page start, column 0), one 4-byte block per page
     const uint8_t pageCmd[8][4] = {
         {OLED_MEM_CMD, 0xb0, 0x00, 0x10}, {OLED_MEM_CMD, 0xb1, 0x00, 0x10},
         {OLED_MEM_CMD, 0xb2, 0x00, 0x10}, {OLED_MEM_CMD, 0xb3, 0x00, 0x10},
@@ -42,17 +42,17 @@ namespace Oled{
         {OLED_MEM_CMD, 0xb6, 0x00, 0x10}, {OLED_MEM_CMD, 0xb7, 0x00, 0x10},
     };
 
-    // Seznam bloků rámce; další blok startuje přerušení DMA po dokončení předchozího
-    constexpr int MAX_CHUNKS = 17; // 8 × (adresa + stránka) + zapnutí displeje
+    // List of the frame's blocks; the next block is started by the DMA interrupt after the previous one completes
+    constexpr int MAX_CHUNKS = 17; // 8 × (address + page) + display on
     const uint8_t * chunkPtr[MAX_CHUNKS];
     uint16_t chunkLen[MAX_CHUNKS];
     uint8_t chunkCount;
     volatile uint8_t chunkIndex;
-    // Rámec na sběrnici; nový se spustí až po dokončení (process()), nikdy uprostřed přenosu
+    // A frame on the bus; a new one is started only after completion (process()), never in the middle of a transfer
     volatile bool busy;
     bool framePending;
 
-    // Zapnutí displeje, připojené za první rámec po inicializaci
+    // Display on, appended after the first frame following initialization
     const uint8_t displayOnCmd[] = {OLED_MEM_CMD, 0xaf};
     bool displayOn = false;
 
@@ -107,8 +107,8 @@ namespace Oled{
         //Set DC-DC enable
         0x8d, 
         0x14
-        // Displej zůstává vypnutý: RAM OLED přežije reset MCU (poslední obrazovka), zapne se
-        // až na konci prvního rámce
+        // The display stays off: the OLED RAM survives an MCU reset (last screen), it is turned on
+        // only at the end of the first frame
     };
 
     void init(){
@@ -142,13 +142,13 @@ namespace Oled{
             (sizeof(initBuffer) << I2C_CR2_NBYTES_Pos) // Buffer size
         );
 
-        // I2C1 kernel clock = PCLK1 = 144 MHz (RCC_CCIPR.I2C1SEL = 00), cíl 400 kHz (Fast mode, SH1106 max.)
+        // I2C1 kernel clock = PCLK1 = 144 MHz (RCC_CCIPR.I2C1SEL = 00), target 400 kHz (Fast mode, SH1106 max.)
         // PRESC = 3 → t = 4 / 144 MHz = 27.8 ns
         // SCLL = 0x35 → tLOW  = 54 × 27.8 ns = 1.50 us (min. 1.3 us)
         // SCLH = 0x1D → tHIGH = 30 × 27.8 ns = 0.83 us (min. 0.6 us)
         // SDADEL = 2 (56 ns), SCLDEL = 0xF (444 ns ≥ tr 300 ns + tSU;DAT 100 ns)
-        // Perioda 2.33 us + synchronizace/náběh ≈ 2.5 us → ~400 kHz
-        // (původní 0x0070215B byla hodnota pro 16 MHz → při 144 MHz ~1 MHz SCL)
+        // Period 2.33 us + synchronization/rise time ≈ 2.5 us → ~400 kHz
+        // (the original 0x0070215B was a value for 16 MHz → at 144 MHz ~1 MHz SCL)
         stmcpp::reg::write(std::ref(I2C1->TIMINGR), 0x30F21D35);
         
         // Enable DMA and TX complete interrupt
@@ -210,7 +210,7 @@ namespace Oled{
         stmcpp::reg::set(std::ref(I2C1->CR2), I2C_CR2_START);
     }
 
-    // Spustí čekající rámec, jakmile je sběrnice volná (volá se z hlavní smyčky)
+    // Starts the pending frame as soon as the bus is free (called from the main loop)
     void process(){
         if(!isInitialized() || isSleeping() || busy || !framePending) return;
         framePending = false;
@@ -246,11 +246,11 @@ namespace Oled{
         process();
     }
 
-    // noinline + used: test_fault.py ji volá přes gdb (celý flush pod watchdogem)
+    // noinline + used: test_fault.py calls it via gdb (a full flush under the watchdog)
     [[gnu::used, gnu::noinline]] void flush(uint32_t timeoutMs){
         uint32_t start = stmcpp::systick::getTicks();
         while((!isInitialized() || busy || framePending) && (stmcpp::systick::getTicks() - start) < timeoutMs){
-            wdg::kick(); // čekání až timeoutMs (start: 500 ms)
+            wdg::kick(); // waits up to timeoutMs (at startup: 500 ms)
             process();
         }
     }

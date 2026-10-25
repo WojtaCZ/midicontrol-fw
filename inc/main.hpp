@@ -3,7 +3,7 @@
 
 #include "router.hpp"
 
-// Dostupnost PC (keepalive) — sleduje router
+// PC availability (keepalive) — tracked by the router
 using router::isPcAlive;
 
 #endif

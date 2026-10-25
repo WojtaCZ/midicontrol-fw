@@ -31,44 +31,44 @@ namespace router {
 	using protocol::NakReason;
 	using protocol::Packet;
 
-	// Časování podle lib/protocol (constants.hpp)
+	// Timing according to lib/protocol (constants.hpp)
 	static constexpr duration RETRY_TIMEOUT = duration::fromMilliSeconds(protocol::RETRY_TIMEOUT_MS);
 	static constexpr duration KEEPALIVE_PERIOD = duration::fromMilliSeconds(protocol::KEEPALIVE_PERIOD_MS);
 	static constexpr duration KEEPALIVE_LOSS = duration::fromMilliSeconds(protocol::KEEPALIVE_LOSS_MS);
 
-	// ── Stav ──────────────────────────────────────────────────────────────
+	// ── State ─────────────────────────────────────────────────────────────
 
-	// Jeden čítač PacketId pro všechny zprávy, které Base posílá
+	// A single PacketId counter for all messages the Base sends
 	static uint8_t _packetId = 0;
 
-	// USB-CDC: parser příjmu a odesílací buffer (krátké zápisy do TinyUSB se dopisují v process())
+	// USB-CDC: receive parser and send buffer (short writes to TinyUSB are completed in process())
 	static protocol::Parser _cdcParser;
 	static RingBuffer<uint8_t, 1024> _cdcTx;
 
-	// Průběh aktualizace Remote (FW_UPDATE_* přes Base): sleduje se jen pro obrazovku na OLED
+	// Progress of the Remote update (FW_UPDATE_* via the Base): tracked only for the OLED screen
 	static boot::FwProgress _remoteFw(protocol::ADDR_REMOTE);
 
-	// Milisekundy pro FwProgress (systick má rozlišení 1 ms; zalomení uint32_t je v trackeru ošetřeno)
+	// Milliseconds for FwProgress (systick has 1 ms resolution; uint32_t wraparound is handled in the tracker)
 	static uint32_t nowMs() {
 		return static_cast<uint32_t>(stmcpp::systick::getDuration() / 1_ms);
 	}
 
-	// Dostupnost protistran
+	// Availability of the peers
 	static duration _lastPcRx = 0_ms;
 	static bool _pcEverSeen = false;
-	// used: testy (tools/basetest, conftest.remote_alive) z nich počítají isRemoteAlive() přes sondu
+	// used: tests (tools/basetest, conftest.remote_alive) compute isRemoteAlive() from them through the probe
 	[[gnu::used]] static duration _lastRemoteRx = 0_ms;
 	[[gnu::used]] static bool _remoteEverSeen = false;
 	static duration _lastKeepalive = 0_ms;
 
-	// Diagnostika (log): poslední hlášený stav protistran, zahozené rámce a plný CDC buffer
+	// Diagnostics (log): last reported state of the peers, dropped frames and a full CDC buffer
 	static bool _pcAliveLogged = false;
 	static bool _remoteAliveLogged = false;
 	static uint16_t _badFrames = 0;
 	static uint16_t _cdcOverflows = 0;
 	static duration _lastCountReport = 0_ms;
 
-	// Nepotvrzené pakety, které Base sama odeslala (čekají na ACK/NAK)
+	// Unacknowledged packets that the Base itself sent (waiting for ACK/NAK)
 	struct Pending {
 		Packet pkt;
 		duration sentAt;
@@ -78,21 +78,21 @@ namespace router {
 	static constexpr uint8_t MAX_PENDING = 4;
 	static Pending _pending[MAX_PENDING] = {};
 
-	// Deduplikace: poslední PacketId zpracovaný lokálně od každého uzlu (index = adresa)
+	// Deduplication: the last PacketId processed locally from each node (index = address)
 	struct LastRx {
 		uint8_t packetId;
 		bool valid;
 	};
 	static LastRx _lastRx[4] = {};
 
-	// Restart do bootloaderu (ENTER_BOOTLOADER)
+	// Restart into the bootloader (ENTER_BOOTLOADER)
 	static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the bootloader
 	static bool _enterBootloader = false;
 	static duration _enterBootloaderAt = 0_ms;
 
-	// ── Pomocné funkce ────────────────────────────────────────────────────
+	// ── Helper functions ──────────────────────────────────────────────────
 
-	// Zprávy, které se nepotvrzují (PROTOCOL.md: Reliability)
+	// Messages that are not acknowledged (PROTOCOL.md: Reliability)
 	static bool needsAck(const Packet &pkt) {
 		if (pkt.dest == protocol::ADDR_BROADCAST) return false;
 		switch (pkt.msgType) {
@@ -128,7 +128,7 @@ namespace router {
 		uint8_t frame[protocol::MAX_FRAME_SIZE];
 		uint16_t len = protocol::encode(pkt, frame);
 		if (len == 0 || !tud_mounted()) return false;
-		if (_cdcTx.freeSpace() < len) { // Celý rámec, nebo nic
+		if (_cdcTx.freeSpace() < len) { // The whole frame or nothing
 			if (_cdcOverflows != 0xFFFF) _cdcOverflows++;
 			return false;
 		}
@@ -145,7 +145,7 @@ namespace router {
 		return Bluetooth::sendProtocolPacket(pkt);
 	}
 
-	// Odeslání do USB po částech podle volného místa v TinyUSB FIFO
+	// Sending to USB in pieces according to the free space in the TinyUSB FIFO
 	static void flushCdc() {
 		if (!tud_mounted()) {
 			_cdcTx.clear();
@@ -210,10 +210,10 @@ namespace router {
 			p.used = true;
 			return true;
 		}
-		return false; // Fronta plná
+		return false; // Queue full
 	}
 
-	// ACK/NAK od cílového uzlu uzavře odpovídající nepotvrzený paket
+	// An ACK/NAK from the destination node closes the corresponding unacknowledged packet
 	static void resolvePending(const Packet &rx) {
 		if (rx.payloadLen < 1) return;
 		uint8_t ackedId = rx.payload[0];
@@ -232,10 +232,10 @@ namespace router {
 			if (p.retries >= protocol::MAX_RETRIES) {
 				Debug::log(Debug::Level::WARNING, "router", "retries exhausted: type 0x%02x to 0x%02x pid %u", static_cast<unsigned>(p.pkt.msgType),
 						   p.pkt.dest, p.pkt.packetId);
-				p.used = false; // Vzdáváme to; GUI má vlastní timeouty
+				p.used = false; // We give up; the GUI has its own timeouts
 				continue;
 			}
-			// Stejné PacketId — příjemce duplikát potvrdí, ale neprovede dvakrát
+			// Same PacketId — the receiver acknowledges the duplicate but does not execute it twice
 			transmit(p.pkt, transportFor(p.pkt.dest));
 			p.retries++;
 			p.sentAt = now;
@@ -258,7 +258,7 @@ namespace router {
 		TAMP->BKP0R = kEnterBootMagic;
 	}
 
-	// Kopie ASCII payloadu do řetězce (bez koncové nuly v payloadu, případná nula se toleruje)
+	// Copy of the ASCII payload into a string (no terminating zero in the payload, a zero is tolerated if present)
 	template<size_t N>
 	static void payloadToString(const Packet &pkt, char (&out)[N]) {
 		size_t len = pkt.payloadLen < N - 1 ? pkt.payloadLen : N - 1;
@@ -266,7 +266,7 @@ namespace router {
 		out[len] = '\0';
 	}
 
-	// Signály PC → Remote; Base je sleduje, aby OLED odpovídal stavu přehrávání
+	// Signals PC → Remote; the Base observes them so the OLED matches the playback state
 	static void observeSignal(const Packet &pkt) {
 		switch (pkt.msgType) {
 			case MsgType::SIGNAL_PLAYING: {
@@ -289,12 +289,12 @@ namespace router {
 		}
 	}
 
-	// ── Lokální obsluha paketů pro Base ───────────────────────────────────
+	// ── Local handling of packets for the Base ─────────────────────────────
 
 	static void handleLocal(const Packet &pkt, Transport via) {
 		bool ack = needsAck(pkt);
 
-		// Deduplikace opakovaných paketů: potvrdit znovu, ale neprovádět
+		// Deduplication of repeated packets: acknowledge again, but do not execute
 		if (ack && pkt.source < 4) {
 			LastRx &last = _lastRx[pkt.source];
 			if (last.valid && last.packetId == pkt.packetId) {
@@ -312,7 +312,7 @@ namespace router {
 					break;
 				}
 				base::current::set(pkt.payload[0] != 0);
-				GUI::syncPowerCheckbox(); // Checkbox v menu podle skutečného stavu SSR
+				GUI::syncPowerCheckbox(); // Menu checkbox according to the actual SSR state
 				if (ack) sendAck(pkt, via);
 				break;
 
@@ -326,12 +326,12 @@ namespace router {
 				resp.payload[2] = static_cast<uint8_t>(display::isConnected());
 				resp.payload[3] = static_cast<uint8_t>(isPcAlive());
 				resp.payloadLen = 4;
-				sendReliable(resp); // Odpověď se také potvrzuje
+				sendReliable(resp); // The response is acknowledged too
 				break;
 			}
 
 			case MsgType::NOW_PLAYING_INFO:
-				// Jeden rámec na displej, bez ACK (častá zpráva)
+				// One frame to the display, no ACK (frequent message)
 				display::applyNowPlaying(pkt.payload, pkt.payloadLen);
 				GUI::updateNowPlayingInfo();
 				break;
@@ -353,7 +353,7 @@ namespace router {
 			case MsgType::SIGNAL_STOPPED:
 			case MsgType::SIGNAL_ANCHOR:
 			case MsgType::SIGNAL_RECORDING:
-				// Signály adresované přímo Base (např. když Remote není připojen)
+				// Signals addressed directly to the Base (e.g. when the Remote is not connected)
 				observeSignal(pkt);
 				if (ack) sendAck(pkt, via);
 				break;
@@ -363,7 +363,7 @@ namespace router {
 				break;
 
 			case MsgType::KEEPALIVE_ACK:
-				// Dostupnost se aktualizuje při každém přijatém paketu (processPacket)
+				// Availability is updated on every received packet (processPacket)
 				break;
 
 			case MsgType::ACK:
@@ -382,13 +382,13 @@ namespace router {
 				break;
 
 			default:
-				// Neznámé typy i příkazy určené PC (PLAY_SONG, GET_SONG_LIST, ...) Base neobsluhuje
+				// Unknown types and commands meant for the PC (PLAY_SONG, GET_SONG_LIST, ...) are not handled by the Base
 				if (ack) sendNak(pkt, NakReason::UNKNOWN_MSG, via);
 				break;
 		}
 	}
 
-	// ── Směrování ─────────────────────────────────────────────────────────
+	// ── Routing ────────────────────────────────────────────────────────────
 
 	static void forward(const Packet &pkt, Transport from) {
 		Transport to = (from == Transport::USB_CDC) ? Transport::BLE : Transport::USB_CDC;
@@ -399,12 +399,12 @@ namespace router {
 			return;
 		}
 
-		// Nelze předat: odesílatel přestane opakovat (NAK se neposílá na nepotvrzované zprávy)
+		// Cannot forward: the sender stops retrying (NAK is not sent for unacknowledged messages)
 		if (!needsAck(pkt)) return;
-		// BUSY jen když je spojení použitelné (připojeno, stream otevřený a protějšek přijatý = zabezpečený ovladač),
-		// ale TX cesta je chvilku zaneprázdněná (příkazový režim modulu). Připojeno, ale stream ještě neotevřený nebo
-		// spojení ještě nezabezpečené (po %CONNECT%), je pro PC stále UNREACHABLE: BUSY by ho nutilo opakovat po dobu,
-		// kdy Remote není k dispozici.
+		// BUSY only when the link is usable (connected, stream open and peer accepted = secured remote),
+		// but the TX path is briefly occupied (module command mode). Connected but the stream not yet open, or
+		// the link not yet secured (after %CONNECT%), is still UNREACHABLE for the PC: BUSY would force it to retry for as long as
+		// the Remote is unavailable.
 		bool linkUp = (to == Transport::BLE) ? (Bluetooth::isConnected() && Bluetooth::isStreamOpen() && Bluetooth::isPeerAccepted()) : pcReachable();
 		sendNak(pkt, linkUp ? NakReason::BUSY : NakReason::UNREACHABLE, from);
 	}
@@ -432,8 +432,8 @@ namespace router {
 				break;
 
 			case protocol::ADDR_REMOTE:
-				if (via != Transport::USB_CDC) break; // Remote sám sobě — zahodit
-				observeSignal(pkt);                  // Base nekonzumuje, jen sleduje (OLED)
+				if (via != Transport::USB_CDC) break; // Remote to itself — drop
+				observeSignal(pkt);                  // the Base does not consume it, only observes (OLED)
 				_remoteFw.observe(pkt, nowMs());     // PC -> Remote: START/DATA/END
 				forward(pkt, via);
 				break;
@@ -445,11 +445,11 @@ namespace router {
 				break;
 
 			default:
-				break; // Neznámá adresa
+				break; // Unknown address
 		}
 	}
 
-	// Změny dostupnosti PC/Remote a souhrn zahozených rámců (nejvýše jednou za sekundu) do logu
+	// Changes in PC/Remote availability and a summary of dropped frames (at most once per second) into the log
 	static void logChanges() {
 		bool pc = isPcAlive();
 		if (pc != _pcAliveLogged) {
@@ -471,7 +471,7 @@ namespace router {
 		}
 	}
 
-	// Obrazovka aktualizace Remote na OLED: tick (stall, zmizení výsledku) a překreslení při změně
+	// Remote update screen on the OLED: tick (stall, disappearance of the result) and redraw on change
 	static void updateFwScreen() {
 		_remoteFw.tick(nowMs());
 		if (!_remoteFw.takeChange()) return;
@@ -485,7 +485,7 @@ namespace router {
 	}
 
 	void process() {
-		// Příjem z USB-CDC
+		// Receive from USB-CDC
 		if (tud_cdc_available()) {
 			uint8_t buf[64];
 			uint32_t count = tud_cdc_read(buf, sizeof(buf));
@@ -494,12 +494,12 @@ namespace router {
 				if (_cdcParser.feed(buf[i])) {
 					processPacket(_cdcParser.getPacket(), Transport::USB_CDC);
 				} else if (buf[i] == protocol::FRAME_END && _badFrames != 0xFFFF) {
-					_badFrames++; // FRAME_END bez platného rámce: CRC, délka nebo neúplný rámec
+					_badFrames++; // FRAME_END without a valid frame: CRC, length or an incomplete frame
 				}
 			}
 		}
 
-		// Příjem z BLE (fronta paketů plněná Bluetooth::process)
+		// Receive from BLE (packet queue filled by Bluetooth::process)
 		Packet pkt;
 		while (Bluetooth::getProtocolPacket(pkt)) {
 			LED::notifyActivity(LED::PIXEL_BLUETOOTH);

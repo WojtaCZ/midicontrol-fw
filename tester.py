@@ -3,18 +3,18 @@ import usb.util
 import time
 import rtmidi
 
-# Cílové VID a PID
+# Target VID and PID
 PID = 0x4000
 VID = 0xCAFE
 
-# 1) Najít USB zařízení
+# 1) Find the USB device
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if not dev:
     print("USB zařízení nenalezeno.")
     exit(1)
 print("USB zařízení nalezeno.")
 
-# 2) Ověřit MIDI interface
+# 2) Verify the MIDI interface
 has_midi = False
 for cfg in dev:
     for intf in cfg:
@@ -29,7 +29,7 @@ if not has_midi:
     exit(1)
 print("MIDI interface potvrzeno.")
 
-# 3) Najít odpovídající MIDI port
+# 3) Find the matching MIDI port
 midi_out = rtmidi.MidiOut()
 ports = midi_out.get_ports()
 print("Dostupné MIDI porty:")
@@ -50,7 +50,7 @@ if target is None:
 midi_out.open_port(target)
 print("Otevřen port:", ports[target])
 
-# 4) MIDI zprávy
+# 4) MIDI messages
 messages = {
     "Note On": [0x90, 0x3C, 0x7F],
     "Note Off": [0x80, 0x3C, 0x00],

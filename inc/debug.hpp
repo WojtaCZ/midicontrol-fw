@@ -3,36 +3,36 @@
 
 #include <cstdint>
 
-// Textový log base: řádky "[ssssss.mmm] L tag: text\r\n" do kruhového bufferu v no-init RAM (přežije reset,
-// ne výpadek napájení); hlavní smyčka (process) je posílá do druhého USB-CDC ("MIDIControl log", CDC 1).
-// Protokolové CDC (CDC 0) nese dál jen protokolové rámce.
+// Base text log: lines "[ssssss.mmm] L tag: text\r\n" into a ring buffer in no-init RAM (survives a reset,
+// not a power loss); the main loop (process) sends them to the second USB-CDC ("MIDIControl log", CDC 1).
+// The protocol CDC (CDC 0) still carries only protocol frames.
 namespace Debug {
 
 	enum class Level : uint8_t { NONE = 0, ERROR, WARNING, INFO, DEBUG };
 
-	// Události z přerušení: ISR jen zvýší čítač (logFromIsr), řádek z nich udělá process()
+	// Events from interrupts: the ISR only increments a counter (logFromIsr), process() turns it into a line
 	enum IsrEvent : uint8_t {
 		ISR_BLE_UART_ERROR = 0, // USART2 ORE/FE/NE (RN4870)
-		ISR_BLE_RX_OVERFLOW,    // plný RX ring BLE
-		ISR_BLE_STATUS_OVERFLOW, // plná fronta stavových zpráv RN4870
+		ISR_BLE_RX_OVERFLOW,    // BLE RX ring full
+		ISR_BLE_STATUS_OVERFLOW, // RN4870 status message queue full
 		ISR_MIDI_UART_ERROR,    // USART3 ORE/FE/NE (DIN MIDI)
-		ISR_MIDI_OVERFLOW,      // plná fronta DIN → USB
-		ISR_LOG_FROM_ISR,       // Debug::log zavolaný z přerušení (zahozeno)
+		ISR_MIDI_OVERFLOW,      // DIN → USB queue full
+		ISR_LOG_FROM_ISR,       // Debug::log called from an interrupt (dropped)
 		ISR_EVENT_COUNT
 	};
 
-	// Jen z hlavní smyčky (nikdy z ISR: zápis do ringu není reentrantní). Z ISR → logFromIsr.
-	// tag: modul, nejvýše 6 znaků (sys ble router usb disp midi set ota). Text nad 120 znaků se zkrátí a končí '~'.
+	// Main loop only (never from an ISR: writing to the ring is not reentrant). From an ISR → logFromIsr.
+	// tag: module, at most 6 characters (sys ble router usb disp midi set ota). Text over 120 characters is truncated and ends with '~'.
 	void log(Level lvl, const char *tag, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
-	// Bezpečné z ISR: jen čítač události; process() z něj udělá řádek
+	// Safe from an ISR: only an event counter; process() turns it into a line
 	void logFromIsr(uint8_t eventCode);
-	// Jen z cesty chyby (fault::record, přerušení zakázána, následuje reset): řádek "E fault: ..." do ringu bez kontroly IPSR
+	// Only from the error path (fault::record, interrupts disabled, reset follows): an "E fault: ..." line into the ring without an IPSR check
 	void logFault(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-	// Ověří hlavičku ringu v .noinit; platná → ponechá obsah z doby před resetem, neplatná → vymaže
+	// Validates the ring header in .noinit; valid → keeps the content from before the reset, invalid → clears it
 	void init();
-	// Úvodní řádky (úroveň I, vždy): firmware, revize/datum, příčina resetu, uložený záznam o chybě (fault::saved)
+	// Opening lines (level I, always): firmware, revision/date, reset cause, saved fault record (fault::saved)
 	void banner();
-	// Hlavní smyčka: posílá ring do CDC 1, je-li port otevřený (DTR); příkazy "level x", "dump", "help". Nikdy neblokuje.
+	// Main loop: sends the ring to CDC 1 if the port is open (DTR); commands "level x", "dump", "help". Never blocks.
 	void process();
 	Level getLevel();
 	void setLevel(Level level);

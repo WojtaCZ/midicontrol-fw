@@ -1,9 +1,9 @@
-"""USB-MIDI na PC strane: `amidi` obalky (ports/send/receive) a casovany ctenar surovych bajtu z ALSA rawmidi.
+"""USB-MIDI on the PC side: `amidi` wrappers (ports/send/receive) and a timed reader of raw bytes from ALSA rawmidi.
 
-Casovani: `amidi` neumi casova razitka a `aseqdump` je netiskne. `Reader` proto cte /dev/snd/midiC<c>D<d> (rawmidi,
-O_RDONLY) ve vlakne a ke kazdemu navratu z read() prida time.monotonic_ns(). USB-MIDI zarizeni se dotazuje po 1 ms
-a ALSA vraci bajty po paketech, takze rozliseni je ~1 ms (+ jitter planovace Pythonu, radove 100 us); to je
-dostatecne pro prah 30 ms.
+Timing: `amidi` has no timestamps and `aseqdump` does not print them. `Reader` therefore reads /dev/snd/midiC<c>D<d> (rawmidi,
+O_RDONLY) in a thread and adds time.monotonic_ns() to every return from read(). The USB-MIDI device is polled every 1 ms
+and ALSA returns bytes in packets, so the resolution is ~1 ms (+ Python scheduler jitter, on the order of 100 us); that is
+sufficient for the 30 ms threshold.
 """
 
 import os
@@ -18,7 +18,7 @@ OTRAKI_NAME = "USB MIDI Interface"
 
 
 def ports() -> dict:
-    """{'base': 'hw:5,0,0', 'otraki': 'hw:4,0,0'} podle jmena v `amidi -l`; jasna chyba, kdyz nektery chybi."""
+    """{'base': 'hw:5,0,0', 'otraki': 'hw:4,0,0'} by name in `amidi -l`; a clear error when one is missing."""
     out = subprocess.run(["amidi", "-l"], capture_output=True, text=True, check=True).stdout
     found = {}
     for line in out.splitlines()[1:]:
@@ -41,7 +41,7 @@ def send(port: str, hexstr: str):
 
 
 def receive(port: str, seconds: float) -> bytes:
-    """Bajty prijate na portu za `seconds` (amidi -d -t)."""
+    """Bytes received on the port within `seconds` (amidi -d -t)."""
     r = subprocess.run(["amidi", "-p", port, "-d", "-t", str(max(1, round(seconds)))], capture_output=True, text=True,
                        timeout=seconds + 10)
     return bytes.fromhex("".join(r.stdout.split()))
@@ -53,7 +53,7 @@ def rawpath(port: str) -> str:
 
 
 class Reader:
-    """Vlakno cteni surovych bajtu s casovymi razitky: self.events = [(t_ns, bytes)] (jedno za read())."""
+    """Thread reading raw bytes with timestamps: self.events = [(t_ns, bytes)] (one per read())."""
 
     def __init__(self, port: str):
         self.fd = os.open(rawpath(port), os.O_RDONLY | os.O_NONBLOCK)
@@ -87,12 +87,12 @@ class Reader:
         return b"".join(b for _, b in list(self.events))
 
     def timed(self) -> list:
-        """[(t_s, bajt)] - vsechny bajty jednoho read() maji stejny cas."""
+        """[(t_s, byte)] - all bytes of one read() have the same time."""
         return [(t / 1e9, x) for t, b in list(self.events) for x in b]
 
 
 class Writer:
-    """Primy zapis do rawmidi (bez spousteni procesu, kvuli presnemu casovani)."""
+    """Direct write to rawmidi (without spawning a process, for precise timing)."""
 
     def __init__(self, port: str):
         self.fd = os.open(rawpath(port), os.O_WRONLY)
@@ -111,7 +111,7 @@ class Writer:
 
 
 def decode(data: bytes) -> list:
-    """Bajty -> [zpravy] s rozbalenym running statusem (realtime F8-FF jako samostatne zpravy, SysEx jako cely)."""
+    """Bytes -> [messages] with running status expanded (realtime F8-FF as separate messages, SysEx as a whole)."""
     out, status, cur, sysex = [], 0, [], None
     need = {0x80: 2, 0x90: 2, 0xA0: 2, 0xB0: 2, 0xC0: 1, 0xD0: 1, 0xE0: 2}
     for b in data:

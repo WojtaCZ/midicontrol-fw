@@ -1,4 +1,4 @@
-"""Bez hardwaru: fwclient (FW_UPDATE_* klient harnessu) a vyroba vadnych obrazu pro testy bootloaderu."""
+"""Without hardware: fwclient (the FW_UPDATE_* client of the harness) and the creation of bad images for the bootloader tests."""
 
 import os
 import struct
@@ -53,7 +53,7 @@ def test_start_and_data_payloads():
 
 
 class FakeLink:
-    """Odpovida jako FwReceiver: ACK na kazdy paket, STATUS po START (READY) a END (CRC_OK nebo zadany)."""
+    """Answers like FwReceiver: ACK for every packet, STATUS after START (READY) and END (CRC_OK or the given one)."""
 
     def __init__(self, nak_type=None, end_status=0x02):
         self.sent = []

@@ -16,9 +16,9 @@ namespace fault {
 
 	static constexpr uint32_t MAGIC = 0x46415554; // "TUAF"
 
-	// used: testy (dbg.fault_record) ho čtou sondou podle tabulky symbolů
+	// used: tests (dbg.fault_record) read it through the probe via the symbol table
 	[[gnu::section(".noinit.fault"), gnu::used]] Record _record;
-	// CRC záznamu, který už banner ohlásil (úroveň E); jiný/nový záznam se ohlásí znovu
+	// CRC of the record that the banner has already announced (level E); a different/new record is announced again
 	[[gnu::section(".noinit.fault"), gnu::used]] uint32_t _announcedCrc;
 
 	[[gnu::used]] volatile uint8_t testInject = 0;
@@ -45,7 +45,7 @@ namespace fault {
 	}
 
 	void init() {
-		// Samostatné handlery: přesnější druh chyby (jinak HardFault s HFSR.FORCED a stejným CFSR)
+		// Separate handlers: a more precise fault kind (otherwise HardFault with HFSR.FORCED and the same CFSR)
 		SCB->SHCSR |= SCB_SHCSR_MEMFAULTENA_Msk | SCB_SHCSR_BUSFAULTENA_Msk | SCB_SHCSR_USGFAULTENA_Msk;
 	}
 
@@ -61,7 +61,7 @@ namespace fault {
 		return "UNKNOWN";
 	}
 
-	// Rámec musí ležet v RAM (r0..xpsr = 8 slov), jinak by jeho čtení v HardFaultu skončilo lockupem
+	// The frame must lie in RAM (r0..xpsr = 8 words), otherwise reading it in a HardFault would end in a lockup
 	static bool frameValid(const uint32_t *f) {
 		uint32_t a = reinterpret_cast<uint32_t>(f);
 		return f && (a & 3) == 0 && a >= 0x20000000 && a + 32 <= 0x20008000;
@@ -89,7 +89,7 @@ namespace fault {
 			r.xpsr = frame[7];
 		}
 		r.excReturn = excReturn;
-		// Ukazatel zásobníku v okamžiku výjimky = adresa uloženého rámce na zásobníku podle EXC_RETURN bit 2
+		// Stack pointer at the moment of the exception = address of the saved frame on the stack according to EXC_RETURN bit 2
 		bool onPsp = excReturn & 4u;
 		r.msp	   = (frame && !onPsp) ? reinterpret_cast<uint32_t>(frame) : __get_MSP();
 		r.psp	   = (frame && onPsp) ? reinterpret_cast<uint32_t>(frame) : __get_PSP();
@@ -104,7 +104,7 @@ namespace fault {
 		r.crc	= recordCrc(r);
 		_record = r;
 
-		// Řádek do logu (no-init ring): po resetu ho ukáže "log before reset"
+		// Line into the log (no-init ring): after a reset it is shown by "log before reset"
 		Debug::logFault("%s #%u pc=0x%08lx lr=0x%08lx code %u", kindName(r.kind), static_cast<unsigned>(r.count), static_cast<unsigned long>(r.pc),
 			static_cast<unsigned long>(r.lr), static_cast<unsigned>(r.errorCode));
 		__set_PRIMASK(primask);
@@ -112,7 +112,7 @@ namespace fault {
 
 	void recordNonFatal(uint16_t errorCode, uint32_t caller) {
 		const Record *prev = saved();
-		if (prev && (!announced() || prev->kind != static_cast<uint8_t>(Kind::ERROR))) return; // starší záznam zůstává
+		if (prev && (!announced() || prev->kind != static_cast<uint8_t>(Kind::ERROR))) return; // the older record stays
 		const uint32_t frame[8] = {errorCode, 0, 0, 0, 0, caller, caller, 0x01000000};
 		record(Kind::ERROR, frame, 0, errorCode);
 		markAnnounced();
@@ -120,7 +120,7 @@ namespace fault {
 
 	[[gnu::noinline]] void finish() {
 		__disable_irq();
-		// Sonda připojena: zastavit tady (chování na lavici); C_DEBUGEN maže jen POR nebo zápis DHCSR sondou
+		// Probe attached: halt here (bench behaviour); C_DEBUGEN is cleared only by POR or a DHCSR write from the probe
 		if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) __BKPT(0);
 		NVIC_SystemReset();
 	}
@@ -139,7 +139,7 @@ namespace fault {
 		while (true) __asm volatile("");
 	}
 
-	// ── Textový výpis (banner, dump) ─────────────────────────────────────
+	// ── Text output (banner, dump) ────────────────────────────────────────
 
 	struct BitName {
 		uint8_t		bit;
@@ -219,9 +219,9 @@ namespace fault {
 
 } // namespace fault
 
-// ── Vstupy výjimek ───────────────────────────────────────────────────────
-// Naked stub: aktivní zásobník podle EXC_RETURN bit 2 (0 = MSP, 1 = PSP) → r0 = uložený rámec, r1 = EXC_RETURN,
-// r2 = druh; pak skok do C++ (nevrací se). Rámec s FPU (EXC_RETURN bit 4 = 0) začíná stejnými 8 slovy.
+// ── Exception entry points ───────────────────────────────────────────────
+// Naked stub: active stack according to EXC_RETURN bit 2 (0 = MSP, 1 = PSP) → r0 = saved frame, r1 = EXC_RETURN,
+// r2 = kind; then a jump into C++ (does not return). A frame with FPU (EXC_RETURN bit 4 = 0) starts with the same 8 words.
 
 extern "C" [[gnu::used, gnu::externally_visible, noreturn]] void fault_entry(const uint32_t *frame, uint32_t excReturn, uint32_t kind) {
 	fault::capture(static_cast<fault::Kind>(kind), frame, excReturn);
@@ -244,5 +244,5 @@ FAULT_STUB(HardFault_Handler, 1)
 FAULT_STUB(MemManage_Handler, 2)
 FAULT_STUB(BusFault_Handler, 3)
 FAULT_STUB(UsageFault_Handler, 4)
-// NMI (např. CSS na HSE): jako HARDFAULT, rozliší ho ipsr = 2
+// NMI (e.g. CSS on HSE): same as HARDFAULT, distinguished by ipsr = 2
 FAULT_STUB(NMI_Handler, 1)

@@ -19,10 +19,10 @@
 
 namespace Debug {
 
-	// ── Ring v no-init RAM (0x20007800, NOINIT v linker skriptu aplikace i bootloaderu) ──────────────
-	// head/tail jsou absolutní pozice (stále rostou), index = pozice % RING_SIZE. Ring drží posledních
-	// RING_SIZE bajtů historie bez ohledu na to, co už odešlo do CDC: po resetu se celá vypíše jako
-	// "log before reset". Co se přepíše dřív, než to odešlo, se počítá v `dropped` (řádky).
+	// ── Ring in no-init RAM (0x20007800, NOINIT in the linker script of both the application and the bootloader) ──
+	// head/tail are absolute positions (they keep growing), index = position % RING_SIZE. The ring holds the last
+	// RING_SIZE bytes of history regardless of what has already gone out to the CDC: after a reset all of it is printed as
+	// "log before reset". Whatever is overwritten before it was sent is counted in `dropped` (lines).
 	static constexpr uint32_t RING_MAGIC = 0x4C4F4721; // "!GOL"
 	static constexpr uint32_t RING_SIZE = 1536;
 	static constexpr uint8_t LOG_CDC = 1; // TinyUSB instance log CDC
@@ -33,7 +33,7 @@ namespace Debug {
 		uint32_t head;
 		uint32_t tail;
 		uint32_t dropped;
-		uint32_t crc; // CRC-32 předchozích 4 polí
+		uint32_t crc; // CRC-32 of the previous 4 fields
 	};
 
 	struct NoInitLog {
@@ -41,19 +41,19 @@ namespace Debug {
 		char ring[RING_SIZE];
 	};
 
-	// used: testy (dbg.debug_log) ho čtou sondou podle tabulky symbolů
+	// used: tests (dbg.debug_log) read it through the probe via the symbol table
 	[[gnu::section(".noinit.log"), gnu::used]] NoInitLog _log;
 
 	static Level _level = Level::INFO;
-	static uint32_t _sent = 0;    // absolutní pozice: co už odešlo do CDC (tail <= _sent <= head)
-	static uint32_t _bootPos = 0; // head v okamžiku init(): hranice logu před resetem
+	static uint32_t _sent = 0;    // absolute position: what has already gone out to the CDC (tail <= _sent <= head)
+	static uint32_t _bootPos = 0; // head at the moment of init(): boundary of the log before the reset
 
-	// Stav výpisu logu před resetem
+	// State of printing the log before the reset
 	enum class PreReset : uint8_t { NONE, START, BODY, DONE };
 	static PreReset _pre = PreReset::NONE;
 
-	// Port otevřen (DTR) a od kdy: první řádky se posílají až po HOLD_OFF_MS, protože PC po otevření portu maže
-	// vstupní buffer (pyserial i termios tcflush) a co přijde hned po DTR, by se ztratilo
+	// Port open (DTR) and since when: the first lines are sent only after HOLD_OFF_MS, because the PC clears its
+	// input buffer after opening the port (pyserial and termios tcflush) and anything arriving right after DTR would be lost
 	static constexpr uint32_t HOLD_OFF_MS = 200;
 	static bool _dtr = false;
 	static uint32_t _dtrSince = 0;
@@ -61,16 +61,16 @@ namespace Debug {
 	static volatile uint16_t _isrCounts[ISR_EVENT_COUNT] = {};
 	static uint32_t _lastIsrCheck = 0;
 
-	// Odpověď na příkaz (posílá se přednostně, mimo ring)
+	// Response to a command (sent with priority, outside the ring)
 	static char _reply[96];
 	static uint8_t _replyLen = 0;
 	static char _cmd[32];
-	// Výpis záznamu o chybě příkazem "dump": další řádek (fault::formatLine) až po odeslání předchozího
+	// Printing the fault record with the "dump" command: the next line (fault::formatLine) only after the previous one has been sent
 	static constexpr uint8_t DUMP_NONE = 0xFF;
 	static uint8_t _dumpIdx = DUMP_NONE;
 	static uint8_t _cmdLen = 0;
 
-	// ── CRC hlavičky ──────────────────────────────────────────────────────
+	// ── Header CRC ────────────────────────────────────────────────────────
 
 	static uint32_t headerCrc(const Header &h) { return util::crc32(&h, offsetof(Header, crc)); }
 
@@ -80,14 +80,14 @@ namespace Debug {
 		return h.magic == RING_MAGIC && h.crc == headerCrc(h) && (h.head - h.tail) <= RING_SIZE;
 	}
 
-	// Porovnání absolutních pozic odolné proti přetečení uint32 (po 4 GB logu)
+	// Comparison of absolute positions robust against uint32 overflow (after 4 GB of log)
 	static bool before(uint32_t a, uint32_t b) { return static_cast<int32_t>(a - b) < 0; }
 
 	static char at(uint32_t pos) { return _log.ring[pos % RING_SIZE]; }
 
-	// ── Zápis do ringu ────────────────────────────────────────────────────
+	// ── Writing to the ring ───────────────────────────────────────────────
 
-	// Uvolní místo pro `need` bajtů po celých řádcích (nejstarší první)
+	// Frees room for `need` bytes in whole lines (oldest first)
 	static void makeRoom(uint32_t need) {
 		Header &h = _log.h;
 		uint32_t tail = h.tail;
@@ -95,12 +95,12 @@ namespace Debug {
 		while (h.head + need - tail > RING_SIZE) {
 			uint32_t lineStart = tail;
 			while (tail != h.head && at(tail) != '\n') tail++;
-			if (tail == h.head) break; // bez konce řádku (nemá nastat): vše pryč
+			if (tail == h.head) break; // no end of line (should not happen): drop everything
 			tail++;
-			if (!before(lineStart, _sent)) dropped++; // řádek neodešel
+			if (!before(lineStart, _sent)) dropped++; // line was not sent
 		}
 		if (before(_sent, tail)) _sent = tail;
-		// Nejdřív hlavička (tail), teprve potom se přepisují bajty: reset uprostřed nechá platný stav
+		// Header (tail) first, only then are bytes overwritten: a reset in between leaves a valid state
 		h.tail = tail;
 		h.dropped += dropped;
 		seal();
@@ -110,7 +110,7 @@ namespace Debug {
 		if (len == 0 || len > RING_SIZE) return;
 		Header &h = _log.h;
 		if (h.tail >= 0x80000000u) {
-			// 2^32 není násobek RING_SIZE: pozice včas posunout o násobek RING_SIZE (indexy i rozdíly zůstanou)
+			// 2^32 is not a multiple of RING_SIZE: shift the positions in time by a multiple of RING_SIZE (indices and differences are preserved)
 			uint32_t k = (h.tail / RING_SIZE) * RING_SIZE;
 			h.head -= k;
 			h.tail -= k;
@@ -143,7 +143,7 @@ namespace Debug {
 		int t = vsnprintf(line + pre, MAX_TEXT + 1, fmt, ap);
 		if (t < 0) t = 0;
 		size_t text = static_cast<size_t>(t) > MAX_TEXT ? MAX_TEXT : static_cast<size_t>(t);
-		// Řádek musí zůstat jedním řádkem
+		// A line must remain a single line
 		for (size_t i = pre; i < pre + text; ++i) {
 			if (line[i] == '\r' || line[i] == '\n') line[i] = ' ';
 		}
@@ -162,10 +162,10 @@ namespace Debug {
 		va_end(ap);
 	}
 
-	// ── Veřejné API ───────────────────────────────────────────────────────
+	// ── Public API ────────────────────────────────────────────────────────
 
 	void log(Level lvl, const char *tag, const char *fmt, ...) {
-		// Z přerušení se nesmí zapisovat do ringu (hlavní smyčka může být uprostřed append): jen započítat
+		// The ring must not be written from an interrupt (the main loop may be in the middle of append): only count it
 		if (__get_IPSR() != 0) {
 			logFromIsr(ISR_LOG_FROM_ISR);
 			return;
@@ -194,7 +194,7 @@ namespace Debug {
 		if (headerValid(_log.h)) {
 			_pre = (_log.h.head != _log.h.tail) ? PreReset::START : PreReset::NONE;
 		} else {
-			// První zapnutí / výpadek napájení: v RAM je náhodný obsah
+			// First power-up / power loss: RAM contains random content
 			memset(&_log.h, 0, sizeof(_log.h));
 			_log.h.magic = RING_MAGIC;
 			seal();
@@ -209,7 +209,7 @@ namespace Debug {
 				 git::commit_time.c_str());
 		uint32_t csr = resetcause::readAndClear();
 		logForce(Level::INFO, "sys", "reset: %s (csr 0x%08lx)", resetcause::describe(csr), static_cast<unsigned long>(csr));
-		// Uložený záznam o chybě: nový celý na úrovni E (PC ho započítá jednou), už ohlášený jen odkazem na "dump"
+		// Saved fault record: a new one in full at level E (the PC counts it once), an already announced one only with a pointer to "dump"
 		if (const fault::Record *r = fault::saved()) {
 			if (fault::announced()) {
 				logForce(Level::INFO, "fault", "last %s #%u kept (dump)", fault::kindName(r->kind), static_cast<unsigned>(r->count));
@@ -224,14 +224,14 @@ namespace Debug {
 	Level getLevel() { return _level; }
 	void setLevel(Level level) { _level = level; }
 
-	// ── Příkazy z log CDC ─────────────────────────────────────────────────
+	// ── Commands from the log CDC ─────────────────────────────────────────
 
 	static void reply(const char *text) {
 		int n = snprintf(_reply, sizeof(_reply), "%s\r\n", text);
 		_replyLen = (n > 0 && static_cast<size_t>(n) < sizeof(_reply)) ? static_cast<uint8_t>(n) : 0;
 	}
 
-	// Další řádek výpisu "dump" do _reply (odpovědi jsou řádky bez log prefixu)
+	// Next line of the "dump" output into _reply (responses are lines without the log prefix)
 	static void nextDumpLine() {
 		const fault::Record *r = fault::saved();
 		char text[sizeof(_reply) - 2];
@@ -244,7 +244,7 @@ namespace Debug {
 	}
 
 	static void handleCommand(char *cmd) {
-		// Ořezat mezery, malá písmena
+		// Trim spaces, lowercase
 		while (*cmd == ' ') cmd++;
 		size_t len = strlen(cmd);
 		while (len && cmd[len - 1] == ' ') cmd[--len] = '\0';
@@ -280,7 +280,7 @@ namespace Debug {
 	}
 
 	static void readInput() {
-		// Další příkaz až po odeslání odpovědi na předchozí (zbytek vstupu počká v TinyUSB FIFO)
+		// Next command only after the response to the previous one has been sent (the rest of the input waits in the TinyUSB FIFO)
 		while (_replyLen == 0 && _dumpIdx == DUMP_NONE && tud_cdc_n_available(LOG_CDC)) {
 			uint8_t c;
 			if (tud_cdc_n_read(LOG_CDC, &c, 1) != 1) break;
@@ -294,7 +294,7 @@ namespace Debug {
 		}
 	}
 
-	// ── Události z ISR → řádky ────────────────────────────────────────────
+	// ── Events from ISRs → lines ──────────────────────────────────────────
 
 	static void reportIsrEvents() {
 		static const struct {
@@ -310,7 +310,7 @@ namespace Debug {
 			{"sys", Level::ERROR, "log called from ISR"},
 		};
 		uint32_t now = stmcpp::systick::getTicks();
-		if (now - _lastIsrCheck < 500) return; // nejvýše 2 řádky za sekundu na událost
+		if (now - _lastIsrCheck < 500) return; // at most 2 lines per second per event
 		_lastIsrCheck = now;
 		for (uint8_t i = 0; i < ISR_EVENT_COUNT; ++i) {
 			if (_isrCounts[i] == 0) continue;
@@ -323,9 +323,9 @@ namespace Debug {
 		}
 	}
 
-	// ── Odesílání do CDC 1 ────────────────────────────────────────────────
+	// ── Sending to CDC 1 ──────────────────────────────────────────────────
 
-	// Celý text, nebo nic (v TX FIFO jsou vždy jen celé řádky)
+	// The whole text or nothing (the TX FIFO always holds only whole lines)
 	static bool writeWhole(const char *text, uint32_t len, uint32_t &avail) {
 		if (avail < len) return false;
 		tud_cdc_n_write(LOG_CDC, text, len);
@@ -344,14 +344,14 @@ namespace Debug {
 			}
 			_replyLen = 0;
 			wrote = true;
-			nextDumpLine(); // "dump": další řádek záznamu (nebo nic)
+			nextDumpLine(); // "dump": next line of the record (or nothing)
 		}
 
 		Header &h = _log.h;
 		while (true) {
 			if (_pre == PreReset::START) {
 				if (!before(_sent, _bootPos)) {
-					_pre = PreReset::DONE; // log před resetem se mezitím celý přepsal
+					_pre = PreReset::DONE; // the log before the reset has been overwritten entirely in the meantime
 				} else {
 					static const char marker[] = "--- log before reset ---\r\n";
 					if (!writeWhole(marker, sizeof(marker) - 1, avail)) break;
@@ -378,12 +378,12 @@ namespace Debug {
 			}
 			if (_sent == h.head) break;
 
-			// Jeden celý řádek od _sent (do '\n' včetně)
+			// One whole line starting at _sent (up to and including '\n')
 			uint32_t end = _sent;
 			while (end != h.head && at(end) != '\n') end++;
-			if (end == h.head) break; // neúplný řádek (nemá nastat)
+			if (end == h.head) break; // incomplete line (should not happen)
 			uint32_t len = end + 1 - _sent;
-			if (avail < len) break; // FIFO plné: pokračovat při dalším průchodu smyčkou
+			if (avail < len) break; // FIFO full: continue on the next pass through the loop
 			uint32_t idx = _sent % RING_SIZE;
 			uint32_t first = (idx + len <= RING_SIZE) ? len : RING_SIZE - idx;
 			tud_cdc_n_write(LOG_CDC, &_log.ring[idx], first);
@@ -400,13 +400,13 @@ namespace Debug {
 		reportIsrEvents();
 		if (!tud_mounted()) return;
 		readInput();
-		// Bez otevřeného portu (DTR) zůstává vše v ringu; nejstarší řádky se přepisují ([dropped N])
+		// Without an open port (DTR) everything stays in the ring; the oldest lines get overwritten ([dropped N])
 		bool dtr = tud_cdc_n_connected(LOG_CDC);
 		if (dtr != _dtr) {
 			_dtr = dtr;
 			_dtrSince = stmcpp::systick::getTicks();
-			// Zbytek v TX FIFO by po dalším otevření smazal PC (flush) — začít s prázdnou FIFO.
-			// Ztratí se nejvýše obsah FIFO (CFG_TUD_CDC_TX_BUFSIZE), který při zavření ještě neodešel.
+			// The remainder in the TX FIFO would be discarded by the PC (flush) on the next open — start with an empty FIFO.
+			// At most the FIFO contents (CFG_TUD_CDC_TX_BUFSIZE) that had not gone out by the time of closing are lost.
 			tud_cdc_n_write_clear(LOG_CDC);
 		}
 		if (dtr && (stmcpp::systick::getTicks() - _dtrSince) >= HOLD_OFF_MS) drain();

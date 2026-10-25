@@ -1,4 +1,4 @@
-"""Textovy log base na druhem USB-CDC ("MIDIControl log"), banner s pricinou resetu, log pred resetem (no-init RAM)."""
+"""The base text log on the second USB-CDC ("MIDIControl log"), the banner with the reset cause, the log before a reset (no-init RAM)."""
 
 import os
 import re
@@ -17,7 +17,7 @@ BANNER_RE = r"^\[ *\d+\.\d{3}\] I sys: MIDIControl base .* rev [0-9a-f]{7}"
 PRE_START = "--- log before reset ---"
 PRE_END = "--- end of log before reset ---"
 SCB_AIRCR = 0xE000ED0C
-AIRCR_SYSRESETREQ = 0x05FA0004  # VECTKEY | SYSRESETREQ, jako NVIC_SystemReset()
+AIRCR_SYSRESETREQ = 0x05FA0004  # VECTKEY | SYSRESETREQ, like NVIC_SystemReset()
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def log():
 
 
 def ack_status(link):
-    """GET_STATUS na protokolovem CDC: ACK + STATUS_RESP, odpoved se potvrdi (jinak by ji base opakovala)."""
+    """GET_STATUS on the protocol CDC: ACK + STATUS_RESP, the reply is acknowledged (otherwise the base would repeat it)."""
     pid = link.send_msg(MT.GET_STATUS)
     ack = link.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.ACK and p.payload[:1] == bytes([pid]))
     resp = link.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.STATUS_RESP)
@@ -58,19 +58,19 @@ def wait_log_port(timeout=5.0) -> str:
 
 
 def reset_and_reopen(link, log, do_reset):
-    """Reset base (`do_reset()`), USB zpet do 5 s, znovu otevrit log CDC a protokolovy link. Vraci novy LogLink."""
+    """Reset the base (`do_reset()`), USB back within 5 s, reopen the log CDC and the protocol link. Returns a new LogLink."""
     log.close()
     link.detach()
     t0 = time.monotonic()
     do_reset()
-    time.sleep(1.0)  # stare CDC musi zmizet (reset -> bootloader -> aplikace)
+    time.sleep(1.0)  # the old CDC must disappear (reset -> bootloader -> application)
     port = wait_log_port(5.0)
     assert time.monotonic() - t0 < 6.5, "USB did not come back within 5 s"
     for _ in range(30):
         try:
             new = loglink.LogLink(port)
             break
-        except Exception:  # noqa: BLE001 - port jeste neni otevritelny
+        except Exception:  # noqa: BLE001 - the port is not openable yet
             time.sleep(0.1)
     else:
         raise AssertionError("log CDC not openable")
@@ -79,7 +79,7 @@ def reset_and_reopen(link, log, do_reset):
 
 
 def boot_section(log, timeout=5.0) -> list:
-    """Radky nove bootovane base: preskoci cast "log before reset" (je-li), vraci radky az po banner vcetne."""
+    """Lines of the freshly booted base: skips the "log before reset" part (if any), returns the lines up to and including the banner."""
     first = log.lines(timeout, pred=lambda l: l == PRE_START or re.search(BANNER_RE, l))
     if first and first[-1] == PRE_START:
         log.lines(timeout, pred=lambda l: l == PRE_END)
@@ -99,7 +99,7 @@ def test_log_cdc_is_separate(link, log):
     assert os.path.basename(os.path.realpath(log.port)) == log_ports[0][0]
     keepalive_rtt(link)
 
-    # 2 s logovani (D uroven, GET_STATUS) - na protokolovem CDC nesmi byt nic mimo ramce
+    # 2 s of logging (D level, GET_STATUS) - nothing outside frames may appear on the protocol CDC
     assert log.command("level d") == ["level D"]
     try:
         log.skip()
@@ -123,7 +123,7 @@ def test_banner_after_probe_reset(link, log, base):
 
 
 def test_banner_after_software_reset(link, log, base):
-    # = NVIC_SystemReset() (CMSIS inline, v tabulce symbolu neni): SCB->AIRCR = VECTKEY | SYSRESETREQ za behu jadra
+    # = NVIC_SystemReset() (CMSIS inline, not in the symbol table): SCB->AIRCR = VECTKEY | SYSRESETREQ while the core runs
     log = reset_and_reopen(link, log, lambda: base.write32(SCB_AIRCR, AIRCR_SYSRESETREQ))
     try:
         boot_section(log)
@@ -152,7 +152,7 @@ def test_help_and_unknown(log):
 
 
 def test_pre_reset_log_survives(link, log, base):
-    # Zarucene posledni I/W radky: prepnuti DTR protokoloveho CDC loguje "I usb:" (zavreni/otevreni portu)
+    # Guaranteed last I/W lines: toggling DTR of the protocol CDC logs "I usb:" (port close/open)
     link.detach()
     link.attach(settle=0.0)
     time.sleep(0.5)
@@ -170,7 +170,7 @@ def test_pre_reset_log_survives(link, log, base):
 
 
 def test_ring_wraps_without_host(link, log, base):
-    """Log CDC zavrene, >3 KB D radku za 10 s: smycka nikdy nestoji, po otevreni "[dropped N]" a cele radky."""
+    """Log CDC closed, >3 KB of D lines in 10 s: the loop never stalls, after opening "[dropped N]" and whole lines."""
     assert log.command("level d") == ["level D"]
     port = log.port
     log.close()
@@ -201,7 +201,7 @@ def test_ring_wraps_without_host(link, log, base):
         w.join(2)
     assert not stall, stall
     assert worst < 0.2, f"KEEPALIVE took {worst * 1000:.0f} ms"
-    assert n * 2 * 40 > 3072, n  # ~2 D radky po >40 B na GET_STATUS
+    assert n * 2 * 40 > 3072, n  # ~2 D lines of >40 B per GET_STATUS
 
     log2 = loglink.LogLink(port)
     try:
@@ -218,7 +218,7 @@ def test_ring_wraps_without_host(link, log, base):
 
 
 def test_line_format(link, log):
-    """Kazdy prijaty radek (krome znacek a odpovedi na prikazy) ma format [ssssss.mmm] L tag: text."""
+    """Every received line (except markers and replies to commands) has the format [ssssss.mmm] L tag: text."""
     assert log.command("level d") == ["level D"]
     try:
         log.skip()
@@ -244,9 +244,9 @@ def _crc32(b: bytes) -> int:
 
 
 def test_positions_survive_uint32_wrap(link, log, base):
-    """head/tail jsou absolutni pozice; 2^32 neni nasobek 1536, takze se pred pretecenim musi posunout o nasobek
-    1536. Pozice se presunou tesne pod 2^32 (stejne indexy v ringu), pak se loguje pres hranici: radky na CDC
-    i v RAM musi zustat cele a hlavicka platna."""
+    """head/tail are absolute positions; 2^32 is not a multiple of 1536, so before the wrap they must be shifted by a multiple of
+    1536. The positions are moved to just below 2^32 (same ring indices), then logging crosses the boundary: lines on the CDC
+    and in RAM must stay whole and the header valid."""
     import struct
     size = 1536
     hdr = base.sym("Debug::_log")
@@ -254,7 +254,7 @@ def test_positions_survive_uint32_wrap(link, log, base):
         magic, head, tail, dropped, _ = struct.unpack("<5I", base.read(hdr, 20))
         sent = base.u("Debug::_sent")
         boot = base.u("Debug::_bootPos")
-        target = 0xFFFFFFFF - 600  # tail tesne pod 2^32: dalsi radky prejdou pres preteceni
+        target = 0xFFFFFFFF - 600  # tail just below 2^32: further lines cross the wrap
         delta = ((target - tail) // size) * size
         f = [magic, (head + delta) & 0xFFFFFFFF, (tail + delta) & 0xFFFFFFFF, dropped]
         f.append(_crc32(struct.pack("<4I", *f)))
@@ -264,7 +264,7 @@ def test_positions_survive_uint32_wrap(link, log, base):
     assert log.command("level d") == ["level D"]
     try:
         log.skip()
-        for _ in range(40):  # ~3 KB radku: head projde pres 2^32
+        for _ in range(40):  # ~3 KB of lines: head crosses 2^32
             ack_status(link)
         time.sleep(0.5)
     finally:

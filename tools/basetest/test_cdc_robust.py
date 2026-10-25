@@ -1,4 +1,4 @@
-"""Odolnost parseru base na USB-CDC: rozdelene/slepene ramce, chybne CRC, smeti."""
+"""Robustness of the base parser on USB-CDC: split/merged frames, bad CRC, garbage."""
 
 import random
 import time
@@ -24,12 +24,12 @@ def quiet(link):
 
 
 def ka_acks(link, timeout=0.6):
-    link.recv(timeout, lambda p: False)  # pocka na dobehnuti odpovedi
+    link.recv(timeout, lambda p: False)  # waits for the replies to finish arriving
     return [p for p in link.drain() if p.mtype == MT.KEEPALIVE_ACK and p.src == ADDR_BASE]
 
 
 def write_unobserved(link, data: bytes):
-    """Zapis mimo evidenci keepalive (smeti nesmi rozhodit parovani ACK)."""
+    """A write outside the keepalive bookkeeping (garbage must not upset the ACK matching)."""
     with link._lock:
         link.ser.write(data)
         link.ser.flush()
@@ -50,7 +50,7 @@ def test_burst_8_frames(quiet):
 
 def test_bad_crc_silent(quiet):
     frame = bytearray(KA(0x22))
-    frame[-2] ^= 0x55  # bajt CRC pred EOT
+    frame[-2] ^= 0x55  # the CRC byte before EOT
     quiet.send_raw(bytes(frame))
     assert quiet.expect_silence(0.5) == []
 
@@ -70,12 +70,12 @@ def test_300_byte_garbage(quiet):
 
 
 def test_max_escaped_payload(quiet, base, request):
-    """Maximalni payload (127 B, sam escapovany) do Remote: base ho cely naparsuje a odpovi NAK UNREACHABLE.
-    Je-li remote pripojen, drzi se jeho RN4870 v resetu (PB8 pres sondu remote), aby odpoved byla NAK."""
+    """Maximum payload (127 B, fully escaped) to the Remote: the base parses it completely and answers NAK UNREACHABLE.
+    If the remote is connected, its RN4870 is held in reset (PB8 via the remote probe) so that the answer is a NAK."""
     from conftest import wait_until
     remote = None
     if base.u("Bluetooth::_connected", 1):
-        remote = request.getfixturevalue("remote_probe")  # preskoci, kdyz sondu drzi jiny proces
+        remote = request.getfixturevalue("remote_probe")  # skips when another process holds the probe
         remote.hold_ble_reset(True)
     try:
         if remote:

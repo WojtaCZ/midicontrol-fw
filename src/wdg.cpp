@@ -6,25 +6,25 @@
 
 #include "stmcpp/systick.hpp"
 
-// IWDG po resetu (ověřeno na lavici 2026-10-19, STM32G431, IWDG_SW = 1 v FLASH->OPTR): softwarově spuštěný IWDG
-// NEpřežije systémový reset (NVIC_SystemReset / SYSRESETREQ) ani vlastní IWDG reset — po resetu má PR/RLR výchozí
-// hodnoty (0 / 0xFFF) a bez nového spuštění už nikdy nezresetuje. Kicky v bootloaderu (Task 6A) jsou proto jen
-// pojistka (pro případ hardwarového IWDG v option bytes); aplikace IWDG spouští při každém bootu sama (start()).
+// IWDG after a reset (verified on the bench 2026-10-19, STM32G431, IWDG_SW = 1 in FLASH->OPTR): a software-started IWDG
+// does NOT survive a system reset (NVIC_SystemReset / SYSRESETREQ) or its own IWDG reset — after a reset PR/RLR have default
+// values (0 / 0xFFF) and without being started again it never resets anything. The kicks in the bootloader (Task 6A) are therefore only
+// a safeguard (in case of a hardware IWDG in the option bytes); the application starts the IWDG itself on every boot (start()).
 
 namespace wdg {
 
-	static volatile uint32_t _sinceKick = 0; // ms od posledního kick()
+	static volatile uint32_t _sinceKick = 0; // ms since the last kick()
 	static volatile bool	 _armed		= false;
 
 	void start() {
-		// IWDG stojí, když je jádro zastavené sondou (jinak by gdb session base resetovala)
+		// The IWDG stops while the core is halted by the probe (otherwise a gdb session would reset the base)
 		DBGMCU->APB1FZR1 |= DBGMCU_APB1FZR1_DBG_IWDG_STOP;
 
-		// RM0440 IWDG: nejdřív spustit (zapne LSI), pak odemknout PR/RLR a počkat na jejich převzetí
+		// RM0440 IWDG: start first (turns on the LSI), then unlock PR/RLR and wait for them to be taken over
 		IWDG->KR	   = 0xCCCC;
 		IWDG->KR	   = 0x5555;
-		IWDG->PR	   = 3; // /32 → 1 kHz z LSI 32 kHz
-		IWDG->RLR	   = 2000; // 2000 tiků = ~2 s (LSI ±: zhruba 1,9–2,2 s)
+		IWDG->PR	   = 3; // /32 → 1 kHz from the 32 kHz LSI
+		IWDG->RLR	   = 2000; // 2000 ticks = ~2 s (LSI ±: roughly 1.9–2.2 s)
 		uint32_t start = stmcpp::systick::getTicks();
 		while (IWDG->SR && (stmcpp::systick::getTicks() - start) < 50) {}
 		IWDG->KR = 0xAAAA;

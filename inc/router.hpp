@@ -4,8 +4,8 @@
 #include <cstdint>
 #include "protocol/types.hpp"
 
-// Směrování protokolových paketů mezi PC (USB-CDC) a Remote (BLE) a lokální obsluha
-// paketů pro Base. Pravidla viz lib/protocol/PROTOCOL.md (sekce Routing / Reliability).
+// Routing of protocol packets between the PC (USB-CDC) and the Remote (BLE) and local handling
+// of packets for the Base. For the rules see lib/protocol/PROTOCOL.md (Routing / Reliability section).
 namespace router {
 
 	enum class Transport : uint8_t {
@@ -13,11 +13,11 @@ namespace router {
 		BLE,
 	};
 
-	// Hlavní smyčka: čtení CDC a BLE, opakování nepotvrzených paketů, keepalive k Remote, odesílání CDC
+	// Main loop: reading CDC and BLE, retrying unacknowledged packets, keepalive to the Remote, CDC transmission
 	void process();
 
-	// Odešle paket, který Base sama vytváří, s potvrzením a opakováním (3 × 500 ms, stejné PacketId).
-	// source a packetId doplní router. Vrací false, když je fronta plná nebo cíl nedostupný.
+	// Sends a packet that the Base itself creates, with acknowledgement and retries (3 × 500 ms, same PacketId).
+	// source and packetId are filled in by the router. Returns false when the queue is full or the destination is unreachable.
 	bool sendReliable(protocol::Packet &pkt);
 
 	bool isPcAlive();

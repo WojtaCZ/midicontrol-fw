@@ -7,7 +7,7 @@
 
 namespace LED{
 
-    // Indexy pixelů na zadním LED pásku
+    // Pixel indices on the rear LED strip
     constexpr uint8_t PIXEL_USB       = 0;
     constexpr uint8_t PIXEL_DISPLAY   = 1;
     constexpr uint8_t PIXEL_CURRENT   = 2;

@@ -23,7 +23,7 @@ using namespace stmcpp::units;
 
 #define OLED_SLEEP_INTERVAL     30000_ms
 
-//Velikost bufferu
+//Buffer size
 #define OLED_SCREENBUF_SIZE		(OLED_WIDTH*OLED_HEIGHT / 8) + 8
 
 namespace Oled{
@@ -81,7 +81,7 @@ namespace Oled{
 
     void update();
     void process();
-    // Blokující dokončení inicializace a čekajícího rámce (start, před blokující inicializací BLE)
+    // Blocking completion of the initialization and of the pending frame (startup, before the blocking BLE initialization)
     void flush(uint32_t timeoutMs);
     void init();
 

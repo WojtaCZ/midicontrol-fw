@@ -1,7 +1,7 @@
-"""Offline dry-run ridiciho toku test_soak (bez hardware): male fake link / base / remote / log / midi.
-Overuje, ze soak dobehne na stastne ceste a ze asserty mezery vzorkovani a stari remote opravdu padnou.
-Fake base modeluje i spolehlive STATUS_RESP: nepotvrzena odpoved na GET_STATUS da po ~2 s (3 x 500 ms opakovani)
-W radek "retries exhausted" do logu, jako skutecna base (src/router.cpp)."""
+"""Offline dry run of the test_soak control flow (without hardware): small fake link / base / remote / log / midi.
+Verifies that the soak completes on the happy path and that the sampling-gap and remote-age asserts really fail.
+The fake base also models a reliable STATUS_RESP: an unacknowledged reply to GET_STATUS puts, after ~2 s (3 x 500 ms retries),
+a W line "retries exhausted" into the log, like the real base (src/router.cpp)."""
 
 import sys
 import time
@@ -25,20 +25,20 @@ class Clock:
         return time.monotonic() - self.t0
 
 
-STATUS_RETRY_S = 2.0  # base: STATUS_RESP 4x po 500 ms, pak W "retries exhausted"
+STATUS_RETRY_S = 2.0  # base: STATUS_RESP 4x at 500 ms, then W "retries exhausted"
 
 
 class FakeLink:
-    """Simulovany remote za base: ACK na vse PC -> remote, DIAG_GET -> ACK + DIAG_RESP.
-    Base: GET_STATUS -> ACK + STATUS_RESP (spolehlive; bez ACK od PC do STATUS_RETRY_S -> W radek v logu)."""
+    """A simulated remote behind the base: ACK for everything PC -> remote, DIAG_GET -> ACK + DIAG_RESP.
+    Base: GET_STATUS -> ACK + STATUS_RESP (reliable; without an ACK from the PC within STATUS_RETRY_S -> a W line in the log)."""
 
     def __init__(self, crc_on_diag=False, reattach_on_diag=False):
         self.q = []
         self.pid = 0
-        self.parser = proto.FrameParser()  # pocitadla chyb PC strany (crc_errors, bad_frames, overflows)
+        self.parser = proto.FrameParser()  # PC-side error counters (crc_errors, bad_frames, overflows)
         self.crc_on_diag, self.reattach_on_diag = crc_on_diag, reattach_on_diag
         self.base_pid = 0x60
-        self.status_pending = {}  # pid STATUS_RESP -> cas, kdy base vzda opakovani
+        self.status_pending = {}  # STATUS_RESP pid -> the time when the base gives up retrying
         self.keepalives_sent = self.keepalive_acks = 0
         self.error = None
         self.stray = b""
@@ -61,9 +61,9 @@ class FakeLink:
             if p.mtype == MT.DIAG_GET:
                 if self.reattach_on_diag:
                     self.reattach_on_diag = False
-                    self.parser = proto.FrameParser()  # Link.attach() parser nahrazuje
+                    self.parser = proto.FrameParser()  # Link.attach() replaces the parser
                 if self.crc_on_diag:
-                    self.parser.crc_errors += 1  # poskozeny ramec base -> PC
+                    self.parser.crc_errors += 1  # a corrupted base -> PC frame
                 self.push(Packet(ADDR_REMOTE, ADDR_PC, 0x40, MT.DIAG_RESP, proto.diag_encode_resp(BOOT_ID, 5, [])))
         elif p.dst == ADDR_BASE and p.mtype == MT.GET_STATUS:
             self.base_pid = (self.base_pid + 1) & 0xFF
@@ -94,7 +94,7 @@ class FakeLink:
 
 
 class FakeBase:
-    """systick 1 ms; stari posledniho paketu od remote = age_fn(cas od startu)."""
+    """systick 1 ms; age of the last packet from the remote = age_fn(time since start)."""
 
     def __init__(self, clock, age_fn):
         self.clock, self.age_fn = clock, age_fn
@@ -120,7 +120,7 @@ class FakeBase:
 
 
 class FakeRemote:
-    """key() trva play_s (PLAY 406+ENTER, posle PLAY_SONG) nebo back_s (BACK); stale_once: po prvnim PLAY zustanou cislice."""
+    """key() takes play_s (PLAY 406+ENTER, sends PLAY_SONG) or back_s (BACK); stale_once: after the first PLAY the digits remain."""
 
     def __init__(self, link, play_s=0.05, back_s=0.05, stale_once=False):
         self.link, self.play_s, self.back_s, self.stale = link, play_s, back_s, stale_once
@@ -151,7 +151,7 @@ class FakeRemote:
 
 
 class FakeLog:
-    """history: radky base logu; W radky za nepotvrzene STATUS_RESP pribudou, jakmile base vzda opakovani."""
+    """history: base log lines; W lines for unacknowledged STATUS_RESPs are added as soon as the base gives up retrying."""
 
     def __init__(self, link=None):
         self._history = []
@@ -188,7 +188,7 @@ class FakeWriter:
 
 
 def happy_age(t):
-    return (t * 1000) % 2000 * 0.1  # keepalive odpovedi: stari stale male
+    return (t * 1000) % 2000 * 0.1  # keepalive replies: the age stays small
 
 
 @pytest.fixture
@@ -219,7 +219,7 @@ def test_soak_dryrun_happy(soak_env, capsys):
 
 
 def test_fake_base_logs_unacked_status_resp(monkeypatch):
-    """Model sam: nepotvrzena STATUS_RESP -> W radek; potvrzena -> nic."""
+    """The model itself: an unacknowledged STATUS_RESP -> a W line; an acknowledged one -> nothing."""
     monkeypatch.setattr(sys.modules[__name__], "STATUS_RETRY_S", 0.05)
     link = FakeLink()
     log = FakeLog(link)
@@ -241,7 +241,7 @@ def test_soak_dryrun_slow_play_key_fails_gap(soak_env):
 
 
 def test_soak_dryrun_slow_first_play_key_fails_gap(soak_env, monkeypatch):
-    # jediny cyklus: pomaly je jen prvni PLAY v okne (pred nim zadny sample v cyklu)
+    # a single cycle: only the first PLAY in the window is slow (no sample in the cycle before it)
     monkeypatch.setenv("SOAK_SECONDS", "0.5")
     with pytest.raises(AssertionError, match="age sampling gap"):
         soak_env(play_s=1.2)
@@ -263,6 +263,6 @@ def test_soak_dryrun_pc_crc_error_fails(soak_env):
 
 
 def test_soak_dryrun_pc_crc_error_after_reattach_fails(soak_env):
-    # Link.attach() vymeni parser: chyba v novem parseru se musi zapocitat taky
+    # Link.attach() swaps the parser: an error in the new parser must be counted too
     with pytest.raises(AssertionError, match="pc_crc_errors"):
         soak_env(link_kw=dict(crc_on_diag=True, reattach_on_diag=True))

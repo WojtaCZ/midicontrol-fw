@@ -29,49 +29,49 @@ namespace GUI {
     // Access to power checkbox for external state changes
     ui::MenuItem& checkboxPower();
 
-    // Přístup k checkboxům v nastavení
+    // Access to the checkboxes in the settings
     ui::MenuItem& checkboxLedMaster();
     ui::MenuItem& checkboxMidiRole();
 
-    // Výsledek párování z menu ("Sparovano", ...) na obrazovce "Parovani", pokud je otevřená
+    // Pairing result from the menu ("Sparovano", ...) on the "Parovani" screen, if it is open
     void showPairingResult(const char* text);
 
-    // Zobrazení/skrytí obrazovky "Přehrávání"
+    // Show/hide the "Přehrávání" screen
     void showNowPlaying(const char* songName);
     void dismissNowPlaying();
 
-    // Aktualizace Remote relay-ovana pres Base: obrazovka s postupem; hint musi byt retezcovy literal (porovnava se ukazatel).
-    // Pri prvnim zobrazeni vyprazdni stack (hlavni menu + obrazovka); Now Playing a seznam pisni se po dobu aktualizace nepushuji.
+    // Remote update relayed via the Base: progress screen; hint must be a string literal (it is compared by pointer).
+    // On the first display it empties the stack (main menu + screen); Now Playing and the song list are not pushed during the update.
     void showFwProgress(const char* hint, uint8_t percent);
-    // Konec aktualizace: obrazovka se odebere ze stacku (zpet na hlavni menu)
+    // End of the update: the screen is removed from the stack (back to the main menu)
     void hideFwProgress();
 
-    // Aktualizace info na "Now Playing" obrazovce (song/verse/letter z display::)
+    // Update of the info on the "Now Playing" screen (song/verse/letter from display::)
     void updateNowPlayingInfo();
 
-    // Popisek sekce ze SIGNAL_ANCHOR ("Sloka 2")
+    // Section label from SIGNAL_ANCHOR ("Sloka 2")
     void setNowPlayingAnchor(const char* label);
 
-    // Checkbox "Napajeni Varhan" podle skutečného stavu SSR (např. po SET_CURRENT z PC)
+    // "Napajeni Varhan" checkbox according to the actual SSR state (e.g. after SET_CURRENT from the PC)
     void syncPowerCheckbox();
 
-    // Registrace callbacku pro zastavení přehrávání (volá se při dismiss z OLED)
+    // Registers the callback for stopping playback (called on dismiss from the OLED)
     using StopCallback = void (*)();
     void setStopCallback(StopCallback cb);
 
-    // Callbacky pro seznam písní a přehrávání
+    // Callbacks for the song list and playback
     using RequestSongListCallback = void (*)(uint8_t offset);
     using PlaySongCallback = void (*)(const char* songName);
     void setRequestSongListCallback(RequestSongListCallback cb);
     void setPlaySongCallback(PlaySongCallback cb);
 
-    // Zpracování odpovědi se seznamem písní z PC
+    // Handling of the song list response from the PC
     void handleSongListResponse(const char* payload, uint8_t len, bool hasMore);
 
-    // Interní: timeout handler pro song list loading
+    // Internal: timeout handler for song list loading
     void songListTimeout();
 
-    // Interní: delayed loading screen handler
+    // Internal: delayed loading screen handler
     void songListDelayShow();
 }
 

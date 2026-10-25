@@ -6,8 +6,8 @@
 
 namespace util {
 
-	// CRC-32 (IEEE 802.3, zrcadlená 0xEDB88320, init 0xFFFFFFFF, výstup negovaný) = Python zlib.crc32.
-	// Bez tabulky: hlavičky v no-init RAM jsou malé a počítají se zřídka.
+	// CRC-32 (IEEE 802.3, reflected 0xEDB88320, init 0xFFFFFFFF, output inverted) = Python zlib.crc32.
+	// Table-less: headers in no-init RAM are small and computed rarely.
 	inline uint32_t crc32(const void *data, size_t len) {
 		const uint8_t *p   = static_cast<const uint8_t *>(data);
 		uint32_t	   crc = 0xFFFFFFFF;

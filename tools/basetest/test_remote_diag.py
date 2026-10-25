@@ -1,9 +1,9 @@
-"""Diagnostika remote pres base: DIAG_GET (0x80) -> ACK + DIAG_RESP (0x81), kruh 32 zaznamu v RAM (Task 6D-1);
-sloty ve W25Q32, watchdogy a zachyceni chyb (Task 6D-2).
-Predpoklad: base a remote jsou sparovane (test_pairing.py), remote bezi nove firmware s diag.
+"""Remote diagnostics via the base: DIAG_GET (0x80) -> ACK + DIAG_RESP (0x81), a ring of 32 records in RAM (Task 6D-1);
+slots in the W25Q32, watchdogs and fault capture (Task 6D-2).
+Precondition: the base and the remote are paired (test_pairing.py), the remote runs new firmware with diag.
 
-Reset remote uvolni PA1 a remote se VYPNE (nikdo ho na lavici nezapne): testy, ktere chybu/watchdog skutecne vyvolaji,
-jsou `needs_user` (bezi jen s `-m needs_user` a clovekem u lavice, ktery remote zapne)."""
+A remote reset releases PA1 and the remote SWITCHES OFF (nobody switches it back on at the bench): tests that really trigger a fault/watchdog
+are `needs_user` (they run only with `-m needs_user` and a person at the bench who switches the remote on)."""
 
 import os
 import struct
@@ -26,15 +26,15 @@ CODE_LOOP_STALL = 4
 CODE_RECORDS_LOST = 16
 LEVEL_INFO = 3
 
-# Slot ve W25Q32 (midicontroller-fw src/logic/diag_slot.hpp): 256 B, sektor 0x3FF000, 16 slotu
+# A slot in the W25Q32 (midicontroller-fw src/logic/diag_slot.hpp): 256 B, sector 0x3FF000, 16 slots
 SLOT_SIZE, SLOT_COUNT, SLOT_MAGIC = 256, 16, 0x544C5344
 SLOT_EMPTY, SLOT_UNFETCHED, SLOT_FETCHED, SLOT_CORRUPT = range(4)
 OFF_RECORDS, OFF_CRC, OFF_FETCHED = 48, 240, 255
 
 
 def get(link, dst, cursor, timeout=2.0):
-    """DIAG_GET -> (reply ACK/NAK, DIAG_RESP | None). DIAG_RESP chodi navic po ACK."""
-    # pozdni DIAG_RESP z drivejsiho pozadavku (po timeoutu) by se jinak spletla s odpovedi na tento
+    """DIAG_GET -> (reply ACK/NAK, DIAG_RESP | None). DIAG_RESP additionally arrives after the ACK."""
+    # a late DIAG_RESP from an earlier request (after a timeout) would otherwise be confused with the answer to this one
     link.drain()
     pid = link.send(Packet(ADDR_PC, dst, 0, MT.DIAG_GET, proto.diag_encode_get(cursor)))
     reply = link.recv(timeout, lambda p: p.src == dst and p.mtype in (MT.ACK, MT.NAK) and p.payload[:1] == bytes([pid]))
@@ -42,7 +42,7 @@ def get(link, dst, cursor, timeout=2.0):
     if reply.mtype != MT.ACK:
         return reply, None
     resp = link.recv(timeout, lambda p: p.src == dst and p.dst == ADDR_PC and p.mtype == MT.DIAG_RESP)
-    if resp is not None:  # DIAG_RESP se potvrzuje (PROTOCOL.md), jinak ho remote opakuje
+    if resp is not None:  # DIAG_RESP is acknowledged (PROTOCOL.md), otherwise the remote repeats it
         link.send(Packet(ADDR_PC, dst, 0, MT.ACK, bytes([resp.pid])))
     return reply, resp
 
@@ -52,7 +52,7 @@ def decode(resp):
 
 
 def decode_slot(raw: bytes) -> dict:
-    """Slot (256 B) nezavisle na firmware: magic, crc (zlib), hlavicka, registry, zaznamy (seq, code, level, uptime, arg)."""
+    """A slot (256 B) decoded independently of the firmware: magic, crc (zlib), header, registers, records (seq, code, level, uptime, arg)."""
     magic, boot_id, reason, count, uptime = struct.unpack_from("<IHBBI", raw, 0)
     regs = struct.unpack_from("<9I", raw, 12)
     crc = struct.unpack_from("<I", raw, OFF_CRC)[0]
@@ -62,7 +62,7 @@ def decode_slot(raw: bytes) -> dict:
 
 
 def head_and_boot(link):
-    """(boot_id, head) z DIAG_GET s kurzorem za koncem."""
+    """(boot_id, head) from a DIAG_GET with the cursor past the end."""
     _, r = get(link, ADDR_REMOTE, 0xFFFF)
     assert r is not None, "no DIAG_RESP"
     boot_id, head, recs = decode(r)
@@ -71,7 +71,7 @@ def head_and_boot(link):
 
 
 def read_range(link, start, end):
-    """Zaznamy seq start..end-1 (strankovane DIAG_GET); vraci (boot_id, zaznamy, posledni next)."""
+    """Records seq start..end-1 (paged DIAG_GET); returns (boot_id, records, last next)."""
     out, cur, bid = [], start, None
     while cur < end:
         _, r = get(link, ADDR_REMOTE, cur)
@@ -84,7 +84,7 @@ def read_range(link, start, end):
 
 
 def tell_user(msg: str):
-    """Zprava cloveku u lavice (mimo zachytavani pytest)."""
+    """A message to the person at the bench (bypassing pytest's capture)."""
     print(f"\n>>> {msg}", file=sys.__stderr__, flush=True)
 
 
@@ -96,7 +96,7 @@ def paired(base):
 
 
 def test_diag_get_boot_record(paired, link):
-    """BOOT je prvni zaznam tohoto behu; pred nim smi byt jen zaznamy nactene ze slotu W25Q32 (nejvyse 16)."""
+    """BOOT is the first record of this run; before it there may be only records loaded from W25Q32 slots (at most 16)."""
     link.drain()
     reply, resp = get(link, ADDR_REMOTE, 0)
     assert reply.mtype == MT.ACK, reply
@@ -119,11 +119,11 @@ def test_diag_get_boot_record(paired, link):
 def test_diag_cursor_paging(paired, link, remote_probe):
     remote = remote_probe
     link.drain()
-    _, resp = get(link, ADDR_REMOTE, 0xFFFF)  # kurzor za koncem: n = 0, next = head
+    _, resp = get(link, ADDR_REMOTE, 0xFFFF)  # cursor past the end: n = 0, next = head
     boot_id, head0, recs = decode(resp)
     assert recs == [], recs
     def head_now():
-        try:  # hned po otevreni streamu remote jeste nemusi odpovidat
+        try:  # right after the stream opens the remote may not answer yet
             _, r = get(link, ADDR_REMOTE, 0xFFFF, timeout=1.0)
             return decode(r)[1] if r else -1
         except AssertionError:
@@ -136,7 +136,7 @@ def test_diag_cursor_paging(paired, link, remote_probe):
         remote.hold_ble_reset(False)
         wait_until(lambda: paired.read_bool("Bluetooth::_streamOpen"), 15, what="reconnected")
         cycles += 1
-        # kazdy cyklus: BLE_DISCONNECT, BLE_CONNECT, BLE_SECURED
+        # every cycle: BLE_DISCONNECT, BLE_CONNECT, BLE_SECURED
         wait_until(lambda: head_now() >= head + 3, 15, interval=0.5, what="records of the reset cycle")
         head = head_now()
     assert head - head0 >= 10, f"only {head - head0} records after {cycles} reset cycles"
@@ -165,10 +165,10 @@ def test_diag_get_to_base_nak(paired, link):
 
 
 def test_diag_traffic_budget(paired, link, remote_probe):
-    """60 s, DIAG_GET kazdych 10 s s plnou davkou (8 zaznamu): presne jeden ACK a jedna DIAG_RESP na GET, nic
-    navic (ani opakovani, ani neziadane), payload <= 101 B, ramec na drate <= 2x nezeskapovany + 2 B.
-    Pocita se end-to-end pres `link` (bez ztrat); logicky analyzator se nepouziva, jeho dekodovani 64 s zaznamu
-    ztracelo ramce a mez 120 B zavisi na datech (escapuji se jen 0x01/0x04/0x1B/'$'/'%')."""
+    """60 s, DIAG_GET every 10 s with a full batch (8 records): exactly one ACK and one DIAG_RESP per GET, nothing
+    extra (neither retries nor unsolicited), payload <= 101 B, wire frame <= 2x unescaped + 2 B.
+    It is counted end-to-end via `link` (lossless); the logic analyzer is not used, its decoding of a 64 s recording
+    dropped frames and the 120 B limit depends on the data (only 0x01/0x04/0x1B/'$'/'%' are escaped)."""
     remote = remote_probe
 
     def head_now():
@@ -178,7 +178,7 @@ def test_diag_traffic_budget(paired, link, remote_probe):
         except AssertionError:
             return -1
 
-    while head_now() < 8:  # zasoba >= 8 zaznamu, aby se zkusila plna davka
+    while head_now() < 8:  # a supply of >= 8 records, so that a full batch is tried
         remote.hold_ble_reset(True)
         wait_until(lambda: not paired.read_bool("Bluetooth::_streamOpen"), 10, what="base sees disconnect")
         remote.hold_ble_reset(False)
@@ -205,7 +205,7 @@ def test_diag_traffic_budget(paired, link, remote_probe):
         cursor = decode(resp)[1]
         if i < 5:
             time.sleep(max(0.0, t0 + 10 * (i + 1) - time.monotonic()))
-            # mezitim nic nepriteklo: zadny duplikat DIAG_RESP (retry) ani neziadany ramec od remote
+            # nothing arrived in the meantime: no duplicate DIAG_RESP (retry) and no unsolicited frame from the remote
             extra = [p for p in link.drain() if p.src == ADDR_REMOTE and p.mtype in (MT.DIAG_RESP, MT.ACK, MT.NAK)]
             assert extra == [], f"unsolicited/duplicate frames from remote after GET {i}: {extra}"
     gaps = [b - a for a, b in zip(sent_at, sent_at[1:])]
@@ -217,10 +217,10 @@ def test_diag_traffic_budget(paired, link, remote_probe):
 
 
 def test_persisted_slot_roundtrip(paired, link, remote_probe):
-    """Slot ve W25Q32 bez resetu remote (reset = vypnuti): gdb zavola diag::testPersist() - skutecna cesta persist()
-    jako z HardFaultu (preruseni zakazana, polling SPI, jeden page program) se syntetickymi registry; slot se precte
-    zpet do RAM (diag::testReadSlot -> w25q::read) a dekoduje nezavisle (zlib crc). Pak diag::testLoadSlot nacte slot
-    do kruhu jako boot, DIAG_GET jeho zaznamy ukaze a kurzor za nimi slot oznaci jako vyzvednuty (bajt 255 = 0x00)."""
+    """A slot in the W25Q32 without a remote reset (reset = switch-off): gdb calls diag::testPersist() - the real persist() path
+    as from a HardFault (interrupts disabled, SPI polling, one page program) with synthetic registers; the slot is read
+    back into RAM (diag::testReadSlot -> w25q::read) and decoded independently (zlib crc). Then diag::testLoadSlot loads the slot
+    into the ring as a boot, DIAG_GET shows its records and a cursor past them marks the slot as fetched (byte 255 = 0x00)."""
     remote = remote_probe
     marker = 0x6D200000
     boot_id, head0 = head_and_boot(link)
@@ -233,7 +233,7 @@ def test_persisted_slot_roundtrip(paired, link, remote_probe):
     assert slot["regs"] == tuple(marker + i for i in range(9)), [hex(r) for r in slot["regs"]]
     assert slot["fetched"] == 0xFF
     assert 1 <= slot["count"] <= 16, slot
-    # zaznamy slotu = posledni zaznamy tohoto behu, shodne s kruhem
+    # the slot records = the last records of this run, identical to the ring
     first = slot["recs"][0][0]
     _, ring, _ = read_range(link, first, first + slot["count"])
     assert ring[: slot["count"]] == slot["recs"], (ring, slot["recs"])
@@ -246,7 +246,7 @@ def test_persisted_slot_roundtrip(paired, link, remote_probe):
     loaded = loaded[:n]
     assert [r[0] for r in loaded] == list(range(head1, head1 + n))
     assert [r[1:] for r in loaded] == [r[1:] for r in slot["recs"]], (loaded, slot["recs"])
-    # kurzor za poslednim nactenym zaznamem -> program "fetched"
+    # a cursor past the last loaded record -> the program marks it "fetched"
     get(link, ADDR_REMOTE, nxt)
     wait_until(lambda: remote.call(f"diag::testReadSlot({idx})") == SLOT_FETCHED, 5, interval=0.5, what="slot marked fetched")
     raw = remote.read(remote.sym("diag::testBuf"), SLOT_SIZE)
@@ -255,16 +255,16 @@ def test_persisted_slot_roundtrip(paired, link, remote_probe):
 
 
 def test_watchdogs_do_not_trip(paired, link, remote_probe):
-    """10 min bezneho provozu (DIAG_GET kazdych 10 s, relay PC -> remote, OLED pres klavesy) + mazani OTA stagingu
-    (FW_UPDATE_START na plnou velikost, pak FW_UPDATE_END bez dat = BAD_SIZE: zadne abort zpravy neni, hlavicka
-    stagingu zustava smazana) -> remote se nikdy neresetuje: boot_id stejny, seq roste, spojeni drzi."""
+    """10 min of normal operation (DIAG_GET every 10 s, PC -> remote relay, OLED via keys) + OTA staging erase
+    (FW_UPDATE_START for the full size, then FW_UPDATE_END without data = BAD_SIZE: there is no abort message, the staging
+    header stays erased) -> the remote never resets: same boot_id, seq grows, the link holds."""
     remote = remote_probe
-    duration = int(os.environ.get("BASETEST_WDG_SECONDS", "600"))  # kratsi beh jen pro ladeni
+    duration = int(os.environ.get("BASETEST_WDG_SECONDS", "600"))  # a shorter run for debugging only
     app_max = 0x0801F800 - 0x08004000
     boot_id, cur = head_and_boot(link)
     t0 = time.monotonic()
 
-    # OTA erase (nejdelsi blokujici operace remote)
+    # OTA erase (the longest blocking operation of the remote)
     link.drain()
     pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.FW_UPDATE_START, struct.pack("<BII", ADDR_REMOTE, app_max, 0x12345678) + b"wdg"))
     r = link.recv(15.0, lambda p: p.src == ADDR_REMOTE and p.mtype in (MT.ACK, MT.NAK) and p.payload[:1] == bytes([pid]))
@@ -291,13 +291,13 @@ def test_watchdogs_do_not_trip(paired, link, remote_probe):
             assert not bad, bad
             cur, polls = nxt, polls + 1
             next_poll += 10
-        # relay: PC -> remote (ACK od remote)
+        # relay: PC -> remote (ACK from the remote)
         for mt, pl in ((MT.SIGNAL_PLAYING, b"406A"), (MT.SIGNAL_STOPPED, b"")):
             pid = link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, mt, pl))
             r = link.recv(1.5, lambda p, pid=pid: p.src == ADDR_REMOTE and p.mtype in (MT.ACK, MT.NAK) and p.payload[:1] == bytes([pid]))
             assert r is not None and r.mtype == MT.ACK, f"{MT(mt).name}: {r}"
             signals += 1
-        # OLED: cislice a jeji smazani (prekresleni bez provozu na lince)
+        # OLED: a digit and its deletion (redraw without traffic on the link)
         remote.key("1", dbg.BACK)
         keys += 2
         assert not remote.core_state()["halted"], "remote core left halted"
@@ -312,7 +312,7 @@ def test_watchdogs_do_not_trip(paired, link, remote_probe):
 
 
 def _inject_and_wait_off(remote, paired, value: int, what: str):
-    """Zapise fault::testInject; vraci cas [s] do ztraty remote (sonda uz necte = vypnuto)."""
+    """Writes fault::testInject; returns the time [s] until the remote is lost (the probe can no longer read = switched off)."""
     t0 = time.monotonic()
     remote.write(remote.sym("fault::testInject"), bytes([value]))
     off = None
@@ -329,7 +329,7 @@ def _inject_and_wait_off(remote, paired, value: int, what: str):
             break
         time.sleep(0.1)
     assert off is not None, f"{what}: remote still running 15 s after the injection"
-    remote.stop()  # openocd na vypnutem cili
+    remote.stop()  # openocd on a switched-off target
     tell_user(f"{what}: remote se vypnul ({off:.1f} s po injekci). Zapnete ho tlacitkem ON/OFF (do 3 min).")
     wait_until(lambda: paired.read_bool("Bluetooth::_streamOpen"), 180, interval=1.0, what="remote switched on and reconnected")
     wait_until(lambda: remote_alive(paired), 15, interval=0.5, what="remote alive")
@@ -337,7 +337,7 @@ def _inject_and_wait_off(remote, paired, value: int, what: str):
 
 
 def _records_before_boot(link):
-    """Zaznamy nactene ze slotu (pred BOOT) a BOOT."""
+    """Records loaded from slots (before BOOT) and BOOT."""
     _, recs, _ = read_range(link, 0, 1)
     nxt = recs[-1][0] + 1
     while not any(r[1] == CODE_BOOT for r in recs):
@@ -349,8 +349,8 @@ def _records_before_boot(link):
 
 @pytest.mark.needs_user
 def test_remote_fault_survives_power_off(paired, link, remote_probe):
-    """HardFault (fault::testInject = 1, nezarovnane cteni) -> FAULT(1) + 4x FAULT_DETAIL (pc v fault::testPoll) ve
-    slotu W25Q32 -> reset = vypnuti; clovek remote zapne; zaznamy jsou v kruhu pred BOOT."""
+    """HardFault (fault::testInject = 1, unaligned read) -> FAULT(1) + 4x FAULT_DETAIL (pc in fault::testPoll) in the
+    W25Q32 slot -> reset = switch-off; a person switches the remote on; the records are in the ring before BOOT."""
     remote = remote_probe
     boot0, _ = head_and_boot(link)
     _inject_and_wait_off(remote, paired, 1, "HardFault")
@@ -368,8 +368,8 @@ def test_remote_fault_survives_power_off(paired, link, remote_probe):
 
 @pytest.mark.needs_user
 def test_remote_loop_stall(paired, link, remote_probe):
-    """Smycka s povolenymi prerusenimi (testInject = 2) -> po 2000 ms SysTick zapise LOOP_STALL(pc v testSpin) + slot
-    -> reset = vypnuti (~2 s); clovek remote zapne; LOOP_STALL je v kruhu pred BOOT."""
+    """A loop with interrupts enabled (testInject = 2) -> after 2000 ms SysTick writes LOOP_STALL (pc in testSpin) + a slot
+    -> reset = switch-off (~2 s); a person switches the remote on; LOOP_STALL is in the ring before BOOT."""
     remote = remote_probe
     off = _inject_and_wait_off(remote, paired, 2, "loop stall")
     assert off >= 1.8, f"reset after {off:.1f} s, loop watchdog is 2000 ms"
@@ -383,12 +383,12 @@ def test_remote_loop_stall(paired, link, remote_probe):
 
 @pytest.mark.needs_user
 def test_remote_iwdg(paired, link, remote_probe):
-    """Smycka se zakazanymi prerusenimi (testInject = 3): SysTick nebezi, resetuje IWDG po ~4 s (LSI 29,5-34 kHz ->
-    3,8-4,3 s). Zadny slot (IWDG nedava sanci nic zapsat); po zapnuti BOOT, pred nim zadny novy FAULT/LOOP_STALL.
-    Pricina resetu: IWDG (bit 5) jen kdyz remote reset prezil napajeny, jinak POR."""
+    """A loop with interrupts disabled (testInject = 3): SysTick does not run, the IWDG resets after ~4 s (LSI 29.5-34 kHz ->
+    3.8-4.3 s). No slot (the IWDG gives no chance to write anything); after switch-on a BOOT, before it no new FAULT/LOOP_STALL.
+    Reset cause: IWDG (bit 5) only if the remote survived the reset powered, otherwise POR."""
     remote = remote_probe
-    # Stav pred injekci: vsechny FAULT/LOOP_STALL, ktere tento beh zna (nactene ze starsich slotu i vlastni). Po zapnuti
-    # smi byt pred BOOT jen ty (znovu nactene sloty nesou puvodni uptime a arg), zadny novy z behu ukonceneho IWDG.
+    # State before the injection: all FAULT/LOOP_STALL records known to this run (loaded from older slots and its own). After switch-on
+    # only those may be before BOOT (re-loaded slots carry the original uptime and arg), no new one from the run ended by the IWDG.
     _, head0 = head_and_boot(link)
     _, pre, _ = read_range(link, 0, head0)
     off = _inject_and_wait_off(remote, paired, 3, "IWDG")
@@ -400,5 +400,5 @@ def test_remote_iwdg(paired, link, remote_probe):
 
 
 def _fault_keys(recs):
-    """FAULT/LOOP_STALL zaznamy jako (code, uptime_ms, arg): seq a boot se po nacteni ze slotu meni, tohle ne."""
+    """FAULT/LOOP_STALL records as (code, uptime_ms, arg): seq and boot change when loaded from a slot, these do not."""
     return {(r[1], r[3], r[4]) for r in recs if r[1] in (CODE_FAULT, CODE_LOOP_STALL)}

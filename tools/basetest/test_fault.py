@@ -1,9 +1,9 @@
-"""Zaznamy o chybach (fault::Record v no-init RAM), smyckovy watchdog (SysTick, 1000 ms) a IWDG (~2 s) base.
+"""Fault records (fault::Record in no-init RAM), the loop watchdog (SysTick, 1000 ms) and the base IWDG (~2 s).
 
-Chyby se vyvolavaji zapisem do `fault::testInject` (firmware ho cte jednou za pruchod hlavni smyckou):
-1 = cteni z 0xFFFFFFF0 (BusFault / HardFault), 2 = nekonecna smycka s povolenymi prerusenimi (loop stall),
-3 = nekonecna smycka se zakazanymi prerusenimi (IWDG). Pro cestu "zaznam + reset" musi byt DHCSR.C_DEBUGEN = 0:
-`base.release_debug()` (README "Fault tests"). Kazdy test zacina i konci s bezici base, USB a otevrenym logem."""
+Faults are triggered by writing to `fault::testInject` (the firmware reads it once per main loop iteration):
+1 = read from 0xFFFFFFF0 (BusFault / HardFault), 2 = an infinite loop with interrupts enabled (loop stall),
+3 = an infinite loop with interrupts disabled (IWDG). For the "record + reset" path DHCSR.C_DEBUGEN must be 0:
+`base.release_debug()` (README "Fault tests"). Every test starts and ends with the base running, USB and the log open."""
 
 import random
 import re
@@ -23,8 +23,8 @@ FAULT_RE = r"E fault: (HARDFAULT|MEMMANAGE|BUSFAULT|USAGEFAULT|ERROR|LOOP_STALL)
 
 
 def reboot(link, log, action, gone_within: float, back_within: float = 6.0):
-    """`action()` ma base resetovat. Ceka, az log CDC zmizi (do `gone_within` s od zacatku akce) a znovu se objevi.
-    Vraci (novy LogLink, cas do zmizeni USB [s])."""
+    """`action()` is meant to reset the base. Waits until the log CDC disappears (within `gone_within` s of the start of the action) and reappears.
+    Returns (new LogLink, time until the USB disappeared [s])."""
     log.close()
     link.detach()
     t0 = time.monotonic()
@@ -42,7 +42,7 @@ def reboot(link, log, action, gone_within: float, back_within: float = 6.0):
         try:
             new = loglink.LogLink(port)
             break
-        except Exception:  # noqa: BLE001 - port jeste neni otevritelny
+        except Exception:  # noqa: BLE001 - the port is not openable yet
             time.sleep(0.1)
     else:
         raise AssertionError("log CDC not openable")
@@ -51,7 +51,7 @@ def reboot(link, log, action, gone_within: float, back_within: float = 6.0):
 
 
 def boot(log, timeout=5.0):
-    """(radky logu pred resetem, radky noveho bootu od banneru do 1,5 s po nem)."""
+    """(log lines before the reset, lines of the new boot from the banner to 1.5 s after it)."""
     first = log.lines(timeout, pred=lambda l: l == PRE_START or re.search(BANNER_RE, l))
     before = []
     if first and first[-1] == PRE_START:
@@ -63,10 +63,10 @@ def boot(log, timeout=5.0):
 
 
 def inject(base, value: int, release=True):
-    """Zapis fault::testInject za behu jadra; s release i odpojeni ladeni (C_DEBUGEN = 0) a konec openocd."""
+    """Writes fault::testInject while the core runs; with release also detaches debug (C_DEBUGEN = 0) and ends openocd."""
     addr = base.sym("fault::testInject")
     if release:
-        # Nejdriv C_DEBUGEN = 0, teprve pak injekce: chyba muze nastat hned v dalsim pruchodu smyckou
+        # First C_DEBUGEN = 0, only then the injection: the fault can occur right in the next loop iteration
         base.tcl(f"write_memory 0xE000EDF0 32 {{0xA05F0000}}; write_memory 0x{addr:08x} 8 {{{value}}}")
         base.stop()
     else:
@@ -87,7 +87,7 @@ def fault_lines(lines):
 
 @pytest.fixture(autouse=True)
 def base_running(base):
-    """Pred i po testu: jadro bezi (nikdy nenechat zastavene)."""
+    """Before and after the test: the core runs (never leave it halted)."""
     st = base.core_state()
     if st["halted"]:
         base.resume()
@@ -110,11 +110,11 @@ def test_hardfault_record(link, log, base):
         cfsr_line = next(l for l in f if "cfsr=" in l)
         assert re.search(r"PRECISERR|IBUSERR|BFARVALID", cfsr_line), cfsr_line
         assert field(f, "bfar") == 0xFFFFFFF0, f
-        # Log pred resetem: posledni radky pred chybou (zavreni portu pri reboot()) a radek z cesty chyby
+        # Log before the reset: the last lines before the fault (port closing in reboot()) and the line from the fault path
         assert any("I usb: log port closed" in l for l in before), before[-10:]
         assert any(re.search(r"E fault: (HARDFAULT|BUSFAULT) ", l) for l in before), before[-10:]
         assert any(re.search(r"reset: .*SOFTWARE", l) for l in lines), lines
-        # dump: stejny zaznam jako odpovedi na prikaz
+        # dump: the same record as a reply to the command
         rep = log.command("dump")
         assert rep and re.search(r"^(HARDFAULT|BUSFAULT) #\d+", rep[0]), rep
         assert any(f"pc=0x{pc:08x}" in l for l in rep), rep
@@ -146,7 +146,7 @@ def test_iwdg_reset(link, log, base):
         assert 1.5 < t_gone < 3.0, f"IWDG reset after {t_gone:.2f} s (expected ~2 s)"
         before, lines = boot(log)
         assert any(re.search(r"reset: .*IWDG", l) for l in lines), lines
-        # Se zakazanymi prerusenimi SysTick nebezi: zadny novy zaznam (E), jen pripadne starsi uz ohlaseny (I)
+        # With interrupts disabled SysTick does not run: no new record (E), at most an older one that was already announced (I)
         assert not [l for l in lines if " E fault: " in l], lines
     finally:
         log.close()
@@ -168,7 +168,7 @@ def test_no_bogus_fault_after_garbage(link, log, base):
     log, _ = reboot(link, log, garbage_and_reset, gone_within=3.0)
     try:
         before, lines = boot(log)
-        assert before == [], before[:5]  # hlavicka ringu neplatna -> log zacina znovu
+        assert before == [], before[:5]  # the ring header is invalid -> the log starts afresh
         assert not fault_lines(lines), lines
         assert base.fault_record() is None
         assert log.command("dump") == ["no fault record"]
@@ -179,8 +179,8 @@ def test_no_bogus_fault_after_garbage(link, log, base):
 
 
 def test_debugger_halts_not_resets(link, log, base):
-    """Sonda pripojena (C_DEBUGEN = 1): chyba -> zaznam + bkpt, jadro stoji (zadny reset). Behem zastaveni
-    neobsluhuje USB, proto je link i log odpojeny po celou dobu zastaveni (jinak zapis keepalive vyprsi)."""
+    """Probe attached (C_DEBUGEN = 1): fault -> record + bkpt, the core stops (no reset). While halted it
+    does not service USB, so both the link and the log are detached for the whole halt (otherwise the keepalive write times out)."""
     st = base.core_state()
     assert st["dhcsr"] & 1, "C_DEBUGEN not set with openocd attached"
     seen = {}
@@ -222,12 +222,12 @@ def _uptime_ms(line: str) -> int:
 
 
 def test_long_operations_do_not_trip(link, log, base):
-    """BLE rekonfigurace ($$$ ... R,1), cely OLED flush a 200 DIN not: zadny reset (USB zustava, uptime roste)."""
+    """BLE reconfiguration ($$$ ... R,1), a full OLED flush and 200 DIN notes: no reset (USB stays, uptime grows)."""
     was_alive = remote_alive(base)
     t0 = base.u("stmcpp::systick::ticks_")
     w0 = time.monotonic()
     log.skip()
-    # Hned po bootu muze fronta prikazu RN4870 jeste drzet konfiguraci z bootu (configure vraci 1): zkouset
+    # Right after boot the RN4870 command queue may still hold the configuration from boot (configure returns 1): keep trying
     end = time.monotonic() + 15.0
     while base.call("Bluetooth::configure()") != 0:
         assert time.monotonic() < end, "Bluetooth::configure() not accepted within 15 s"
@@ -243,11 +243,11 @@ def test_long_operations_do_not_trip(link, log, base):
         time.sleep(0.2)
     lines = log.lines(0.5)
     assert not [l for l in lines if re.search(BANNER_RE, l) or "reset:" in l or l == PRE_START], lines
-    assert any("ble" in l for l in lines), lines  # R,1 -> modul se restartoval
+    assert any("ble" in l for l in lines), lines  # R,1 -> the module restarted
     ups = [_uptime_ms(l) for l in lines if loglink.is_log_line(l)]
     assert ups == sorted(ups), ups
     elapsed = base.u("stmcpp::systick::ticks_") - t0
     assert elapsed >= (time.monotonic() - w0 - 1.0) * 1000, (elapsed, time.monotonic() - w0)
-    usblink.find_port()  # protokolove CDC stale tu
+    usblink.find_port()  # the protocol CDC is still there
     if was_alive:
         wait_until(lambda: remote_alive(base), 30.0, interval=0.5, what="remote reconnected after R,1")

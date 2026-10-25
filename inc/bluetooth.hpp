@@ -21,18 +21,18 @@ namespace Bluetooth{
 
 	static constexpr char STATUS_DELIMITER = '%';
 
-	// Párování s ovladačem (Remote): připojuje se jen k zařízení s tímto jménem (SN v ../midicontroller-fw)
+	// Pairing with the controller (Remote): connects only to a device with this name (SN in ../midicontroller-fw)
 	static constexpr const char *REMOTE_NAME = "MIDIControlRemote";
-	// Celková doba od startPairing() do DONE; potom X/Z/K,1 a FAILED
+	// Total time from startPairing() to DONE; after that X/Z/K,1 and FAILED
 	static constexpr stmcpp::units::duration PAIRING_TIMEOUT = 15000_ms;
 
 	enum class PairingState : uint8_t {
-		IDLE = 0,       // nic neprobíhá
-		SCANNING = 1,   // Z, F: čekáme na reklamu REMOTE_NAME
-		CONNECTING = 2, // X, C,<typ>,<adresa>: čekáme na %CONNECT%
-		BONDING = 3,    // B: čekáme na %SECURED% / %BONDED%
-		DONE = 4,       // spárováno
-		FAILED = 5      // timeout, odpojení nebo chyba zabezpečení
+		IDLE = 0,       // nothing in progress
+		SCANNING = 1,   // Z, F: waiting for an advertisement from REMOTE_NAME
+		CONNECTING = 2, // X, C,<type>,<address>: waiting for %CONNECT%
+		BONDING = 3,    // B: waiting for %SECURED% / %BONDED%
+		DONE = 4,       // paired
+		FAILED = 5      // timeout, disconnect or security error
 	};
 	static constexpr char MESSAGE_DELIMITER = '\r';
 
@@ -237,60 +237,60 @@ namespace Bluetooth{
     };
     
 
-    // Inicializace USART2/DMA a reset modulu. Blokující (max. DEFAULT_TIMEOUT), volá se jen při startu
-    // (před USB). Pozdější restarty modulu dělá neblokující restart().
+    // USART2/DMA initialization and module reset. Blocking (max. DEFAULT_TIMEOUT), called only at startup
+    // (before USB). Later module restarts are done by the non-blocking restart().
     uint8_t init(void);
 
-    // Neblokující restart modulu přes RST (RST dole 100 ms, nahoru, čekání na %REBOOT% ≤ DEFAULT_TIMEOUT),
-    // provádí ho process(). Výsledek: restartState() SUCCEEDED/FAILED, potvrdit restartAck().
+    // Non-blocking module restart via RST (RST low for 100 ms, then high, wait for %REBOOT% ≤ DEFAULT_TIMEOUT),
+    // performed by process(). Result: restartState() SUCCEEDED/FAILED, acknowledge with restartAck().
     enum class RestartState : uint8_t { IDLE, RUNNING, SUCCEEDED, FAILED };
     void restart();
     RestartState restartState();
     void restartAck();
 
-    // Stav konfigurace zařazené configure(): DONE až s %REBOOT% po "R,1"; FAILED při timeoutu "$$$" / chybějícím %REBOOT%
+    // State of the configuration queued by configure(): DONE only with %REBOOT% after "R,1"; FAILED on a "$$$" timeout / missing %REBOOT%
     enum class ConfigState : uint8_t { NONE, PENDING, DONE, FAILED };
     ConfigState configState();
-    // Modul mlčí: 3 po sobě jdoucí timeouty "$$$"
+    // Module is silent: 3 consecutive "$$$" timeouts
     bool wedged();
-    // Hlavní smyčka hlásí, zda je BLE použitelné (menu: párování při výpadku BLE)
+    // The main loop reports whether BLE is usable (menu: pairing when BLE is down)
     bool isUp();
     void setUp(bool up);
 
-    // Zařadí konfiguraci modulu (SN, SA, SR, SS, R,1). Neblokující — provádí ji process().
+    // Queues the module configuration (SN, SA, SR, SS, R,1). Non-blocking — performed by process().
     uint8_t configure();
 
-    // Zařadí pokus o připojení k poslednímu bondovanému zařízení (Z + C). Neblokující.
+    // Queues an attempt to connect to the last bonded device (Z + C). Non-blocking.
     uint8_t reconnect();
 
-    // Obsluha v hlavní smyčce: parsování přijatých dat, stavový automat příkazového režimu.
+    // Main loop handler: parsing of received data, command-mode state machine.
     void process();
 
-    // Stavové zprávy modulu (%...%), parsované v hlavní smyčce
+    // Module status messages (%...%), parsed in the main loop
     bool isCommandAvailable();
     std::unique_ptr<Command> getCommand();
 
-    // Zařadí jeden příkaz (bez \r) do příkazové fronty. Vrací false, když je fronta plná.
+    // Queues one command (without \r) into the command queue. Returns false when the queue is full.
     bool queueCommand(const char *command);
 
-    // První spárování s ovladačem (z menu): [K,1], Z, F a stav SCANNING. Zbytek automatu (připojení, B, timeout)
-    // řídí hlavní smyčka podle stavových zpráv. Vrací 1, když párování už běží nebo je fronta příkazů plná.
+    // First pairing with the controller (from the menu): [K,1], Z, F and the SCANNING state. The rest of the state machine
+    // (connect, B, timeout) is driven by the main loop from the status messages. Returns 1 when pairing is already running or the command queue is full.
     uint8_t startPairing();
-    // Zastaví skenování (X). false = fronta příkazů plná
+    // Stops scanning (X). false = command queue full
     bool stopScan();
-    // Připojení k adrese z reklamy: C,<typ adresy 0/1>,<12 hex znaků>. false = fronta příkazů plná
+    // Connect to the address from the advertisement: C,<address type 0/1>,<12 hex characters>. false = command queue full
     bool connectTo(uint8_t addrType, const char *addr);
-    // Adresa posledního connectTo() (12 hex znaků; "" před prvním voláním)
+    // Address of the last connectTo() (12 hex characters; "" before the first call)
     const char *pendingConnectAddr();
 
     PairingState pairingState();
     void setPairingState(PairingState state);
-    // Čas od startPairing()
+    // Time since startPairing()
     stmcpp::units::duration pairingElapsed();
-    // SCANNING, CONNECTING nebo BONDING
+    // SCANNING, CONNECTING or BONDING
     bool isPairing();
 
-    // true, pokud automat příkazového režimu nic neprovádí a modul je v datovém režimu
+    // true if the command-mode state machine is doing nothing and the module is in data mode
     bool isIdle();
 
     // Connection state
@@ -301,25 +301,25 @@ namespace Bluetooth{
     bool isStreamOpen();
     void setStreamOpen(bool open);
 
-    // Přijatý protějšek: spojení zabezpečené (%SECURED%/%BONDED%) se zařízením, jehož adresa z %CONNECT% odpovídala
-    // uloženému ovladači (nebo adrese párování). Nastavuje hlavní smyčka; bez něj se přijaté rámce zahazují.
+    // Accepted peer: link secured (%SECURED%/%BONDED%) with a device whose address from %CONNECT% matched
+    // the stored controller (or the pairing address). Set by the main loop; without it received frames are dropped.
     bool isPeerAccepted();
     void setPeerAccepted();
-    // Zrušit přijetí protějšku a zahodit přijaté rámce i stav parseru (%CONNECT%, %DISCONNECT%, %REBOOT%, restart()).
-    // setConnected(false) ho volá samo.
+    // Revoke the peer acceptance and drop received frames and the parser state (%CONNECT%, %DISCONNECT%, %REBOOT%, restart()).
+    // setConnected(false) calls it by itself.
     void resetPeer();
 
-    // Lze teď odeslat datový rámec k Remote? (spojení + transparentní UART + přijatý protějšek + datový režim)
+    // Can a data frame be sent to the Remote now? (link + transparent UART + accepted peer + data mode)
     bool canSendData();
 
     // Data receive timestamp
     stmcpp::units::duration getDataReceivedTimestamp();
 
-    // Protokolové pakety — fronta přijatých paketů (plní process())
+    // Protocol packets — queue of received packets (filled by process())
     bool isProtocolPacketAvailable();
     bool getProtocolPacket(protocol::Packet &pkt);
 
-    // Zařadí paket do TX fronty (DMA). Vrací false, když nelze odeslat (není spojení / plná fronta).
+    // Queues a packet into the TX queue (DMA). Returns false when it cannot be sent (no link / queue full).
     bool sendProtocolPacket(const protocol::Packet &pkt);
 
 }

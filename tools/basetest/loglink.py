@@ -1,7 +1,7 @@
-"""PC strana log CDC base ("MIDIControl log"): textove radky `[%6lu.%03lu] L tag: text\\r\\n`.
+"""PC side of the base log CDC ("MIDIControl log"): text lines `[%6lu.%03lu] L tag: text\\r\\n`.
 
-Ctecí vlakno sklada prijata data do celych radku (`.history`); `lines`/`wait_for` ctou od kurzoru dal.
-Odpovedi na prikazy (`level d`, `dump`, `help`) jsou radky bez log prefixu."""
+The reader thread assembles received data into whole lines (`.history`); `lines`/`wait_for` read onward from the cursor.
+Replies to commands (`level d`, `dump`, `help`) are lines without the log prefix."""
 
 import re
 import threading
@@ -31,10 +31,10 @@ class LogLink:
     def __init__(self, port=None, ser=None):
         self.port = port or (None if ser else find_log_port())
         self.ser = ser or serial.Serial(self.port, 115200, timeout=0.05, write_timeout=2)
-        self.history = []  # [(cas prijmu, radek)] vsechny cele radky
+        self.history = []  # [(receive time, line)] all whole lines
         self.raw = b""
         self._buf = b""
-        self._pos = 0  # kurzor pro lines()/wait_for()
+        self._pos = 0  # cursor for lines()/wait_for()
         self._cv = threading.Condition()
         self._stop = threading.Event()
         self.error = None
@@ -59,7 +59,7 @@ class LogLink:
                         line, self._buf = self._buf.split(b"\n", 1)
                         self.history.append((time.monotonic(), line.rstrip(b"\r").decode(errors="replace")))
                     self._cv.notify_all()
-        except BaseException as e:  # noqa: BLE001 - ukazat testu
+        except BaseException as e:  # noqa: BLE001 - surface it to the test
             self.error = e
 
     def _check(self):
@@ -67,7 +67,7 @@ class LogLink:
             raise RuntimeError(f"loglink thread failed: {self.error!r}") from self.error
 
     def _next(self, deadline):
-        """Dalsi radek od kurzoru, nebo None po deadline."""
+        """Next line from the cursor, or None after the deadline."""
         with self._cv:
             while self._pos >= len(self.history):
                 self._check()
@@ -80,12 +80,12 @@ class LogLink:
             return line
 
     def skip(self):
-        """Kurzor na konec: dalsi lines()/wait_for() vidi jen nove radky."""
+        """Cursor to the end: the next lines()/wait_for() see only new lines."""
         with self._cv:
             self._pos = len(self.history)
 
     def lines(self, timeout: float, pred=None) -> list:
-        """Cele radky prijate behem `timeout` (od kurzoru). S `pred` skonci drive na prvnim radku, kde pred(radek)."""
+        """Whole lines received during `timeout` (from the cursor). With `pred` it ends earlier, at the first line where pred(line) holds."""
         end = time.monotonic() + timeout
         out = []
         while True:
@@ -97,7 +97,7 @@ class LogLink:
                 return out
 
     def wait_for(self, regex: str, timeout: float) -> re.Match:
-        """Prvni radek od kurzoru, ktery odpovida `regex` (re.search); jinak AssertionError."""
+        """First line from the cursor that matches `regex` (re.search); otherwise AssertionError."""
         rx = re.compile(regex)
         end = time.monotonic() + timeout
         seen = []
@@ -112,8 +112,8 @@ class LogLink:
                 return m
 
     def command(self, text: str, timeout: float = 1.5, quiet: float = 0.3) -> list:
-        """Posle prikaz + CRLF; vraci radky odpovedi (radky bez log prefixu a mimo znacky). Log radky prijate mezitim
-        zustavaji v historii (kurzor se jimi neposouva)."""
+        """Sends a command + CRLF; returns the reply lines (lines without the log prefix and not markers). Log lines received
+        in the meantime stay in the history (the cursor is not advanced by them)."""
         with self._cv:
             start = len(self.history)
         self.ser.write(text.encode() + b"\r\n")

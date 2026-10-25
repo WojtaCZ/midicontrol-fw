@@ -72,7 +72,7 @@ The bootloader shows the update on the OLED (title, hint and progress bar).
 - **Namespaces**: Each module uses its own namespace (`base::`, `Bluetooth::`, `display::`, `midi::`, `router::`, `GUI::`, `LED::`)
 - **C++ dialect**: C++23, `-fno-exceptions`, `-fno-threadsafe-statics`, `-fno-use-cxa-atexit`; FPU flags `-mfpu=fpv4-sp-d16 -mfloat-abi=hard`
 - **Warnings as errors**: `-Werror=switch`, `-Werror=return-type`, `-Werror=parentheses`, `-Wfatal-errors`
-- **Language**: Comments and readme are in Czech
+- **Language**: Code comments, identifiers and variable names are always English (the UI is Czech; the readme is still Czech)
 - **UI language**: all user-visible text (OLED menus, screens, messages, hints) is Czech without diacritics (plain ASCII, the fonts have no Czech glyphs). Names stay English: `MIDIControl` and the splash device type `BASE` (`base::DEVICE_TYPE`). Text longer than its line scrolls (`ui::TextScroll`) instead of being cut off. Protocol, RN4870 and USB strings stay as they are. Keep each string within the display (128 px; 7x10 font = 18 chars, 11x18 font = 11 chars) and its `snprintf` buffer. The `ConfirmScreen`/`NumberScreen`/`back()` defaults live in the `lib/ui` submodule (Czech since `5fb5a2a`: `Ano`/`Ne`, `Zpet`); change them there
 
 ## Bench (hardware tests)

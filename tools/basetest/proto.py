@@ -1,5 +1,5 @@
-# Kopie ../midicontroller-fw/tools/bletest/proto.py (repozitare jsou nezavisle); drzet v souladu s lib/protocol.
-# DIAG_GET/DIAG_RESP + kodek zaznamu (protocol/diag.hpp) zrcadli lib/protocol; pri zmene upravit i bletest/proto.py.
+# Copy of ../midicontroller-fw/tools/bletest/proto.py (the repositories are independent); keep in sync with lib/protocol.
+# DIAG_GET/DIAG_RESP + the record codec (protocol/diag.hpp) mirror lib/protocol; when changing, update bletest/proto.py too.
 """midicontrol-protocol v2 codec (lib/protocol/PROTOCOL.md) for the BLE test harness."""
 
 import struct

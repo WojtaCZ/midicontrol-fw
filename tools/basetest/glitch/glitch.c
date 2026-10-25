@@ -1,23 +1,23 @@
-// Glitch rutina pro testy bootloaderu (nahrava ji bootfi.py sondou do SRAM, bezi na G071 i G431: Thumb-1).
-// Spusti skutecne mazani stranky / programovani dvojslova a po `delay` iteracich resetuje MCU (SYSRESETREQ), tj.
-// preruseni flash operace v jejim prubehu - nejblizsi nahrada vypadku napajeni, kterou lavice umi.
-// op: 0 = erase + reset, 1 = program + reset, 2 = erase + mereni (iterace do konce BSY, bkpt), 3 = program + mereni,
-// 4 = smazat stranku (dokoncit) a pak program + reset, 5 = smazat stranku a pak program + mereni. 4/5 bezi ze stavu
-// aplikace: programovani ze zastaveneho bootloaderu base hlasi PGAERR|PGSERR (bench 2026-10-24, pricina neznama).
+// Glitch routine for the bootloader tests (bootfi.py loads it into SRAM via the probe, runs on G071 and G431: Thumb-1).
+// Starts a real page erase / double-word program and resets the MCU (SYSRESETREQ) after `delay` iterations, i.e.
+// interrupts the flash operation midway - the closest substitute for a power loss that the bench can do.
+// op: 0 = erase + reset, 1 = program + reset, 2 = erase + measure (iterations until BSY ends, bkpt), 3 = program + measure,
+// 4 = erase the page (let it finish) and then program + reset, 5 = erase the page and then program + measure. 4/5 run from the
+// application state: programming from a halted base bootloader reports PGAERR|PGSERR (bench 2026-10-24, cause unknown).
 #include <stdint.h>
 
 typedef struct {
-	uint32_t flash; // FLASH base (0x40022000 na obou)
+	uint32_t flash; // FLASH base (0x40022000 on both)
 	uint32_t op;
-	uint32_t addr;  // adresa stranky / dvojslova
-	uint32_t delay; // iterace mezi startem operace a resetem
+	uint32_t addr;  // page / double-word address
+	uint32_t delay; // iterations between the operation start and the reset
 	uint32_t w0, w1;
-	uint32_t page;  // cislo stranky pro PNB
-	uint32_t result; // op 2/3: iterace do konce operace; 0xE0000000 | SR pri chybe
+	uint32_t page;  // page number for PNB
+	uint32_t result; // op 2/3: iterations until the operation ends; 0xE0000000 | SR on error
 } Params;
 
 #define P ((volatile Params *)0x20000F00u)
-#define KEYR 2u // offsety ve slovech
+#define KEYR 2u // offsets in words
 #define SR 4u
 #define CR 5u
 #define BSY (1u << 16)
@@ -39,7 +39,7 @@ void run(void) {
 		f[KEYR] = 0xCDEF89ABu;
 	}
 	while (f[SR] & BSY) {}
-	f[SR] = 0x0000C3FBu; // smazat chybove priznaky
+	f[SR] = 0x0000C3FBu; // clear the error flags
 	uint32_t op = P->op;
 	if (op >= 4) {
 		f[CR] = (P->page << 3) | (1u << 1);
@@ -47,7 +47,7 @@ void run(void) {
 		while (f[SR] & BSY) {}
 		f[CR] = 0;
 		f[SR] = 0x0000C3FBu;
-		op -= 3; // 4 -> 1 (program + reset), 5 -> 2 ... viz nize: program + mereni
+		op -= 3; // 4 -> 1 (program + reset), 5 -> 2 ... see below: program + measure
 		if (op == 2) op = 3;
 	}
 	if (op == 0 || op == 2) {
@@ -64,14 +64,14 @@ void run(void) {
 		f[CR] = 0;
 		uint32_t sr = f[SR] & 0x0000C3FAu;
 		P->result = sr ? (0xE0000000u | sr) : n;
-		return; // bkpt v entry
+		return; // bkpt in entry
 	}
-	// Stejne telo jako merici smycka nahore (jedno cteni SR, test, inkrement), aby `delay` z mereni odpovidal case:
-	// puvodni smycka s volatile citacem byla ~1,5x pomalejsi (review 2026-10-25), pozdni cast okna se nevzorkovala.
+	// Same body as the measuring loop above (one SR read, test, increment), so that `delay` from the measurement matches the time:
+	// the original loop with a volatile counter was ~1.5x slower (review 2026-10-25), so the late part of the window was never sampled.
 	uint32_t d = P->delay;
 	uint32_t i = 0;
 	while (i < d) {
-		if (f[SR] & 0x80000000u) break; // bit 31 SR je vzdy 0: jen cteni SR jako v mereni
+		if (f[SR] & 0x80000000u) break; // bit 31 of SR is always 0: just an SR read as in the measurement
 		i++;
 	}
 	*(volatile uint32_t *)0xE000ED0Cu = 0x05FA0004u; // AIRCR.SYSRESETREQ

@@ -74,7 +74,7 @@
    ITF_NUM_CDC_DATA,
    ITF_NUM_MIDI,
    ITF_NUM_MIDI_STREAMING,
-   // Log CDC až za MIDI: protokolové CDC zůstává na rozhraní 0/1 (stávající hostitelé)
+   // Log CDC only after MIDI: the protocol CDC stays on interfaces 0/1 (existing hosts)
    ITF_NUM_LOG,
    ITF_NUM_LOG_DATA,
    ITF_NUM_TOTAL
@@ -98,12 +98,12 @@
    // Config number, interface count, string index, total length, attribute, power in mA
    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
 
-   // CDC 0: jen protokolové rámce
+   // CDC 0: protocol frames only
    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 
    TUD_MIDI_DESCRIPTOR(ITF_NUM_MIDI, 5, EPNUM_MIDI_OUT, EPNUM_MIDI_IN, 64),
 
-   // CDC 1: textový log (Debug::process)
+   // CDC 1: text log (Debug::process)
    TUD_CDC_DESCRIPTOR(ITF_NUM_LOG, 6, EPNUM_LOG_NOTIF, 8, EPNUM_LOG_OUT, EPNUM_LOG_IN, 64)
  };
 
@@ -168,7 +168,7 @@
    NULL,                          // 3: UID (generated bellow)
    "Serial Communication",// 4: Serial Interface
    "MIDI Interface",   // 5: MIDI interface
-   "MIDIControl log",  // 6: log CDC (hledá ho PC podle tohoto řetězce)
+   "MIDIControl log",  // 6: log CDC (the PC finds it by this string)
  };
  
  static uint16_t _desc_str[32 + 1];

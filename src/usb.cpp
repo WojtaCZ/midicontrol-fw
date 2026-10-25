@@ -13,16 +13,16 @@ namespace usb {
         stmcpp::gpio::pin<stmcpp::gpio::port::porta, 11> usb_dm (stmcpp::gpio::mode::input, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
 		stmcpp::gpio::pin<stmcpp::gpio::port::porta, 12> usb_dp (stmcpp::gpio::mode::input, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
 
-        // TX FIFO CDC nesmí být přepisovatelná ani bez DTR — přepsáním by se roztrhly protokolové rámce.
-        // Konfigurace platí pro obě instance (CDC 0 protokol, CDC 1 log); log do FIFO zapisuje jen celé řádky a jen s DTR.
+        // The CDC TX FIFO must not be overwritable even without DTR — overwriting would tear protocol frames apart.
+        // The configuration applies to both instances (CDC 0 protocol, CDC 1 log); the log writes only whole lines into the FIFO and only with DTR.
         tud_cdc_configure_t cdcConfig = TUD_CDC_CONFIGURE_DEFAULT();
         cdcConfig.tx_overwritabe_if_not_connected = false;
         tud_cdc_configure(&cdcConfig);
 
         tusb_init();
 
-        // Interní pull-up D+ (USB_BCDR.DPPU, zapnutý v dcd_init()) zůstává zapnutý: pevný 1k5 (R33)
-        // na použitých deskách nefunguje, bez interního pull-upu se zařízení u hostitele neohlásí.
+        // The internal D+ pull-up (USB_BCDR.DPPU, enabled in dcd_init()) stays enabled: the fixed 1k5 (R33)
+        // does not work on the boards in use, without the internal pull-up the device does not announce itself to the host.
     }
 
 }
@@ -45,7 +45,7 @@ extern "C" void UCPD1_IRQHandler(void) {
 }
 
 
-// Callbacky TinyUSB volá tud_task() z hlavní smyčky → Debug::log je zde povolený
+// The TinyUSB callbacks are called by tud_task() from the main loop → Debug::log is allowed here
 void tud_mount_cb(void) {
 	Debug::log(Debug::Level::INFO, "usb", "mounted");
 }
@@ -69,7 +69,7 @@ void tud_resume_cb(void) {
 	Debug::log(Debug::Level::INFO, "usb", "resume");
 }
 
-// Otevření/zavření portu na PC (DTR); CDC 0 = protokol, CDC 1 = log
+// Port opened/closed on the PC (DTR); CDC 0 = protocol, CDC 1 = log
 void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
 	(void) rts;
 	Debug::log(Debug::Level::INFO, "usb", "%s port %s", itf == 0 ? "protocol" : "log", dtr ? "opened" : "closed");

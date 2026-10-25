@@ -6,14 +6,14 @@
 namespace midi{
     void init(void);
 
-    // USB → DIN (varhany), blokující odeslání jedné USB-MIDI zprávy
+    // USB → DIN (organ), blocking send of one USB-MIDI message
     void send(uint8_t (&packet)[4]);
 
-    // Hlavní smyčka: DIN → USB a vlastní SysEx do TinyUSB (nikdy z přerušení)
+    // Main loop: DIN → USB and our own SysEx into TinyUSB (never from an interrupt)
     void process();
 
-    // Zařadí vlastní SysEx (USB-MIDI pakety) k odeslání do PC; odešle se celý a neprokládaně
-    // s DIN SysEx. Vrací false, když předchozí ještě neodešel.
+    // Queues our own SysEx (USB-MIDI packets) for sending to the PC; it is sent whole and not interleaved
+    // with DIN SysEx. Returns false when the previous one has not been sent yet.
     bool queueUsbSysex(const uint8_t (*packets)[4], uint8_t count);
 }
 

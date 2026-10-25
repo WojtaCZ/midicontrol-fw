@@ -1,6 +1,6 @@
-"""FW_UPDATE_* klient harnessu (jako ../midicontrolpy-sw/src/firmware_update.cpp, ale s presnou kontrolou nad tim, co a
-kdy se posle): zastaveni po N bajtech, zmenene obrazy. Transport = cokoli se send(Packet)/recv(timeout, pred)/drain(),
-tj. usblink.Link (base aplikace, remote pres base) nebo Link na portu bootloaderu base (abcd:1235)."""
+"""FW_UPDATE_* client of the harness (like ../midicontrolpy-sw/src/firmware_update.cpp, but with exact control over what and
+when is sent): stopping after N bytes, altered images. Transport = anything with send(Packet)/recv(timeout, pred)/drain(),
+i.e. usblink.Link (base application, remote via the base) or a Link on the base bootloader port (abcd:1235)."""
 
 import glob
 import os
@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lib", "bootloader", "tools"))
 import fw_trailer  # noqa: E402
 
-CHUNK = 120  # jako PC (nasobek 8 kvuli base)
+CHUNK = 120  # same as the PC (multiple of 8 because of the base)
 ST_READY, ST_IN_PROGRESS, ST_CRC_OK, ST_CRC_FAIL, ST_WRITE_ERROR, ST_BAD_SIZE = range(6)
 BOOTLOADER_PID = "1235"
 
@@ -33,15 +33,15 @@ def data_payload(offset: int, chunk: bytes) -> bytes:
 
 
 def offset_at(size: int, pct: int) -> int:
-    """Pocet bajtu odeslanych pri `pct` %: zarovnano dolu na cele chunky, 100 % = vse."""
+    """Number of bytes sent at `pct` %: rounded down to whole chunks, 100 % = everything."""
     if pct >= 100:
         return size
     return (size * pct // 100) // CHUNK * CHUNK
 
 
 def make_image(update: bytes, *, board=None, version=None, corrupt_trailer=False, corrupt_body=False, truncate=None) -> bytes:
-    """Z platneho update souboru: jina deska nebo verze (znovu podepsano), poskozeny trailer, poskozeny obsah (trailer
-    puvodni), zkraceny o `truncate` bajtu."""
+    """From a valid update file: a different board or version (re-signed), a corrupted trailer, a corrupted body (original
+    trailer), truncated by `truncate` bytes."""
     size, _crc, ver, b, _fmt, _r, _tcrc, _magic = struct.unpack("<IIIBBHII", update[-fw_trailer.TRAILER_SIZE:])
     body = bytearray(update[:size])
     out = bytes(body) + fw_trailer.make_trailer(bytes(body), board if board is not None else b, version if version is not None else ver)
@@ -50,7 +50,7 @@ def make_image(update: bytes, *, board=None, version=None, corrupt_trailer=False
         out = bytes(body) + update[size:]
     if corrupt_trailer:
         t = bytearray(out[-fw_trailer.TRAILER_SIZE:])
-        t[8] ^= 0x01  # version: trailerCrc pak nesedi
+        t[8] ^= 0x01  # version: trailerCrc then does not match
         out = out[:-fw_trailer.TRAILER_SIZE] + bytes(t)
     if truncate:
         out = out[:-truncate]
@@ -58,8 +58,8 @@ def make_image(update: bytes, *, board=None, version=None, corrupt_trailer=False
 
 
 def bootloader_port(timeout=10.0) -> str:
-    """Protokolovy port bootloaderu base (abcd:1235, rozhrani 00); ceka, az jde otevrit (uzel /dev se v kontejneru
-    objevi az ~0,2 s po sysfs)."""
+    """Protocol port of the base bootloader (abcd:1235, interface 00); waits until it can be opened (the /dev node in the container
+    appears only ~0.2 s after sysfs)."""
     end = time.monotonic() + timeout
     last = None
     while time.monotonic() < end:
@@ -73,7 +73,7 @@ def bootloader_port(timeout=10.0) -> str:
                         serial.Serial(node, 115200, timeout=0.05).close()
                         if usblink._read(os.path.join(itf, "bInterfaceNumber")) == "00":
                             return node
-                    except Exception as e:  # noqa: BLE001 - uzel jeste neni pripraveny
+                    except Exception as e:  # noqa: BLE001 - the node is not ready yet
                         last = e
                     break
                 d = os.path.dirname(d)
@@ -89,8 +89,8 @@ class Client:
         self.src = src
 
     def _reliable(self, mtype, payload=b"", timeout=2.0, status_wait=0.5):
-        """(acked, status|None): ACK/NAK s pid v payload[0]; STATUS, prijde-li do `status_wait` s po ACK (DATA dostava
-        STATUS jen pri chybe, ta jde hned za NAK/ACK)."""
+        """(acked, status|None): ACK/NAK with the pid in payload[0]; STATUS, if it arrives within `status_wait` s after the ACK (DATA gets
+        STATUS only on error, which comes right after the NAK/ACK)."""
         for _ in range(self.retries + 1):
             pid = self.link.send(Packet(self.src, self.target, 0, mtype, payload))
             reply = self.link.recv(timeout, lambda p: p.src == self.target and p.mtype in (MT.ACK, MT.NAK) and p.payload[:1] == bytes([pid]))
@@ -111,7 +111,7 @@ class Client:
         return self._reliable(MT.FW_UPDATE_END, b"", timeout)
 
     def send_image(self, img: bytes, stop_after=None, on_chunk=None, target_byte=None) -> str:
-        """"ok" | "stopped" (po `stop_after` bajtech, END se neposle) | text chyby."""
+        """"ok" | "stopped" (after `stop_after` bytes, END is not sent) | error text."""
         self.link.drain()
         acked, st = self.start(len(img), zlib.crc32(img), target_byte=target_byte)
         if not acked:

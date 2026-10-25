@@ -1,4 +1,4 @@
-"""Sdilena hardwarova session: USB-CDC link k base (s automatickym keepalive) a ST-Link pomocnici."""
+"""Shared hardware session: USB-CDC link to the base (with automatic keepalive) and ST-Link helpers."""
 
 import time
 
@@ -6,7 +6,7 @@ import pytest
 
 
 def pytest_collection_modifyitems(config, items):
-    # needs_user: jen kdyz o ne vyber vyslovne zada (-m needs_user); `-m hw` je jinak vybere taky
+    # needs_user: only when the selection explicitly asks for them (-m needs_user); `-m hw` would otherwise select them too
     want_user = "needs_user" in (config.option.markexpr or "")
     for item in items:
         if not item.fspath.basename.endswith("_offline.py"):
@@ -42,7 +42,7 @@ def remote():
 
 
 def wait_until(pred, timeout: float, interval: float = 0.2, what: str = "") -> bool:
-    """Ceka, az pred() vrati pravdu; jinak AssertionError s popisem."""
+    """Waits until pred() returns true; otherwise AssertionError with a description."""
     end = time.monotonic() + timeout
     while True:
         if pred():
@@ -54,7 +54,7 @@ def wait_until(pred, timeout: float, interval: float = 0.2, what: str = "") -> b
 
 @pytest.fixture(scope="session")
 def remote_probe(remote):
-    """Remote pres jeho ST-Link; preskoci test, kdyz sondu drzi jiny proces (napr. openocd jine session)."""
+    """Remote via its ST-Link; skips the test when another process holds the probe (e.g. openocd of another session)."""
     import dbg
     holder = dbg.probe_holder("remote")
     if holder:
@@ -66,9 +66,9 @@ KEEPALIVE_LOSS_MS = 6000  # lib/protocol constants.hpp
 
 
 def remote_alive(base) -> bool:
-    """Jako router::isRemoteAlive() (LTO/--gc-sections ji z Release ELF vyhodi, nikdo ji nevola): spojeni,
-    remote nekdy slyset a posledni paket od remote mladsi nez KEEPALIVE_LOSS. Cas = systick resolution_ * ticks_
-    (duration, 1 ms rozliseni)."""
+    """Like router::isRemoteAlive() (LTO/--gc-sections drops it from the Release ELF, nobody calls it): link up,
+    remote heard at some point and the last packet from the remote younger than KEEPALIVE_LOSS. Time = systick resolution_ * ticks_
+    (duration, 1 ms resolution)."""
     res = base.u("stmcpp::systick::resolution_")
     now = (res * base.u("stmcpp::systick::ticks_")) & 0xFFFFFFFF
     last = base.u("router::_lastRemoteRx")

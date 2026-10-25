@@ -1,5 +1,5 @@
-"""ST-Link pomocnici pro base i remote: openocd (TCL, cteni bez zastaveni) + gdb (symboly, volani funkci).
-Vzor: ../midicontroller-fw/tools/bletest/dbg.py. Jedna sonda = jeden openocd; dve sondy bezi soucasne."""
+"""ST-Link helpers for both the base and the remote: openocd (TCL, reads without halting) + gdb (symbols, function calls).
+Model: ../midicontroller-fw/tools/bletest/dbg.py. One probe = one openocd; two probes run at the same time."""
 
 import atexit
 import contextlib
@@ -19,12 +19,12 @@ CONFIGS = {
     "base": dict(serial="39FF71064B43353943122243", cfg=os.path.join(FW, "openocd.cfg"), elf=os.path.join(FW, "build", "midicontrol-fw.elf"),
                  gdb=3334, tcl=6668, telnet=6667, cwd=FW, gpio=0x48000000, safe_bp="Bluetooth::process"),
     "remote": dict(serial="37FF70064E59313840161343", cfg=os.path.join(REMOTE_FW, "openocd.cfg"),
-                   # Release ELF remote nema DWARF; BASETEST_REMOTE_ELF = -g kopie se stejnym kodem (README)
+                   # The remote Release ELF has no DWARF; BASETEST_REMOTE_ELF = a -g copy with the same code (README)
                    elf=os.environ.get("BASETEST_REMOTE_ELF", os.path.join(REMOTE_FW, "build", "midicontroller-fw.elf")), gdb=3333, tcl=6666, telnet=6665, cwd=REMOTE_FW, gpio=0x50000000,
                    safe_bp="base::Keyboard::process"),
 }
 
-# fault::Record (base, inc/fault.hpp): 8 B hlavicka + 18 x u32 + rev[8] + crc
+# fault::Record (base, inc/fault.hpp): 8 B header + 18 x u32 + rev[8] + crc
 FAULT_RECORD_SIZE = 92
 FAULT_KINDS = {1: "HARDFAULT", 2: "MEMMANAGE", 3: "BUSFAULT", 4: "USAGEFAULT", 5: "ERROR", 6: "LOOP_STALL"}
 NOINIT_ADDR, NOINIT_SIZE = 0x20007800, 2048
@@ -36,15 +36,15 @@ DIGIT = {str(d): 6 + d for d in range(10)}
 IDLE, STARTING, PLAYING, STOPPING = 0, 1, 2, 3
 # Bluetooth::PairingState (base)
 PAIR_IDLE, PAIR_SCANNING, PAIR_CONNECTING, PAIR_BONDING, PAIR_DONE, PAIR_FAILED = range(6)
-# Remote RN4870 RST = PB8 (aktivni v nule); GPIOB BSRR na G071
+# Remote RN4870 RST = PB8 (active low); GPIOB BSRR on the G071
 REMOTE_GPIOB_BSRR = 0x50000400 + 0x18
 REMOTE_BLE_RST_PIN = 8
-# Base RN4870 RST = PA1 (aktivni v nule); GPIOA BSRR na G431
+# Base RN4870 RST = PA1 (active low); GPIOA BSRR on the G431
 BASE_GPIOA_BSRR = 0x48000000 + 0x18
 BASE_BLE_RST_PIN = 1
 
 def probe_holder(name: str):
-    """Cizi proces (openocd jine session), ktery drzi sondu `name`; None = volna nebo nase."""
+    """A foreign process (openocd of another session) that holds the probe `name`; None = free or ours."""
     ours = _servers.get(name)
     r = subprocess.run(["pgrep", "-af", f"adapter serial {CONFIGS[name]['serial']}"], capture_output=True, text=True)
     for line in r.stdout.splitlines():
@@ -75,8 +75,8 @@ def _raw_tcl(port: int, cmd: str) -> str:
 
 
 def _release_debugen(name: str):
-    """Pred ukoncenim openocd: DHCSR.C_DEBUGEN = 0 (jadro bezi dal). Jinak by skutecny fault na lavici skoncil v
-    fault::finish() na bkpt (a s DBG_IWDG_STOP viset navzdy). Zastavene jadro se nejdriv rozbehne."""
+    """Before terminating openocd: DHCSR.C_DEBUGEN = 0 (the core keeps running). Otherwise a real fault on the bench would end up in
+    fault::finish() at a bkpt (and hang forever with DBG_IWDG_STOP). A halted core is resumed first."""
     p = _servers.get(name)
     if not p or p.poll() is not None:
         return
@@ -123,9 +123,9 @@ class Target:
             ["openocd", "-c", f"adapter serial {c['serial']}", "-f", c["cfg"],
              "-c", f"gdb_port {c['gdb']}; tcl_port {c['tcl']}; telnet_port {c['telnet']}"],
             cwd=c["cwd"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for _ in range(300):  # prvni pripojeni k sonde muze trvat i 10 s
+        for _ in range(300):  # the first connection to the probe can take up to 10 s
             if _servers[self.name].poll() is not None:
-                if _retry:  # obcas probe po predchozim pripojeni jeste neni pripravena
+                if _retry:  # sometimes the probe is not ready yet after the previous connection
                     time.sleep(1)
                     return self.start(_retry=False)
                 raise RuntimeError(f"openocd ({self.name}) exited - another instance on this probe?")
@@ -148,9 +148,9 @@ class Target:
         return _raw_tcl(self.c["tcl"], cmd)
 
     def dhcsr_on_attach(self) -> int:
-        """DHCSR tak, jak ho jadro melo PRED pripojenim: novy openocd (-d3) cte DHCSR jako prvni vec pri examine
-        a pak C_DEBUGEN sam nastavi. Zde se zaloguje, hodnota se vyparsuje a ladeni se zase uvolni (jadro bezi).
-        Server teto session se pred tim ukonci (stop() = uvolneni)."""
+        """DHCSR as the core had it BEFORE attaching: a new openocd (-d3) reads DHCSR as the first thing during examine
+        and then sets C_DEBUGEN itself. Here it is logged, the value is parsed out and debug is released again (the core runs).
+        This session's server is terminated first (stop() = release)."""
         self.stop()
         c = self.c
         r = subprocess.run(["openocd", "-d3", "-c", f"adapter serial {c['serial']}", "-f", c["cfg"],
@@ -163,12 +163,12 @@ class Target:
         return int(m.group(1), 16)
 
     def read(self, addr: int, n: int) -> bytes:
-        """Cteni pameti bez zastaveni jadra (AHB-AP)."""
+        """Memory read without halting the core (AHB-AP)."""
         out = self.tcl(f"read_memory 0x{addr:08x} 8 {n}")
         return bytes(int(x, 0) for x in out.split())
 
     def write(self, addr: int, data: bytes):
-        """Zapis do pameti bez zastaveni jadra (AHB-AP), napr. pro volatile priznak."""
+        """Memory write without halting the core (AHB-AP), e.g. for a volatile flag."""
         self.tcl(f"write_memory 0x{addr:08x} 8 {{{' '.join(f'0x{b:02x}' for b in data)}}}")
 
     def core_state(self) -> dict:
@@ -176,13 +176,13 @@ class Target:
         return {"halted": bool(dhcsr & (1 << 17)), "sleeping": bool(dhcsr & (1 << 18)), "lockup": bool(dhcsr & (1 << 19)), "dhcsr": dhcsr}
 
     def resume(self):
-        # samotne "resume" openocd ignoruje, kdyz o zastaveni nevi (napr. novy openocd) -> nejdriv halt
+        # a bare "resume" is ignored by openocd when it does not know about the halt (e.g. a new openocd) -> halt first
         self.tcl("capture {halt}; capture {resume}")
 
     def pc_if_halted(self):
         return self.tcl("reg pc") if self.core_state()["halted"] else None
 
-    # -- symboly (jen z ELF)
+    # -- symbols (from the ELF only)
     def _static(self, expr: str) -> str:
         out = subprocess.run([GDB, "-q", "-nx", "-batch", "-ex", f"print {expr}", self.elf], capture_output=True, text=True).stdout
         m = re.search(r"^\$1 = (.*)$", out, re.M)
@@ -191,8 +191,8 @@ class Target:
         return m.group(1)
 
     def sym(self, name: str) -> int:
-        """Adresa symbolu, napr. 'Debug::_logRing'. Nejdriv tabulka symbolu (nm -C, funguje i bez DWARF),
-        jinak gdb (pole struktur, napr. 'GUI::playerScreen.state_', chce -g)."""
+        """Address of a symbol, e.g. 'Debug::_logRing'. First the symbol table (nm -C, works without DWARF too),
+        otherwise gdb (struct fields, e.g. 'GUI::playerScreen.state_', needs -g)."""
         if name not in self._sym:
             nm = subprocess.run([NM, "-C", self.elf], capture_output=True, text=True).stdout
             for line in nm.splitlines():
@@ -210,8 +210,8 @@ class Target:
         return self._sym[name]
 
     def _lto_priv_sym(self, name: str):
-        """Staticke promenne, ktere LTO prejmenuje na <mangled>.lto_priv.N (nm -C je pak nedemangluje, zalezi na
-        rozdeleni LTO partition - zmena jinde ve firmware ji muze vyvolat). Hleda se demanglovany zaklad jmena."""
+        """Static variables that LTO renames to <mangled>.lto_priv.N (nm -C then does not demangle them; it depends on the
+        LTO partitioning - a change elsewhere in the firmware can trigger it). The demangled base of the name is searched."""
         nm = subprocess.run([NM, self.elf], capture_output=True, text=True).stdout
         cands = []
         for line in nm.splitlines():
@@ -232,9 +232,9 @@ class Target:
         return self.read_uint(self.sym(name), size)
 
     def read_uint(self, addr: int, size: int = 4) -> int:
-        """Cislo little-endian bez zastaveni jadra. Zarovnane 2/4 B jednim 16/32bit pristupem: bajtove cteni (read())
-        se roztrhne pres prenos, kdyz ISR hodnotu prave inkrementuje (soak 2026-10-24: "systick went back
-        271871 -> 271819", ticks_ = 0x425FF). Ostatni (1 B, nezarovnane, jine delky) po bajtech."""
+        """Little-endian number without halting the core. Aligned 2/4 B with a single 16/32-bit access: a byte-wise read (read())
+        gets torn across the transfer when an ISR is incrementing the value at that moment (soak 2026-10-24: "systick went back
+        271871 -> 271819", ticks_ = 0x425FF). Everything else (1 B, unaligned, other lengths) byte by byte."""
         if size in (2, 4) and addr % size == 0:
             return int(self.tcl(f"read_memory 0x{addr:08x} {size * 8} 1").split()[0], 0)
         return int.from_bytes(self.read(addr, size), "little")
@@ -253,7 +253,7 @@ class Target:
 
     # -- GPIO
     def gpio(self, port: str, pin: int) -> int:
-        """Stav pinu z IDR (port 'A'..): G431 GPIO na 0x48000000, G071 na 0x50000000, krok 0x400."""
+        """Pin state from IDR (port 'A'..): G431 GPIO at 0x48000000, G071 at 0x50000000, stride 0x400."""
         n = ord(port.upper()) - ord("A")
         base = self.c["gpio"] + 0x400 * n
         idr = int.from_bytes(self.read(base + 0x10, 4), "little")
@@ -265,7 +265,7 @@ class Target:
         args = [GDB, "-q", "-nx", "-batch", "-ex", f"target extended-remote :{self.c['gdb']}", "-ex", "set confirm off"]
         for c in cmds:
             args += ["-ex", c]
-        # nikdy nenechat jadro zastavene: resume pred detach
+        # never leave the core halted: resume before detach
         args += ["-ex", "monitor resume", "-ex", "detach"]
         try:
             r = subprocess.run(args + [self.elf], capture_output=True, text=True, timeout=timeout)
@@ -275,27 +275,27 @@ class Target:
         return r
 
     def reset(self):
-        """Reset jadra pres sondu (reset run); jadro se nikdy nenecha zastavene."""
+        """Core reset via the probe (reset run); the core is never left halted."""
         self.tcl("reset run")
         time.sleep(0.2)
         if self.core_state()["halted"]:
             self.resume()
 
     def release_debug(self):
-        """Odpojit ladeni tak, aby firmware videlo DHCSR.C_DEBUGEN = 0 (fault -> zaznam + NVIC_SystemReset misto bkpt).
-        C_DEBUGEN nuluje jen POR nebo zapis DHCSR; ST-Link (hla) ho pri pripojeni nastavi a systemovy reset ho necha.
-        Proto: DHCSR = DBGKEY bez C_DEBUGEN (0xA05F0000, jadro bezi dal), hned potom ukoncit openocd (dalsi tcl() ho
-        spusti znovu a C_DEBUGEN opet nastavi). Viz README "Fault tests"."""
+        """Detach debug so that the firmware sees DHCSR.C_DEBUGEN = 0 (fault -> record + NVIC_SystemReset instead of bkpt).
+        C_DEBUGEN is cleared only by POR or a DHCSR write; the ST-Link (hla) sets it on attach and a system reset leaves it.
+        Hence: DHCSR = DBGKEY without C_DEBUGEN (0xA05F0000, the core keeps running), then terminate openocd right away (the next tcl() starts
+        it again and sets C_DEBUGEN again). See the README "Fault tests"."""
         self.tcl("write_memory 0xE000EDF0 32 {0xA05F0000}")
         self.stop()
 
     def addr2line(self, addr: int) -> str:
-        """Jmeno funkce pro adresu (arm-none-eabi-addr2line -f -C); Release ELF bez DWARF -> z tabulky symbolu."""
+        """Function name for an address (arm-none-eabi-addr2line -f -C); a Release ELF without DWARF -> from the symbol table."""
         r = subprocess.run([NM.replace("nm", "addr2line"), "-f", "-C", "-e", self.elf, f"0x{addr:08x}"], capture_output=True, text=True)
         return r.stdout.splitlines()[0] if r.stdout else "??"
 
     def fault_record(self):
-        """Base: fault::_record v .noinit jako dict, nebo None (spatna magic/CRC). Rozlozeni = fault::Record (fault.hpp)."""
+        """Base: fault::_record in .noinit as a dict, or None (bad magic/CRC). Layout = fault::Record (fault.hpp)."""
         import struct
         import zlib
         raw = self.read(self.sym("fault::_record"), FAULT_RECORD_SIZE)
@@ -310,7 +310,7 @@ class Target:
         return dict(kind=kind, count=count, code=code, rev=rev, **dict(zip(names, regs)))
 
     def function_symbol(self, name: str) -> str:
-        """Plny demanglovany nazev funkce z tabulky symbolu, napr. 'Bluetooth::queueCommand(char const*)'."""
+        """Full demangled function name from the symbol table, e.g. 'Bluetooth::queueCommand(char const*)'."""
         nm = subprocess.run([NM, "-C", self.elf], capture_output=True, text=True).stdout
         for line in nm.splitlines():
             parts = line.split(" ", 2)
@@ -326,10 +326,10 @@ class Target:
             return False
 
     def call(self, expr: str, timeout=20):
-        """Zavola funkci ve firmware, napr. call('Bluetooth::queueCommand("U,Z")'). Release ELF nema DWARF, takze se
-        funkce hleda v tabulce symbolu (nm) a vola pres pretypovany ukazatel; navratova hodnota jako int (bool -> 0/1).
-        Nejdriv zastavi v bezpecnem miste hlavni smycky (safe_bp), aby volani (a gdb malloc pro retezcovy literal)
-        nikdy neprobehlo uprostred prerusene funkce. Vraci int."""
+        """Calls a function in the firmware, e.g. call('Bluetooth::queueCommand("U,Z")'). A Release ELF has no DWARF, so the
+        function is looked up in the symbol table (nm) and called through a cast pointer; the return value as int (bool -> 0/1).
+        It first halts at a safe point of the main loop (safe_bp), so that the call (and the gdb malloc for a string literal)
+        never runs in the middle of an interrupted function. Returns int."""
         m = re.fullmatch(r"\s*([\w:]+)\s*\((.*)\)\s*", expr, re.S)
         if not m:
             raise ValueError(f"call: expected 'ns::func(args)', got {expr!r}")
@@ -357,8 +357,8 @@ class Target:
 
     @contextlib.contextmanager
     def safe_halt(self, timeout_ms=3000):
-        """Zastavi jadro v bezpecnem miste hlavni smycky (HW breakpoint na safe_bp) pro konzistentni zapisy do RAM
-        (fronty, stav automatu); na konci vzdy pokracuje."""
+        """Halts the core at a safe point of the main loop (HW breakpoint on safe_bp) for consistent writes to RAM
+        (queues, state machine state); always resumes at the end."""
         addr = self.function_address(self.c["safe_bp"])
         self.tcl(f"capture {{bp 0x{addr:08x} 2 hw}}")
         try:
@@ -376,8 +376,8 @@ class Target:
                 self.resume()
 
     def inject_status(self, *lines: str):
-        """Base: vlozi stavove zpravy RN4870 (text bez '%') do Bluetooth::_statusQueue, jako by prisly z modulu.
-        Velikost slotu z nm -S (8 slotu + head + tail)."""
+        """Base: injects RN4870 status messages (text without '%') into Bluetooth::_statusQueue as if they came from the module.
+        Slot size from nm -S (8 slots + head + tail)."""
         nm = subprocess.run([NM, "-C", "-S", self.elf], capture_output=True, text=True).stdout
         line = next(l for l in nm.splitlines() if l.endswith(" Bluetooth::_statusQueue"))
         addr, size = int(line.split()[0], 16), int(line.split()[1], 16)
@@ -391,15 +391,15 @@ class Target:
             self.write(addr + 8 * slot, head.to_bytes(4, "little"))
 
     def hold_ble_reset(self, on: bool):
-        """RN4870 RST do nuly (on=True, modul v resetu) / zpet do jednicky. Zapis do GPIO->BSRR za behu jadra.
-        Remote: PB8 (firmware ho nastavuje jen pri (re)inicializaci modulu). Base: PA1; po resetu base ho bootovaci
-        init() sam shodi a po 100 ms zvedne, takze pro drzeni pres reset je treba zapis opakovat (test_ble_down.py)."""
+        """RN4870 RST to zero (on=True, module held in reset) / back to one. A write to GPIO->BSRR while the core runs.
+        Remote: PB8 (the firmware sets it only on (re)initialization of the module). Base: PA1; after a base reset its boot
+        init() pulls it low itself and raises it after 100 ms, so holding it across a reset requires repeating the write (test_ble_down.py)."""
         if self.name == "remote":
             self.write32(REMOTE_GPIOB_BSRR, 1 << (REMOTE_BLE_RST_PIN + (16 if on else 0)))
         else:
             self.write32(BASE_GPIOA_BSRR, 1 << (BASE_BLE_RST_PIN + (16 if on else 0)))
 
-    # -- remote: obrazovky (pole struktur potrebuji DWARF, remote build je -g)
+    # -- remote: screens (struct fields need DWARF, the remote build is -g)
     def player_state(self) -> int:
         return self.u("GUI::playerScreen.state_", 1)
 
@@ -436,7 +436,7 @@ class Target:
         return self.key(*evs)
 
     def goto_player(self):
-        """Remote: probudit OLED a dostat se na obrazovku prehravace (hlavni menu, polozka 0)."""
+        """Remote: wake the OLED and get to the player screen (main menu, item 0)."""
         for _ in range(5):
             name = self.screen_name()
             if name == "playerScreen" and not self.oled_sleeping():
@@ -444,7 +444,7 @@ class Target:
             if self.oled_sleeping():
                 self.key(BACK)
             elif name == "mainScreen":
-                # polozka 0 = Prehravac; vyber muze zustat na "Nastaveni"
+                # item 0 = Prehravac; the selection may remain on "Nastaveni"
                 sel = self.u("GUI::mainScreen.selectedIndex_")
                 self.key(*([UP] * sel), ENTER)
             else:
@@ -453,7 +453,7 @@ class Target:
         raise RuntimeError(f"could not reach the player screen (at {self.screen_name()})")
 
     def key(self, *events, timeout=20):
-        """Remote: zastavit v hlavni smycce, volat GUI::keypress pro kazdou udalost, pokracovat."""
+        """Remote: halt in the main loop, call GUI::keypress for each event, continue."""
         cmds = ["hbreak base::Keyboard::process", "continue", "delete", "call Oled::wakeupCallback()"]
         for e in events:
             n = DIGIT[e] if isinstance(e, str) else int(e)
@@ -467,8 +467,8 @@ class Target:
         return r.stdout
 
     def debug_log(self) -> list:
-        """Base: obsah logu v no-init RAM (Debug::_log = hlavicka {magic, head, tail, dropped, crc} + 1536 B ring) jako
-        radky od nejstarsiho. head/tail jsou absolutni pozice (index = pozice % 1536)."""
+        """Base: content of the log in no-init RAM (Debug::_log = header {magic, head, tail, dropped, crc} + 1536 B ring) as
+        lines from the oldest. head/tail are absolute positions (index = position % 1536)."""
         import struct
         size = 1536
         raw = self.read(self.sym("Debug::_log"), 20 + size)

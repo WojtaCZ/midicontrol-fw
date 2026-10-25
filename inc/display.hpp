@@ -17,14 +17,14 @@ namespace display{
 
     void init();
 
-    // Hlavní smyčka: odeslání rámce (nejvýše jeden najednou, bez přerušení rozpracovaného) a SysEx ozvěna
+    // Main loop: frame transmission (at most one at a time, a frame in progress is never interrupted) and SysEx echo
     void process();
 
-    // Naplánuje odeslání aktuálního stavu (displej + SysEx ozvěna do PC)
+    // Schedules sending the current state (display + SysEx echo to the PC)
     void sendState();
 
-    // NOW_PLAYING_INFO payload (viz lib/protocol/PROTOCOL.md): BCD po číslicích, 0xF = prázdná číslice,
-    // 0xFF = beze změny, 0xFE = zhasnout pole, prázdný payload = smazat vše. Vždy jeden rámec.
+    // NOW_PLAYING_INFO payload (see lib/protocol/PROTOCOL.md): BCD per digit, 0xF = blank digit,
+    // 0xFF = unchanged, 0xFE = blank the field, empty payload = clear everything. Always a single frame.
     void applyNowPlaying(const uint8_t *payload, uint8_t len);
     void clear();
 
@@ -33,10 +33,10 @@ namespace display{
     void setLetter(char letter, bool visible);
     void setLed(ledColor led);
 
-    // Text pro OLED po číslicích, mezera = zhasnutá číslice (" 401", "1 ")
+    // OLED text per digit, space = blanked digit (" 401", "1 ")
     void formatSong(char (&out)[5]);
     void formatVerse(char (&out)[3]);
-    char getLetter(); // 'A'-'D' nebo ' '
+    char getLetter(); // 'A'-'D' or ' '
     ledColor getLed();
     bool isConnected();
     bool wasChanged();

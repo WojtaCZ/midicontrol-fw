@@ -8,10 +8,10 @@ namespace settings {
 
 	static constexpr uint32_t SETTINGS_MAGIC = 0xBEEFCAFE;
 	static constexpr uint8_t SETTINGS_VERSION = 2;
-	// Verze 1: jen prvních 8 bajtů (bez remoteAddr)
+	// Version 1: only the first 8 bytes (without remoteAddr)
 	static constexpr uint32_t SETTINGS_V1_SIZE = 8;
 
-	// Poslední stránka flash (page 63) — 2KB stránky na STM32G4
+	// Last flash page (page 63) — 2KB pages on the STM32G4
 	static constexpr uint32_t SETTINGS_PAGE = 63;
 	static constexpr uint32_t SETTINGS_ADDR = 0x0801F800;
 
@@ -33,7 +33,7 @@ namespace settings {
 			ramCopy.remoteAddr[sizeof(ramCopy.remoteAddr) - 1] = '\0';
 			Debug::log(Debug::Level::INFO, "set", "loaded v%u, remote %s", SETTINGS_VERSION, ramCopy.remoteAddr[0] ? ramCopy.remoteAddr : "-");
 		} else if (flash->magic == SETTINGS_MAGIC && flash->version == 1) {
-			// Migrace: LED/MIDI nastavení zůstanou, ovladač je třeba jednou spárovat z menu
+			// Migration: the LED/MIDI settings are kept, the remote must be paired once from the menu
 			loadDefaults();
 			std::memcpy(&ramCopy, flash, SETTINGS_V1_SIZE);
 			ramCopy.version = SETTINGS_VERSION;
@@ -62,7 +62,7 @@ namespace settings {
 
 	static void flashErasePage(uint32_t page) {
 		flashWaitBusy();
-		// Vymazání stránky (single bank)
+		// Page erase (single bank)
 		FLASH->CR &= ~FLASH_CR_PNB_Msk;
 		FLASH->CR |= (page << FLASH_CR_PNB_Pos) | FLASH_CR_PER;
 		FLASH->CR |= FLASH_CR_STRT;
@@ -74,7 +74,7 @@ namespace settings {
 		flashWaitBusy();
 		FLASH->CR |= FLASH_CR_PG;
 
-		// STM32G4 flash programování po 64-bitových slovech
+		// STM32G4 flash programming in 64-bit words
 		*reinterpret_cast<volatile uint32_t *>(addr) = static_cast<uint32_t>(data);
 		*reinterpret_cast<volatile uint32_t *>(addr + 4) = static_cast<uint32_t>(data >> 32);
 
@@ -89,7 +89,7 @@ namespace settings {
 		flashUnlock();
 		flashErasePage(SETTINGS_PAGE);
 
-		// Zápis po 64-bitových slovech
+		// Write in 64-bit words
 		const auto *src = reinterpret_cast<const uint64_t *>(&ramCopy);
 		uint32_t addr = SETTINGS_ADDR;
 		for (uint32_t i = 0; i < sizeof(SettingsData); i += 8) {
@@ -100,7 +100,7 @@ namespace settings {
 			flashProgramDoubleWord(addr + i, word);
 		}
 
-		// Vyčištění chybových flagů
+		// Clear the error flags
 		FLASH->SR = FLASH->SR;
 
 		flashLock();

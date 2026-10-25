@@ -29,7 +29,7 @@ namespace resetcause {
 
 	uint32_t readAndClear() {
 		_last = RCC->CSR;
-		RCC->CSR |= RCC_CSR_RMVF; // smazat příznaky, ať další boot ukáže jen svou příčinu
+		RCC->CSR |= RCC_CSR_RMVF; // clear the flags so the next boot shows only its own cause
 		return _last;
 	}
 

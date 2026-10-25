@@ -1,5 +1,5 @@
-"""Relay PC <-> Remote pres base (USB-CDC <-> BLE) se sparovanym remote. PC hraje harness (link), remote je skutecny
-(klavesy a stav pres jeho ST-Link, `remote_probe`). Predpoklad: base a remote jsou sparovane (test_pairing.py)."""
+"""Relay PC <-> Remote via the base (USB-CDC <-> BLE) with a paired remote. The PC is played by the harness (link), the remote is real
+(keys and state via its ST-Link, `remote_probe`). Precondition: the base and the remote are paired (test_pairing.py)."""
 
 import re
 import time
@@ -14,7 +14,7 @@ from proto import MT, NAK, Packet
 
 ADDR_PC, ADDR_BASE, ADDR_REMOTE = proto.ADDR_PC, proto.ADDR_BASE, proto.ADDR_REMOTE
 BAUD = 115200
-MAX_RETRIES = 3  # PROTOCOL.md: 3 opakovani po 500 ms, stejne PacketId
+MAX_RETRIES = 3  # PROTOCOL.md: 3 retries at 500 ms, same PacketId
 
 
 def from_remote(mtype, pid=None):
@@ -30,7 +30,7 @@ def to_remote(link, mtype, payload=b"") -> int:
 
 
 def pc_signal(link, mtype, payload=b""):
-    """PC -> Remote, ceka na ACK od remote (src 3)."""
+    """PC -> Remote, waits for an ACK from the remote (src 3)."""
     pid = to_remote(link, mtype, payload)
     r = link.recv(1.5, reply_to(pid))
     assert r is not None and r.mtype == MT.ACK, f"{MT(mtype).name}: {r}"
@@ -47,7 +47,7 @@ def frames(data: bytes) -> list:
 
 @pytest.fixture(scope="module")
 def paired(base):
-    """Spojeni s remote musi byt nahore (stream otevreny, zabezpeceny) a remote ziv."""
+    """The link to the remote must be up (stream open, secured) and the remote alive."""
     wait_until(lambda: base.read_bool("Bluetooth::_streamOpen"), 15, what="BLE stream open (pair first: test_pairing.py)")
     wait_until(lambda: remote_alive(base), 8, interval=0.5, what="remote alive")
     return base
@@ -55,9 +55,9 @@ def paired(base):
 
 @pytest.fixture
 def player(paired, link, remote_probe):
-    """Remote na obrazovce prehravace, IDLE, prazdny vstup; zadne cekajici prikazy."""
+    """Remote on the player screen, IDLE, empty input; no pending commands."""
     remote = remote_probe
-    time.sleep(2.2)  # pripadny rozpracovany prikaz z predchoziho testu dobehne
+    time.sleep(2.2)  # a possible in-progress command from the previous test finishes
     remote.goto_player()
     pc_signal(link, MT.SIGNAL_STOPPED)
     n = remote.u("GUI::playerScreen.digitCount_", 1) + (1 if remote.u("GUI::playerScreen.letter_", 1) else 0)
@@ -80,7 +80,7 @@ def test_base_keepalive_to_remote(paired):
     base = paired
     sr = la.capture(11, channels="D2,D3", samplerate="1M")
     data, _ = la.uart_timed(sr, la.CH["base_ble_tx"], BAUD, 1e6)
-    # ramce s casem prvniho bajtu (SOH)
+    # frames with the time of the first byte (SOH)
     times, parser = [], proto.FrameParser()
     for t, b in data:
         for p in parser.feed(bytes([b])):
@@ -169,7 +169,7 @@ def test_pc_to_remote_unreachable(paired, link, remote_probe):
             link.send_msg(MT.GET_STATUS)
             st = link.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.STATUS_RESP)
             assert st is not None and st.payload[0] == 0, st
-            # PC -> Remote bez spojeni: NAK UNREACHABLE od base hned
+            # PC -> Remote without a link: NAK UNREACHABLE from the base immediately
             nak_pid = to_remote(link, MT.SIGNAL_STOPPED)
             t = time.monotonic()
             nak = link.recv(1.0, reply_to(nak_pid, src=ADDR_BASE))
@@ -192,7 +192,7 @@ def test_pc_to_remote_unreachable(paired, link, remote_probe):
         la.finish(proc, sr, 60)
         status = {k: re.findall(r"%([^%\r\n]{1,60})%", la.uart(sr, la.CH[k], BAUD).decode("latin1")) for k in ("base_ble_rx", "rem_ble_rx")}
         print("status lines:", status)
-    # nic stareho: paket odmitnuty NAKem nesmi dorazit k remote ani po obnoveni spojeni
+    # nothing stale: a packet rejected with a NAK must not reach the remote even after the link is restored
     to_rem = [p for p in frames(la.uart(sr, la.CH["rem_ble_rx"], BAUD)) if p.src == ADDR_PC]
     assert not [p for p in to_rem if p.pid == nak_pid and p.mtype == MT.SIGNAL_STOPPED], to_rem
     print(f"reconnect {reconnect_s:.1f} s after release; PC frames at remote: {[(p.pid, MT(p.mtype).name) for p in to_rem]}")

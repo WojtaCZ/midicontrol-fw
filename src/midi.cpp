@@ -80,8 +80,8 @@ namespace midi {
 	}
 
 	void send(uint8_t (&packet)[4]) {
-		uint8_t size = messageSize(packet[0] & 0x0F); // Horní nibble = číslo kabelu
-		wdg::kick(); // aktivní čekání na USART (~1 ms na zprávu); dávka z USB FIFO jich je víc za sebou
+		uint8_t size = messageSize(packet[0] & 0x0F); // Upper nibble = cable number
+		wdg::kick(); // busy-waiting on the USART (~1 ms per message); a batch from the USB FIFO has several in a row
 		for (uint8_t i = 1; i <= size; ++i) {
 			// Wait until transmit data register is empty
 			while (!(USART3->ISR & USART_ISR_TXE)) {}
@@ -92,13 +92,13 @@ namespace midi {
 		while (!(USART3->ISR & USART_ISR_TC)) {}
 	}
 
-	// ── DIN vstup (varhany) → USB ────────────────────────────────────────
-	// Parser běží v ISR a skládá USB-MIDI pakety do kruhového bufferu; do TinyUSB je
-	// zapisuje až hlavní smyčka (process), protože TinyUSB není ISR-safe.
+	// ── DIN input (organ) → USB ───────────────────────────────────────────
+	// The parser runs in the ISR and assembles USB-MIDI packets into a ring buffer; they are
+	// written to TinyUSB only by the main loop (process), because TinyUSB is not ISR-safe.
 	static RingBuffer<UsbPacket, 64> _dinToUsb;
 
-	static uint8_t _status = 0;        // Aktuální (i running) status, 0 = žádný
-	static uint8_t _dataNeeded = 0;    // Počet datových bajtů zprávy
+	static uint8_t _status = 0;        // Current (also running) status, 0 = none
+	static uint8_t _dataNeeded = 0;    // Number of data bytes of the message
 	static uint8_t _data[2] = {};
 	static uint8_t _dataIdx = 0;
 	static bool _inSysex = false;
@@ -107,7 +107,7 @@ namespace midi {
 
 	static void _emit(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3) {
 		UsbPacket pkt = {{cin, b1, b2, b3}};
-		if (!_dinToUsb.push(pkt)) Debug::logFromIsr(Debug::ISR_MIDI_OVERFLOW); // Při přetečení se paket zahodí
+		if (!_dinToUsb.push(pkt)) Debug::logFromIsr(Debug::ISR_MIDI_OVERFLOW); // On overflow the packet is dropped
 	}
 
 	static uint8_t _dataBytesFor(uint8_t status) {
@@ -123,8 +123,8 @@ namespace midi {
 	}
 
 	static void _parseDinByte(uint8_t data) {
-		// Real-time zprávy (F8-FF) mohou přijít kdykoliv, i uprostřed SysEx nebo jiné zprávy,
-		// a nic nepřerušují
+		// Real-time messages (F8-FF) can arrive at any time, even in the middle of a SysEx or another message,
+		// and they interrupt nothing
 		if (data >= 0xF8) {
 			_emit(MIDI_CIN_1BYTE_DATA, data, 0, 0);
 			return;
@@ -149,16 +149,16 @@ namespace midi {
 		}
 
 		if (data >= 0x80) {
-			// Jiný status ukončí SysEx (neúplný se zahodí)
+			// Any other status terminates the SysEx (an incomplete one is dropped)
 			_inSysex = false;
 			_sysexIdx = 0;
 
-			if (data == 0xF6) { // Tune request: jednobajtová system common
+			if (data == 0xF6) { // Tune request: single-byte system common
 				_emit(MIDI_CIN_SYSEX_END_1BYTE, data, 0, 0);
 				_status = 0;
 				return;
 			}
-			if (data >= 0xF4) { // Nedefinované F4/F5
+			if (data >= 0xF4) { // Undefined F4/F5
 				_status = 0;
 				return;
 			}
@@ -169,7 +169,7 @@ namespace midi {
 			return;
 		}
 
-		// Datový bajt
+		// Data byte
 		if (_inSysex) {
 			_sysex[_sysexIdx++] = data;
 			if (_sysexIdx == 3) {
@@ -179,7 +179,7 @@ namespace midi {
 			return;
 		}
 
-		if (_status == 0) return; // Data bez statusu
+		if (_status == 0) return; // Data without a status
 
 		_data[_dataIdx++] = data;
 		if (_dataIdx < _dataNeeded) return;
@@ -188,12 +188,12 @@ namespace midi {
 		if (_status >= 0xF0) {
 			cin = (_dataNeeded == 2) ? MIDI_CIN_SYSCOM_3BYTE : MIDI_CIN_SYSCOM_2BYTE;
 		} else {
-			cin = _status >> 4; // Kanálové zprávy: CIN = horní nibble statusu
+			cin = _status >> 4; // Channel messages: CIN = upper nibble of the status
 		}
 		_emit(cin, _status, _data[0], _dataNeeded > 1 ? _data[1] : 0);
 		_dataIdx = 0;
 
-		// Running status platí jen pro kanálové zprávy, system common ho ruší
+		// Running status applies only to channel messages, system common cancels it
 		if (_status >= 0xF0) _status = 0;
 	}
 
@@ -209,7 +209,7 @@ namespace midi {
 		}
 
 		if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE)) {
-			// Chyba příjmu: smazat příznaky a zahodit rozpracovanou zprávu
+			// Receive error: clear the flags and drop the message in progress
 			USART3->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
 			Debug::logFromIsr(Debug::ISR_MIDI_UART_ERROR);
 			_inSysex = false;
@@ -218,11 +218,11 @@ namespace midi {
 		}
 	}
 
-	// ── USB výstup (hlavní smyčka) ───────────────────────────────────────
+	// ── USB output (main loop) ────────────────────────────────────────────
 	static UsbPacket _echo[8];
 	static uint8_t _echoCount = 0;
 	static uint8_t _echoIdx = 0;
-	static bool _dinSysexOpen = false;  // Do USB odešel začátek DIN SysEx, ale ještě ne konec
+	static bool _dinSysexOpen = false;  // The start of a DIN SysEx has gone out to USB, but not the end yet
 	static duration _lastDinPacket = 0_ms;
 
 	bool queueUsbSysex(const uint8_t (*packets)[4], uint8_t count) {
@@ -237,7 +237,7 @@ namespace midi {
 
 	void process() {
 		if (!tud_midi_mounted()) {
-			// Není komu posílat — zahodit, ať se po připojení nepošlou stará data
+			// Nobody to send to — drop it, so old data is not sent after connecting
 			_dinToUsb.clear();
 			_echoCount = 0;
 			_dinSysexOpen = false;
@@ -245,15 +245,15 @@ namespace midi {
 		}
 
 		duration now = stmcpp::systick::getDuration();
-		// Přerušený DIN SysEx (odpojený kabel) nesmí navždy blokovat ozvěnu displeje
+		// An interrupted DIN SysEx (unplugged cable) must not block the display echo forever
 		if (_dinSysexOpen && _dinToUsb.empty() && (now - _lastDinPacket) > 200_ms) _dinSysexOpen = false;
 
 		while (true) {
-			// Vlastní SysEx (ozvěna displeje) se nesmí vložit doprostřed DIN SysEx; když už se
-			// začal posílat, musí se dokončit dřív než cokoliv dalšího
+			// Our own SysEx (display echo) must not be inserted in the middle of a DIN SysEx; once it
+			// has started sending, it must finish before anything else
 			if (_echoCount != 0 && (_echoIdx > 0 || !_dinSysexOpen)) {
 				while (_echoIdx < _echoCount && tud_midi_packet_write(_echo[_echoIdx].data)) _echoIdx++;
-				if (_echoIdx < _echoCount) return; // FIFO plné, pokračovat příště
+				if (_echoIdx < _echoCount) return; // FIFO full, continue next time
 				_echoCount = 0;
 				_echoIdx = 0;
 				continue;
@@ -261,7 +261,7 @@ namespace midi {
 
 			UsbPacket *pkt = _dinToUsb.peek();
 			if (!pkt) return;
-			if (!tud_midi_packet_write(pkt->data)) return; // FIFO plné, paket zůstává ve frontě
+			if (!tud_midi_packet_write(pkt->data)) return; // FIFO full, the packet stays in the queue
 
 			uint8_t cin = pkt->data[0] & 0x0F;
 			if (cin == MIDI_CIN_SYSEX_START) _dinSysexOpen = true;

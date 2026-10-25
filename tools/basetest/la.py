@@ -1,12 +1,12 @@
-"""Logic analyzer (fx2lafw via sigrok-cli): zachyt sbernic base a dekodovani UART."""
+"""Logic analyzer (fx2lafw via sigrok-cli): capture of the base buses and UART decoding."""
 
 import subprocess
 import tempfile
 from pathlib import Path
 
-# sigrok D0..D7 = CH1..CH8; smery overeny na lavici 2026-10-19:
-# displej D1 = MCU -> displej, D0 = displej -> MCU; BLE D3 = MCU -> RN4870, D2 = RN4870 -> MCU;
-# remote BLE (Task 5, %CONNECT%/%SECURED% modulu na D6, "$$$"/"A" MCU na D7): D7 = MCU -> RN4870, D6 = RN4870 -> MCU
+# sigrok D0..D7 = CH1..CH8; directions verified on the bench 2026-10-19:
+# display D1 = MCU -> display, D0 = display -> MCU; BLE D3 = MCU -> RN4870, D2 = RN4870 -> MCU;
+# remote BLE (Task 5, %CONNECT%/%SECURED% of the module on D6, "$$$"/"A" of the MCU on D7): D7 = MCU -> RN4870, D6 = RN4870 -> MCU
 CH = {
 	"disp_tx": "D1",
 	"disp_rx": "D0",
@@ -26,7 +26,7 @@ class CaptureError(RuntimeError):
 
 
 def start(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M", driver: str = "fx2lafw") -> tuple[subprocess.Popen, Path]:
-	"""Spusti zachyt na pozadi; vraci (proces, .sr soubor). Dokonci ho pomoci finish()."""
+	"""Starts a capture in the background; returns (process, .sr file). Complete it with finish()."""
 	out = Path(tempfile.mktemp(suffix=".sr", dir=_DIR))
 	proc = subprocess.Popen(
 		["sigrok-cli", "-d", driver, "--channels", channels, "--config", f"samplerate={samplerate}", "--time", f"{int(seconds * 1000)}ms", "-o", str(out)],
@@ -38,7 +38,7 @@ def start(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M",
 
 
 def finish(proc: subprocess.Popen, out: Path, timeout: float) -> Path:
-	"""Pocka na zachyt; pri chybe/timeoutu proces zabije a vyhodi CaptureError se stderr."""
+	"""Waits for the capture; on an error/timeout kills the process and raises CaptureError with stderr."""
 	try:
 		_, err = proc.communicate(timeout=timeout)
 	except subprocess.TimeoutExpired:
@@ -57,13 +57,13 @@ def finish(proc: subprocess.Popen, out: Path, timeout: float) -> Path:
 
 
 def capture(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M", driver: str = "fx2lafw") -> Path:
-	"""Blokujici zachyt; vraci cestu k .sr souboru, pri selhani vyhodi CaptureError."""
+	"""Blocking capture; returns the path to the .sr file, raises CaptureError on failure."""
 	proc, out = start(seconds, channels, samplerate, driver)
 	return finish(proc, out, seconds + 30)
 
 
 def uart(sr: Path, rx: str, baud: int) -> bytes:
-	"""Dekoduje bajty UART na kanalu `rx` (napr. CH["base_ble_tx"]); pri chybe sigrok-cli vyhodi CaptureError."""
+	"""Decodes UART bytes on channel `rx` (e.g. CH["base_ble_tx"]); raises CaptureError if sigrok-cli fails."""
 	r = subprocess.run(["sigrok-cli", "-i", str(sr), "-P", f"uart:rx={rx}:baudrate={baud}", "-A", "uart=rx-data"], capture_output=True, text=True)
 	if r.returncode != 0:
 		raise CaptureError(f"dekodovani {sr} selhalo (kod {r.returncode}): {r.stderr.strip()}")
@@ -76,9 +76,9 @@ def uart(sr: Path, rx: str, baud: int) -> bytes:
 
 
 def uart_timed(sr: Path, rx: str, baud: int, samplerate: float) -> tuple[list[tuple[float, int]], list[tuple[float, str]]]:
-	"""Jako uart(), ale s casem: vraci ([(cas_zacatku_bajtu_s, bajt)], [(cas_s, text varovani)]).
-	Varovani (rx-warnings: chyba ramce, chyba parity, ...) jsou chyby dekodovani UARTu; prazdny seznam = cisty zaznam.
-	`samplerate` musi odpovidat zachytu (cislo ve Hz, napr. 100000)."""
+	"""Like uart(), but with time: returns ([(byte_start_time_s, byte)], [(time_s, warning text)]).
+	Warnings (rx-warnings: framing error, parity error, ...) are UART decoding errors; an empty list = a clean recording.
+	`samplerate` must match the capture (a number in Hz, e.g. 100000)."""
 	r = subprocess.run(
 		["sigrok-cli", "-i", str(sr), "-P", f"uart:rx={rx}:baudrate={baud}", "-A", "uart=rx-data:rx-warnings", "--protocol-decoder-samplenum"],
 		capture_output=True, text=True)

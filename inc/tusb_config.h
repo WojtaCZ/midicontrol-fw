@@ -104,7 +104,7 @@
 #endif
 
 //------------- CLASS -------------//
-// CDC 0 = protokolové rámce (rozhraní 0/1), CDC 1 = textový log "MIDIControl log" (rozhraní 4/5)
+// CDC 0 = protocol frames (interfaces 0/1), CDC 1 = text log "MIDIControl log" (interfaces 4/5)
 #define CFG_TUD_CDC               2
 #define CFG_TUD_MSC               0
 #define CFG_TUD_HID               0

@@ -18,7 +18,7 @@ using namespace stmcpp::units;
 
 namespace LED{
 
-	// Sledování aktivity — timestamp posledního notifyActivity() pro každý pixel
+	// Activity tracking — timestamp of the last notifyActivity() for each pixel
 	static duration activityTimestamp[6] = {};
 	
 	static constexpr duration BLINK_DURATION = 100_ms;
@@ -294,7 +294,7 @@ namespace LED{
 			pixels[PIXEL_CURRENT].setColorQuiet(off);
 		}
 
-		// MIDI A — vždy červená pokud roleId, bliká bíle pokud master
+		// MIDI A — always red if roleId, blinks white if master
 		if (roleId) {
 			bool blink = master && (now - activityTimestamp[PIXEL_MIDIA]) < BLINK_DURATION;
 			pixels[PIXEL_MIDIA].setColorQuiet(blink ? white : red);
@@ -302,7 +302,7 @@ namespace LED{
 			pixels[PIXEL_MIDIA].setColorQuiet(off);
 		}
 
-		// MIDI B — vždy zelená pokud roleId, bliká bíle pokud master
+		// MIDI B — always green if roleId, blinks white if master
 		if (roleId) {
 			bool blink = master && (now - activityTimestamp[PIXEL_MIDIB]) < BLINK_DURATION;
 			pixels[PIXEL_MIDIB].setColorQuiet(blink ? white : green);

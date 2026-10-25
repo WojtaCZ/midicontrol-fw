@@ -1,6 +1,6 @@
-"""Prvni sparovani base s remote (menu "Sparovat ovladac" -> Bluetooth::startPairing): sken, pripojeni jen k
-MIDIControlRemote, bond (Just Works: base i remote SA,2 NoInputNoOutput, viz CLAUDE.md), opetovne pripojeni po
-resetu base a timeout bez remote. Zaznam obou UART RN4870 behem parovani jde do PAIRING_LOG (vychozi: tmp)."""
+"""First pairing of the base with the remote (menu "Sparovat ovladac" -> Bluetooth::startPairing): scan, connecting only to
+MIDIControlRemote, bond (Just Works: base and remote SA,2 NoInputNoOutput, see CLAUDE.md), reconnection after a
+base reset and a timeout without the remote. The recording of both RN4870 UARTs during pairing goes to PAIRING_LOG (default: tmp)."""
 
 import os
 import re
@@ -20,8 +20,8 @@ LOG = os.environ.get("PAIRING_LOG", os.path.join(tempfile.gettempdir(), "basetes
 
 
 def disconnect_and_forget(base):
-    """Base zapomene vsechny bondy (U,Z) a odpoji se, pokud je pripojena. Poradi U,Z -> K,1: auto-reconnect ("C" k
-    poslednimu bondovanemu) po odpojeni hned uspeje, pokud bond jeste existuje."""
+    """The base forgets all bonds (U,Z) and disconnects if connected. Order U,Z -> K,1: an auto-reconnect ("C" to the
+    last bonded device) right after the disconnect would succeed if the bond still existed."""
     base.call('Bluetooth::queueCommand("U,Z")')
     if base.read_bool("Bluetooth::_connected"):
         base.call('Bluetooth::queueCommand("K,1")')
@@ -39,7 +39,7 @@ def pair(base, timeout=20):
 
 
 def write_log(sr, title):
-    """Stavove zpravy obou RN4870 a prikazy base do PAIRING_LOG; vraci (base_rx, base_tx, remote_rx)."""
+    """Status messages of both RN4870s and the base commands into PAIRING_LOG; returns (base_rx, base_tx, remote_rx)."""
     base_rx = status_lines(la.uart(sr, la.CH["base_ble_rx"], BAUD))
     base_tx = la.uart(sr, la.CH["base_ble_tx"], BAUD)
     rem_rx = status_lines(la.uart(sr, la.CH["rem_ble_rx"], BAUD))
@@ -59,22 +59,22 @@ def test_pairing_finds_remote_and_bonds(base, remote):
         state = pair(base)
         assert state == dbg.PAIR_DONE, f"pairing state {state}"
         assert base.read_bool("Bluetooth::_bonded")
-        # spojeni funguje: keepalive base dojde k remote a remote odpovida
+        # the link works: the base keepalive reaches the remote and the remote answers
         wait_until(lambda: remote_alive(base), 6, interval=0.5, what="remote alive (router::isRemoteAlive)")
     finally:
         la.finish(proc, sr, 60)
         base_rx, base_tx, rem_rx = write_log(sr, "test_pairing_finds_remote_and_bonds")
 
-    # base: pripojeni jen k remote, otevreny stream, zabezpeceno/bondovano
+    # base: connected only to the remote, stream open, secured/bonded
     connects = [s for s in base_rx if s.startswith("CONNECT,")]
     assert connects == [f"CONNECT,0,{REMOTE_ADDR}"], base_rx
     assert "STREAM_OPEN" in base_rx, base_rx
     assert "SECURED" in base_rx or "BONDED" in base_rx, base_rx
     assert "ERR_SEC" not in base_rx, base_rx
     assert f"C,0,{REMOTE_ADDR}".encode() in base_tx
-    # adresa ovladace ulozena trvale (settings v2 na 0x0801F800: magic, verze, LED, MIDI, pad, remoteAddr[13])
+    # the controller address stored permanently (settings v2 at 0x0801F800: magic, version, LED, MIDI, pad, remoteAddr[13])
     assert base.read(SETTINGS_ADDR + 8, 13).split(b"\0")[0] == REMOTE_ADDR.encode()
-    # remote: totez z druhe strany
+    # remote: the same from the other side
     assert any(s.startswith("CONNECT,") for s in rem_rx), rem_rx
     assert "STREAM_OPEN" in rem_rx, rem_rx
     assert "SECURED" in rem_rx or "BONDED" in rem_rx, rem_rx
@@ -87,15 +87,15 @@ def test_reconnect_after_base_reset_uses_bond(base, remote, link):
     base.reset()
     link.attach()
     time.sleep(0.5)
-    wait_until(lambda: base.read_bool("Bluetooth::_streamOpen"), 15, what="stream open after reset")  # "C" k bondovanemu remote
-    # adresa ovladace prezila reset (nastaveni ve flash) -> B po %STREAM_OPEN% -> %SECURED%
+    wait_until(lambda: base.read_bool("Bluetooth::_streamOpen"), 15, what="stream open after reset")  # "C" to the bonded remote
+    # the controller address survived the reset (settings in flash) -> B after %STREAM_OPEN% -> %SECURED%
     wait_until(lambda: base.read_bool("Bluetooth::_bonded"), 3, what="reconnected link secured (%SECURED%)")
     wait_until(lambda: remote_alive(base), 6, interval=0.5, what="router::isRemoteAlive()")
 
 
 def test_pairing_timeout_no_remote(base, remote_probe):
     remote = remote_probe
-    remote.hold_ble_reset(True)  # RN4870 remote v resetu (PB8)
+    remote.hold_ble_reset(True)  # remote RN4870 in reset (PB8)
     try:
         disconnect_and_forget(base)
         t0 = time.monotonic()
@@ -103,11 +103,11 @@ def test_pairing_timeout_no_remote(base, remote_probe):
         took = time.monotonic() - t0
         assert state == dbg.PAIR_FAILED, f"pairing state {state}"
         assert 14 < took < 20, f"FAILED after {took:.1f} s (PAIRING_TIMEOUT 15 s)"
-        # okolni zarizeni (telefony, PC) se nesmi pripojit misto remote
+        # surrounding devices (phones, PC) must not connect in place of the remote
         assert not base.read_bool("Bluetooth::_connected")
     finally:
         remote.hold_ble_reset(False)
-    # obnovit bond pro dalsi testy (remote po uvolneni resetu zacne znovu advertisovat)
+    # restore the bond for the other tests (after the reset is released the remote starts advertising again)
     time.sleep(3)
     proc, sr = la.start(25, channels="D2,D3,D6,D7", samplerate="1M")
     time.sleep(1.0)

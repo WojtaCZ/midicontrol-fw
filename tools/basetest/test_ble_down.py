@@ -1,6 +1,6 @@
-"""R21: mrtvy RN4870 base neresetuje (smycka ~4,5 s), ale zaloguje `E ble:` a zapise ERROR jednou, bezi dal bez BLE a po 60 s
-zkusi init znovu. Modul se drzi v resetu zapisem PA1 = 0 pres sondu za behu jadra (Target.hold_ble_reset); base init() PA1 po
-resetu sam zvedne, proto se zapis opakuje ve vlakne. Po uvolneni PA1 se BLE vrati nejpozdeji pri 60s pokusu."""
+"""R21: the base does not reset on a dead RN4870 (a loop of ~4.5 s), but logs `E ble:` and writes an ERROR once, keeps running without BLE and retries init
+after 60 s. The module is held in reset by writing PA1 = 0 via the probe while the core runs (Target.hold_ble_reset); the base init() raises PA1
+by itself after a reset, hence the write is repeated in a thread. After PA1 is released BLE returns at the latest at the 60 s retry."""
 
 import re
 import struct
@@ -42,7 +42,7 @@ def ticks(base) -> int:
 
 
 def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
-    base.write(base.sym("fault::_record"), bytes(dbg.FAULT_RECORD_SIZE))  # zadny starsi zaznam
+    base.write(base.sym("fault::_record"), bytes(dbg.FAULT_RECORD_SIZE))  # no older record
     holder = Holder(base)
     try:
         def action():
@@ -50,12 +50,12 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
             base.reset()
 
         log, _ = reboot(link, log, action, gone_within=3.0)
-        # Boot: banner a (po ~2-3 s) selhani init; pak >= 15 s behu
+        # Boot: banner and (after ~2-3 s) an init failure; then >= 15 s of running
         _, lines = boot(log)
         lines += log.lines(3.0)
         t0 = ticks(base)
-        # >= 70 s s drzenym RST: pokryje aspon jeden 60s retry (restart modulu musi byt neblokujici). KEEPALIVE
-        # odpovida router::process() z hlavni smycky, takze RTT = perioda smycky (zadne zmrazeni USB/protokolu).
+        # >= 70 s with RST held: covers at least one 60 s retry (the module restart must be non-blocking). KEEPALIVE
+        # is answered by router::process() from the main loop, so RTT = loop period (no USB/protocol freeze).
         rtts, missed = [], 0
         t_end = time.monotonic() + 72.0
         while time.monotonic() < t_end:
@@ -77,7 +77,7 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
         assert "RN4870 init failed" in ble_e[0]
         assert any("RN4870 init failed again" in l for l in lines), "no 60 s retry seen"
 
-        # Zaznam ERROR/ERR_BLE_INIT, jednou, uz oznameny (dalsi banner ho nevydava za chybu minuleho behu)
+        # An ERROR/ERR_BLE_INIT record, once, already announced (the next banner does not report it as an error of the previous run)
         rec = base.fault_record()
         assert rec and rec["kind"] == 5 and rec["code"] == ERR_BLE_INIT and rec["count"] == 1, rec
         raw = base.read(base.sym("fault::_record"), dbg.FAULT_RECORD_SIZE)
@@ -86,7 +86,7 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
         assert not base.read_bool("Bluetooth::_connected")
         assert not base.core_state()["halted"]
 
-        # Uvolnit PA1: modul nabehne; BLE ale zapne az 60s retry (base ho znovu resetuje a nakonfiguruje)
+        # Release PA1: the module comes up; but BLE is enabled only by the 60 s retry (the base resets and configures it again)
         holder.release()
         base.hold_ble_reset(False)
         retry = log.lines(75.0, pred=lambda l: "RN4870 init ok after retry" in l)
@@ -104,8 +104,8 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
 
 
 def test_wedged_module_detected_and_restarted(base, link, log):  # noqa: F811
-    """B: modul, ktery uz pracoval a pak mlci (RST dole), se pozna podle 3 po sobe jdoucich timeoutu `$$$` -> BLE down (E ble:
-    jednou), po uvolneni RST ho 60s retry restartuje a nakonfiguruje (remote se znovu pripoji)."""
+    """B: a module that was already working and then goes silent (RST low) is recognized by 3 consecutive `$$$` timeouts -> BLE down (E ble:
+    once), after RST is released the 60 s retry restarts and configures it (the remote reconnects)."""
     base.write(base.sym("fault::_record"), bytes(dbg.FAULT_RECORD_SIZE))
     log, _ = reboot(link, log, base.reset, gone_within=3.0)
     boot(log)
@@ -115,7 +115,7 @@ def test_wedged_module_detected_and_restarted(base, link, log):  # noqa: F811
         holder.start()
         time.sleep(0.5)
         lines = []
-        # Tri po sobe jdouci timeouty `$$$` (modul v resetu neodpovi); kazdy trva ~1 s
+        # Three consecutive `$$$` timeouts (a module in reset does not answer); each takes ~1 s
         for _ in range(4):
             base.call('Bluetooth::queueCommand("Z")')
             lines += log.lines(2.5)
@@ -124,8 +124,8 @@ def test_wedged_module_detected_and_restarted(base, link, log):  # noqa: F811
         assert len(ble_e) == 1 and "not responding" in ble_e[0], (ble_e, [l for l in lines if "ble:" in l])
         assert len([l for l in lines if "$$$ timeout" in l]) >= 3
         assert not base.core_state()["halted"]
-        keepalive_rtt(link)  # USB bezi dal bez BLE
-        # Final review M1: mrtvy modul -> spojeni neplatí hned (ne az za 60 s), PC dostane NAK UNREACHABLE
+        keepalive_rtt(link)  # USB keeps running without BLE
+        # Final review M1: dead module -> the link stops being valid immediately (not only after 60 s), the PC gets NAK UNREACHABLE
         assert not base.read_bool("Bluetooth::_connected"), "link flags stale after the wedge"
         assert not base.read_bool("Bluetooth::_streamOpen")
         assert not base.read_bool("Bluetooth::_peerAccepted")

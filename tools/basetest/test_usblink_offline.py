@@ -7,7 +7,7 @@ from usblink import KeepaliveTracker, Link
 
 
 class FakeSerial:
-    """Minimalni serial: read() bere z fronty, write() si zaznamenava a umi simulovat base."""
+    """A minimal serial: read() takes from a queue, write() records and can simulate the base."""
 
     def __init__(self):
         self.rx = bytearray()
@@ -55,9 +55,9 @@ def test_tracker_fifo_and_expiry():
 def test_own_keepalive_ack_not_swallowed_while_bg_pending():
     f = FakeSerial()
     L = Link(ser=f)
-    L._ka_track.sent(True)  # bg keepalive vyslan, odpoved jeste neprisla
+    L._ka_track.sent(True)  # bg keepalive sent, the reply has not arrived yet
     L.send(proto.Packet(1, 2, 0, MT.KEEPALIVE))
-    f.feed(ka_ack(1) + ka_ack(2))  # base odpovida v poradi: bg, pak testovy
+    f.feed(ka_ack(1) + ka_ack(2))  # the base answers in order: bg, then the test one
     assert L.recv(0.5, lambda p: p.mtype == MT.KEEPALIVE_ACK).pid == 2
     assert L.recv(0.1) is None and L.keepalive_acks == 1
     L.close()
@@ -93,7 +93,7 @@ def test_thread_error_is_raised():
     f = FakeSerial()
     L = Link(ser=f)
     f.fail_write = True
-    f.feed(proto.encode(2, 1, 5, MT.KEEPALIVE))  # auto-ACK selze v reader vlakne
+    f.feed(proto.encode(2, 1, 5, MT.KEEPALIVE))  # the auto-ACK fails in the reader thread
     time.sleep(0.2)
     assert isinstance(L.error, OSError)
     try:

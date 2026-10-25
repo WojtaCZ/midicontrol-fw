@@ -1,4 +1,4 @@
-"""Base jako samostatny uzel pres USB-CDC: pakety adresovane Base se zpracuji lokalne."""
+"""The base as a standalone node over USB-CDC: packets addressed to the Base are handled locally."""
 
 import re
 
@@ -9,13 +9,13 @@ from proto import MT, NAK, Packet
 
 ADDR_PC, ADDR_BASE = proto.ADDR_PC, proto.ADDR_BASE
 
-# GUI::mainItems[2] (checkbox napajeni): velikost ui::MenuItem a offset checked_ z DWARF (build s -g, viz README). Bez DWARF nejde pole struktury cist jinak.
+# GUI::mainItems[2] (power checkbox): the size of ui::MenuItem and the offset of checked_ from DWARF (build with -g, see README). Without DWARF a struct field cannot be read any other way.
 MENUITEM_SIZE, MENUITEM_CHECKED = 24, 0x14
 
 
 @pytest.fixture
 def quiet(link):
-    """Bez pozadovych keepalive (nepocitaji se do ACK ani ticha); na konci se obnovi."""
+    """Without background keepalives (they count neither toward ACKs nor toward silence); restored at the end."""
     link.pause_keepalive(True)
     link.drain()
     try:
@@ -51,7 +51,7 @@ def test_get_status(quiet, base):
     ble, current, display, pc_alive = resp.payload
     assert pc_alive == 1
     assert ble in (before, after)
-    # STATUS_RESP se potvrzuje, jinak by ho base 3x opakovala a rusila by dalsi testy
+    # STATUS_RESP is acknowledged, otherwise the base would repeat it 3x and disturb the other tests
     quiet.send(Packet(ADDR_PC, ADDR_BASE, 0, MT.ACK, bytes([resp.pid])))
     assert quiet.expect_silence(0.7) == []
 
@@ -77,10 +77,10 @@ def test_unknown_type_nak(quiet):
 
 
 def test_duplicate_pid_executed_once(quiet, base):
-    # Duplicitni pid se jen znovu potvrdi. Dukaz "provedeno jednou": druhy rámec ma STEJNY pid, ale JINY
-    # obsah ([0] misto [1]). Kdyby ho base provedla, pin PA4 by spadl na 0; dedup ho nechá na 1.
-    # (Rozdilny pid mezi nimi by dedup neuplatnil, proto pid dodavame sami pres send_raw.)
-    quiet.send_msg(MT.SET_CURRENT, b"\x00")  # znamy vychozi stav, jiny pid nez DUP
+    # A duplicate pid is only acknowledged again. Proof of "executed once": the second frame has the SAME pid but DIFFERENT
+    # content ([0] instead of [1]). If the base executed it, pin PA4 would drop to 0; dedup leaves it at 1.
+    # (A different pid between them would not trigger dedup, hence we supply the pid ourselves via send_raw.)
+    quiet.send_msg(MT.SET_CURRENT, b"\x00")  # known initial state, a pid other than DUP
     assert quiet.recv(1.0, is_reply(MT.ACK)) is not None
     assert base.gpio("A", 4) == 0
     DUP = 0xC3
@@ -88,8 +88,8 @@ def test_duplicate_pid_executed_once(quiet, base):
     assert quiet.recv(1.0, is_reply(MT.ACK, DUP)) is not None
     assert base.gpio("A", 4) == 1
     quiet.send_raw(proto.encode(ADDR_PC, ADDR_BASE, DUP, MT.SET_CURRENT, b"\x00"))
-    assert quiet.recv(1.0, is_reply(MT.ACK, DUP)) is not None  # druhy ACK
-    assert base.gpio("A", 4) == 1  # nebylo provedeno
+    assert quiet.recv(1.0, is_reply(MT.ACK, DUP)) is not None  # second ACK
+    assert base.gpio("A", 4) == 1  # was not executed
     assert quiet.expect_silence(0.3) == []
     quiet.send_msg(MT.SET_CURRENT, b"\x00")
     assert quiet.recv(1.0, is_reply(MT.ACK)) is not None
@@ -101,10 +101,10 @@ def test_wrong_dest_ignored(quiet):
 
 
 def test_debug_log_not_truncated(base):
-    """Log v no-init RAM drzi uplne zpravy: znamy radek musi byt v logu doslovne a cely. Deterministicke radky:
-    "ble: cmd failed: C" (reconnect "C" bez bondu -> Err) a "ble: pairing timeout" (test_pairing.py). Od b52c8f7
-    "C" s bondem odpovida "Trying" a neloguje se, takze se spojenym remote radek nemusi vzniknout. Kazdy radek ma
-    format "[ssssss.mmm] L tag: text"; ring ma jen 1536 B, takze banner uz po jinych testech v RAM byt nemusi."""
+    """The log in no-init RAM holds complete messages: a known line must be in the log verbatim and whole. Deterministic lines:
+    "ble: cmd failed: C" (reconnect "C" without a bond -> Err) and "ble: pairing timeout" (test_pairing.py). Since b52c8f7
+    "C" with a bond answers "Trying" and is not logged, so with a linked remote the line need not appear. Every line has the
+    format "[ssssss.mmm] L tag: text"; the ring is only 1536 B, so the banner may no longer be in RAM after other tests."""
     lines = base.debug_log()
     assert lines
     bad = [l for l in lines if not re.match(r"^\[ *\d+\.\d{3}\] [EWID] [a-z]{1,6}: .{0,120}~?$", l)]
