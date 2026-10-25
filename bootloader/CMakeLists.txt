@@ -23,6 +23,9 @@ set(SOURCES
 	# Shared engine + the FW_UPDATE protocol receiver (writes internal flash).
 	${BOOTLIB_COMMON_SOURCES}
 
+	# Shared SH1106 progress display (boot::oled).
+	${BOOTLIB_OLED_SOURCES}
+
 	# Protocol codec/parser.
 	${REPO_ROOT}/lib/protocol/src/crc8.cpp
 	${REPO_ROOT}/lib/protocol/src/codec.cpp
@@ -63,6 +66,7 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/inc        # bootloader's CDC-only tusb_config.h (must precede app inc)
 	${CMAKE_CURRENT_SOURCE_DIR}/src
 	${BOOTLIB_INC}
+	${BOOTLIB_OLED_INC}
 	${REPO_ROOT}/lib
 	${REPO_ROOT}/lib/CMSIS_5/CMSIS/Core/Include
 	${REPO_ROOT}/lib/cmsis-device-g4/Include

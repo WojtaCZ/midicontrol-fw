@@ -20,6 +20,7 @@
 #include "boot/fw_receiver.hpp"
 #include "boot/image.hpp"
 #include "boot/wdg.hpp"
+#include "boot/oled.hpp"
 
 // Base USB bootloader. Stays resident when
 //   * the application set the backup-register magic before resetting (update
@@ -106,6 +107,31 @@ namespace {
 		}
 	}
 
+	// Hodiny a piny pro OLED (I2C1 na APB1, zdroj PCLK1 = HSI16 - odpovida TIMINGR nize).
+	// Cekani na napajeni panelu dela boot::oled::init sam.
+	void displayInit() {
+		using namespace stmcpp;
+		reg::set(std::ref(RCC->AHB2ENR), RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN);
+		reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_I2C1EN);
+		reg::change(std::ref(RCC->CCIPR), RCC_CCIPR_I2C1SEL_Msk, (0b00u << RCC_CCIPR_I2C1SEL_Pos));
+
+		gpio::pin<gpio::port::porta, 15> scl(gpio::mode::af4, gpio::otype::openDrain, gpio::speed::veryHigh, gpio::pull::pullUp);
+		gpio::pin<gpio::port::portb, 7> sda(gpio::mode::af4, gpio::otype::openDrain, gpio::speed::veryHigh, gpio::pull::pullUp);
+
+		boot::oled::init(0x10320309); // 400 kHz @ 16 MHz (RM0440)
+		boot::oled::show("Aktualizace", "Cekam na PC", 0);
+	}
+
+	void showProgress(const char *hint, uint8_t percent) {
+		boot::oled::show("Aktualizace", hint, percent);
+	}
+
+	uint8_t progressPercent() {
+		const uint32_t size = s_rx.expectedSize();
+		if (size == 0) return 0;
+		return static_cast<uint8_t>(static_cast<uint64_t>(s_rx.received()) * 100u / size);
+	}
+
 	void onPacket(const protocol::Packet &in) {
 		protocol::Packet out;
 		bool hasOut = false;
@@ -113,6 +139,15 @@ namespace {
 		if (action == boot::FwReceiver::Action::None) return;
 		if (hasOut) sendPacket(out);
 		if (s_rx.takeStatus(out)) sendPacket(out); // FW_UPDATE_STATUS after the ACK/NAK
+
+		// Display after the replies (the redraw must not delay the ACK); show() writes only changed pages.
+		if (action == boot::FwReceiver::Action::Failed) {
+			showProgress("Chyba, opakujte", progressPercent());
+		} else if (action == boot::FwReceiver::Action::Apply) {
+			showProgress("Nevypinejte", 100);
+		} else if (s_rx.active()) {
+			showProgress("Nevypinejte", progressPercent());
+		}
 		if (action == boot::FwReceiver::Action::Apply) s_applyRequested = true;
 	}
 
@@ -181,6 +216,8 @@ extern "C" int main(void) {
 	if (!stay && boot::appBootable(boot::image::kBoardBase)) {
 		boot::jumpToApp(boot::kAppBase);
 	}
+
+	displayInit(); // only on the resident path; a jump to a valid app stays fast and dark
 
 	// USB data pins (PA11 = D-, PA12 = D+).
 	stmcpp::gpio::pin<stmcpp::gpio::port::porta, 11> usb_dm(stmcpp::gpio::mode::input, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);

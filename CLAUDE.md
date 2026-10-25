@@ -39,6 +39,7 @@ Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-gene
 | Settings | last page, 0x0801F800 | 2 KB |
 
 `ENTER_BOOTLOADER` makes the app write a magic word to `TAMP->BKP0R` and reset into the bootloader.
+The bootloader shows the update on the OLED (title, hint and progress bar).
 
 ## Architecture
 
