@@ -21,6 +21,7 @@
 #include "protocol/parser.hpp"
 #include "protocol/codec.hpp"
 #include "protocol/constants.hpp"
+#include "boot/fw_progress.hpp"
 
 using namespace stmcpp::units;
 
@@ -43,6 +44,14 @@ namespace router {
 	// USB-CDC: parser příjmu a odesílací buffer (krátké zápisy do TinyUSB se dopisují v process())
 	static protocol::Parser _cdcParser;
 	static RingBuffer<uint8_t, 1024> _cdcTx;
+
+	// Průběh aktualizace Remote (FW_UPDATE_* přes Base): sleduje se jen pro obrazovku na OLED
+	static boot::FwProgress _remoteFw(protocol::ADDR_REMOTE);
+
+	// Milisekundy pro FwProgress (systick má rozlišení 1 ms; zalomení uint32_t je v trackeru ošetřeno)
+	static uint32_t nowMs() {
+		return static_cast<uint32_t>(stmcpp::systick::getDuration() / 1_ms);
+	}
 
 	// Dostupnost protistran
 	static duration _lastPcRx = 0_ms;
@@ -425,11 +434,13 @@ namespace router {
 			case protocol::ADDR_REMOTE:
 				if (via != Transport::USB_CDC) break; // Remote sám sobě — zahodit
 				observeSignal(pkt);                  // Base nekonzumuje, jen sleduje (OLED)
+				_remoteFw.observe(pkt, nowMs());     // PC -> Remote: START/DATA/END
 				forward(pkt, via);
 				break;
 
 			case protocol::ADDR_PC:
 				if (via != Transport::BLE) break;
+				_remoteFw.observe(pkt, nowMs());     // Remote -> PC: FW_UPDATE_STATUS
 				forward(pkt, via);
 				break;
 
@@ -460,6 +471,19 @@ namespace router {
 		}
 	}
 
+	// Obrazovka aktualizace Remote na OLED: tick (stall, zmizení výsledku) a překreslení při změně
+	static void updateFwScreen() {
+		_remoteFw.tick(nowMs());
+		if (!_remoteFw.takeChange()) return;
+		using State = boot::FwProgress::State;
+		switch (_remoteFw.state()) {
+			case State::Transfer: GUI::showFwProgress("Prenos do ovladace", _remoteFw.percent()); break;
+			case State::Done: GUI::showFwProgress("Instalace ovladace", _remoteFw.percent()); break;
+			case State::Failed: GUI::showFwProgress("Chyba aktualizace", _remoteFw.percent()); break;
+			case State::Idle: GUI::hideFwProgress(); break;
+		}
+	}
+
 	void process() {
 		// Příjem z USB-CDC
 		if (tud_cdc_available()) {
@@ -486,6 +510,7 @@ namespace router {
 		sendKeepaliveToRemote();
 		flushCdc();
 		logChanges();
+		updateFwScreen();
 
 		// Pending reboot into the USB bootloader (after the ACK has been flushed).
 		if (_enterBootloader && stmcpp::systick::getDuration() >= _enterBootloaderAt) {

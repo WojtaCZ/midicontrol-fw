@@ -50,6 +50,7 @@ set(SOURCES
 	${CMAKE_SOURCE_DIR}/lib/ui/src/paragraph_screen.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/number_screen.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/confirm_screen.cpp
+	${CMAKE_SOURCE_DIR}/lib/ui/src/progress.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/navigator.cpp
 
 	${CMAKE_SOURCE_DIR}/lib/protocol/src/crc8.cpp
@@ -130,6 +131,7 @@ ${CMAKE_SOURCE_DIR}/lib/stmcpp
 ${CMAKE_SOURCE_DIR}/lib/gfx/inc/
 ${CMAKE_SOURCE_DIR}/lib/ui/inc/
 ${CMAKE_SOURCE_DIR}/lib/protocol/inc/
+${CMAKE_SOURCE_DIR}/lib/bootloader/inc/
 
 )
 

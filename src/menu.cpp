@@ -9,6 +9,7 @@
 #include "settings.hpp"
 #include "router.hpp"
 
+#include <ui/progress_screen.hpp>
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
 #include <gfx/shapes.hpp>
@@ -214,6 +215,11 @@ static void onSongSelected(ui::MenuItem* item, void* userData) {
     // Pop song list — NowPlaying bude pushed existujícím PLAY_SONG handlerem
     nav.pop();
 }
+
+// ── Obrazovka aktualizace Remote (relay z PC) ──────────────────────────
+
+static ui::ProgressScreen fwProgressScreen("Aktualizace", "");
+static bool fwPushed = false; // obrazovka je ve stacku navigatoru (vzdy jako jediná nad hlavním menu)
 
 // ── Callbacks ─────────────────────────────────────────────────────────
 
@@ -474,6 +480,10 @@ void showNowPlaying(const char* songName) {
     _nowPlayingInfo[0] = '\0';
     _nowPlayingAnchor[0] = '\0';
 
+    // Pri aktualizaci Remote zustava nahore obrazovka s postupem; Now Playing se nepushuje
+    // (po aktualizaci se neukaze, dalsi SIGNAL_PLAYING ji zobrazi)
+    if (fwPushed) return;
+
     // Opakovaný SIGNAL_PLAYING jen aktualizuje obrazovku, nepřidává ji znovu na zásobník
     if (!_nowPlayingActive) {
         _nowPlayingActive = true;
@@ -491,6 +501,38 @@ void dismissNowPlaying() {
         }
         nav.forceRender();
     }
+}
+
+void showFwProgress(const char* hint, uint8_t percent) {
+    fwProgressScreen.setHint(hint);
+    fwProgressScreen.setPercent(percent);
+    if (!fwPushed) {
+        // Rozjety dotaz na seznam pisni a stavove flagy obrazovek, ktere reset stacku odstrani
+        _songListState = SongListState::Idle;
+        _loadingScreenShown = false;
+        songListTimeoutScheduler.stop();
+        songListDelayScheduler.stop();
+        _pairStatusShown = false;
+        _nowPlayingActive = false;
+        // Stack = hlavni menu + obrazovka aktualizace (zadny splash/podmenu pod ni)
+        nav.reset(&mainScreen);
+        nav.push(&fwProgressScreen);
+        fwPushed = true;
+    }
+    Oled::wakeupCallback();
+    nav.forceRender();
+}
+
+void hideFwProgress() {
+    if (!fwPushed) return;
+    fwPushed = false;
+    if (nav.current() == &fwProgressScreen) {
+        nav.pop();
+    } else {
+        nav.reset(&mainScreen); // nemelo by nastat: nad ni se nic nepushuje
+    }
+    Oled::wakeupCallback();
+    nav.forceRender();
 }
 
 void setNowPlayingAnchor(const char* label) {

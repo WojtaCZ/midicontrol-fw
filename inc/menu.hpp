@@ -40,6 +40,12 @@ namespace GUI {
     void showNowPlaying(const char* songName);
     void dismissNowPlaying();
 
+    // Aktualizace Remote relay-ovana pres Base: obrazovka s postupem; hint musi byt retezcovy literal (porovnava se ukazatel).
+    // Pri prvnim zobrazeni vyprazdni stack (hlavni menu + obrazovka); Now Playing a seznam pisni se po dobu aktualizace nepushuji.
+    void showFwProgress(const char* hint, uint8_t percent);
+    // Konec aktualizace: obrazovka se odebere ze stacku (zpet na hlavni menu)
+    void hideFwProgress();
+
     // Aktualizace info na "Now Playing" obrazovce (song/verse/letter z display::)
     void updateNowPlayingInfo();
 
