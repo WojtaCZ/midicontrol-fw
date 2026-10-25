@@ -35,7 +35,7 @@ Done and Failed screens on the apps disappear by themselves 10 s later; keys do 
 - Style: tabs (width 4), 160 columns, braces attached, `int *p`; comments in Czech in the firmware repos (midicontrol-fw, midicontroller-fw), English in midicontrol-bootloader (follow the file you are in).
 - C++: no exceptions, no heap, no RTTI. Bootloaders: blocking code is fine, every wait loop has a guard counter and `boot::wdg::kick()` where it can last > 100 ms.
 - Flash budgets: remote bootloader ≤ 16 KB (now 5.9 KB), base bootloader ≤ 32 KB (now 14.6 KB); report the new sizes.
-- SH1106 column address 0 (as both apps use), page addressing, I2C address 0x3C.
+- SH1106 column address 0 (as both apps use), page addressing, I2C address 0x3C. (superseded, see "Rulings after the bench" at the end).
 - Timeouts in `boot::FwProgress`: stall 20000 ms (> the PC's 15 s START wait), Done and Failed linger 10000 ms; wrap-safe `uint32_t` ms arithmetic.
 - Branch `fw-progress` in every repo touched (midicontrol-fw from `bl-robust`, the others from their current HEAD). Do not push. Leave unrelated dirty files (`.gitignore`, `inc/git.hpp`, `.claude/`, `.trail/`) out of commits.
 - Bench: back up the current flash to `../backups/` before flashing (ST-Link serials in midicontrol-fw/CLAUDE.md).
@@ -122,7 +122,7 @@ Done and Failed screens on the apps disappear by themselves 10 s later; keys do 
 - Produces (namespace `boot::oled`, I2C1 register-level, identical on G0/G4 — the caller has enabled the I2C1 clock, configured SCL/SDA and its kernel clock):
   - `uint8_t dirtyPages(const uint8_t *frame, const uint8_t *shown);` — bit p set when page p (128 bytes) differs. MCU-independent, host-tested.
   - `void init(uint32_t timingr);` — TIMINGR, PE, SH1106 init sequence (copy of the apps' sequence, display on), clears the panel.
-  - `void show(const char *title, const char *hint, uint8_t percent);` — `ui::drawProgress` into the internal 1 KB frame, then writes only the dirty pages (column 0) and updates the shadow copy.
+  - `void show(const char *title, const char *hint, uint8_t percent);` — `ui::drawProgress` into the internal 1 KB frame, then writes only the dirty pages (column 0) and updates the shadow copy. (superseded, see "Rulings after the bench" at the end).
   - `BOOTLIB_OLED_SOURCES` = `src/oled.cpp`, `../ui/src/progress.cpp`, `../gfx/src/font_7x10.cpp`; `BOOTLIB_OLED_INC` = `../ui/inc`, `../gfx/inc` (siblings in a firmware repo's `lib/`).
   - I2C writes: as the remote's old `bootoled::write` (AUTOEND, NBYTES ≤ 255, NACK → give up, guard counters) — a missing panel must never hang the bootloader.
 - [ ] **Step 1: Failing test** `DirtyPages`: identical buffers → 0; byte 0 differs → 0x01; byte 1023 → 0x80; bytes 300 and 700 → 0x24.
@@ -151,7 +151,7 @@ Done and Failed screens on the apps disappear by themselves 10 s later; keys do 
 **Interfaces:** Consumes `boot::oled`, `FwReceiver::active()/received()/expectedSize()`.
 
 - [ ] **Step 1:** `displayInit()`: GPIOA/GPIOB clocks, I2C1 clock (APB1ENR1), I2C1SEL = PCLK1 (reset value, 16 MHz HSI16), PA15 SCL + PB7 SDA AF4 open-drain pull-up, `boot::oled::init(0x10320309)` (400 kHz @ 16 MHz, RM0440 table). Call it once the bootloader decided to stay resident, before USB comes up; show `Cekam na PC`, 0 %.
-- [ ] **Step 2:** In `onPacket()`: after `handle()`, Failed → hint `Chyba, opakujte`; otherwise while `s_rx.active()` → hint `Nevypinejte`, percent `received*100/expectedSize` (64-bit); Apply → 100 % before the reset. `show()` is cheap when nothing changed (no dirty page), so calling it per packet is fine.
+- [ ] **Step 2:** In `onPacket()`: after `handle()`, Failed → hint `Chyba, opakujte`; otherwise while `s_rx.active()` → hint `Nevypinejte`, percent `received*100/expectedSize` (64-bit); Apply → 100 % before the reset. `show()` is cheap when nothing changed (no dirty page), so calling it per packet is fine. (superseded, see "Rulings after the bench" at the end).
 - [ ] **Step 3:** `cd midicontrol-fw && mcu build` → builds; bootloader text < 32768, record the size.
 - [ ] **Step 4:** Commit in midicontrol-fw: "Bootloader: progress bar on the OLED during a USB update".
 
@@ -184,3 +184,12 @@ Done and Failed screens on the apps disappear by themselves 10 s later; keys do 
 - [ ] **Step 2:** Base update over USB with the PC updater (`midicontrolpy-sw`); while it runs, read the base bootloader's frame buffer over SWD (openocd `read_memory`, symbol from `base-bootloader.map`) at least twice and render it as ASCII: expect title, frame and a growing fill; the app comes back afterwards.
 - [ ] **Step 3:** Remote update through the base; sample the base app frame buffer (`frameBuffer`) and the remote app framebuffer the same way during the transfer; capture the remote I2C (LA CH5/CH6) across the reboot to confirm the bootloader writes pages 3/4 during the copy.
 - [ ] **Step 4:** Both boards end on the new app; report sizes, test output and what a person should still look at on the real panels.
+
+## Rulings after the bench (2026-10-25)
+
+These replace the stale statements above (Global Constraints "column address 0", Task 3 "dirty pages (column 0)", Task 5 "show() is cheap when nothing changed").
+
+- Column start is 2, not 0: the apps draw with `theme.displayOffsetX = 2` (130-column RAM), so the bootloader frame lands in RAM columns 6..125 like the apps' picture.
+- `boot::oled::show()` skips an unchanged title/hint/percent (title and hint compared as pointers, so literals), re-renders only the bar rows when just the percent changed, and writes only the changed column ranges of the changed pages. The first version redrew the full frame on every call (base update ~34 s, remote copy 13.1 s).
+- Measured on the bench after the fix: base transfer 21.6 -> 3.5 s, remote copy 13.1 -> 3.2 s.
+- Final review wave: `ui::kProgressBarY`/`kProgressBarH` exported and checked by a `static_assert` in `oled.cpp`; the base bootloader shows `Chyba, opakujte` when no FW packet arrives for ~20 s while a transfer is active (DWT->CYCCNT timer).

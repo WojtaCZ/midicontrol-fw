@@ -122,6 +122,18 @@ namespace {
 		boot::oled::show("Aktualizace", "Cekam na PC", 0);
 	}
 
+	// Casovac vypadku PC: SysTick v bootloaderu nebezi, tak DWT->CYCCNT (jadro zustava na HSI16 = 16 MHz,
+	// 20 s = 320 M taktu < 2^32). Rozdil uint32_t je odolny proti preteceni.
+	constexpr uint32_t kStallCycles = 20u * 16000000u;
+	uint32_t s_lastPacketCycles = 0;
+	bool s_stallShown = false;
+
+	void cycleCounterInit() {
+		CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+		DWT->CYCCNT = 0;
+		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+	}
+
 	void showProgress(const char *hint, uint8_t percent) {
 		boot::oled::show("Aktualizace", hint, percent);
 	}
@@ -137,6 +149,8 @@ namespace {
 		bool hasOut = false;
 		auto action = s_rx.handle(in, out, hasOut);
 		if (action == boot::FwReceiver::Action::None) return;
+		s_lastPacketCycles = DWT->CYCCNT;
+		s_stallShown = false;
 		if (hasOut) sendPacket(out);
 		if (s_rx.takeStatus(out)) sendPacket(out); // FW_UPDATE_STATUS after the ACK/NAK
 
@@ -217,6 +231,7 @@ extern "C" int main(void) {
 		boot::jumpToApp(boot::kAppBase);
 	}
 
+	cycleCounterInit();
 	displayInit(); // only on the resident path; a jump to a valid app stays fast and dark
 
 	// USB data pins (PA11 = D-, PA12 = D+).
@@ -239,6 +254,13 @@ extern "C" int main(void) {
 					onPacket(s_parser.getPacket());
 				}
 			}
+		}
+
+		// PC se odmlcel uprostred prenosu (kabel, zruseni): vyzvat k opakovani, ukazatel zustane.
+		// Dalsi paket se vrati na "Nevypinejte" v onPacket().
+		if (s_rx.active() && !s_stallShown && DWT->CYCCNT - s_lastPacketCycles > kStallCycles) {
+			s_stallShown = true;
+			showProgress("Chyba, opakujte", progressPercent());
 		}
 
 		if (s_applyRequested) {
