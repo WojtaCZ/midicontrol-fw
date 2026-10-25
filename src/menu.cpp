@@ -129,11 +129,26 @@ static ui::SplashScreen noPcScreen("Odpojeno", "", "Cekam na PC", onNoPcEnter);
 
 // Pushes the overlay when the main menu is on top without a PC, removes it when it is on top and the PC is back
 static void syncNoPcScreen() {
+    // Without a stored remote the overlay hides the main menu title hint, so it carries the hint itself
+    // (set only on a change: setComment marks the screen dirty and restarts the scroll)
+    static const char* noPcComment = nullptr;
+    const char* comment = settings::remoteAddr()[0] == '\0' ? "Sparuj ovladac" : "Cekam na PC";
+    if (comment != noPcComment) {
+        noPcComment = comment;
+        noPcScreen.setComment(comment);
+        Oled::wakeupCallback();
+    }
+
+    // The overlay appearing or going away is a state change: wake the display so it is seen
     ui::Screen* cur = nav.current();
     if (!isPcAlive()) {
-        if (cur == &mainScreen) nav.push(&noPcScreen);
+        if (cur == &mainScreen) {
+            nav.push(&noPcScreen);
+            Oled::wakeupCallback();
+        }
     } else if (cur == &noPcScreen) {
         nav.pop();
+        Oled::wakeupCallback();
     }
 }
 

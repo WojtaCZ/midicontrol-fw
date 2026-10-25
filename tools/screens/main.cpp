@@ -181,6 +181,8 @@ int main(int argc, char **argv) {
 	snap("status_no_remote", "Main menu, remote not connected");
 	host::state.remoteAddr = "";
 	snap("main_unpaired", "Main menu, no remote paired yet");
+	host::state.pcAlive = false;
+	snap("no_pc_unpaired", "PC not connected, no remote paired yet: the overlay carries the hint");
 
 	ex.writeSheet();
 	ex.writeIndex("MIDIControl base - screens");
