@@ -44,6 +44,10 @@ add_custom_target(git_header
     COMMAND date -u +%s| tr -d \'\\n\' >> ${GIT_PATH}
     COMMAND echo \'\;\' >> ${GIT_PATH}
 
+    COMMAND echo -n \'    static constexpr bool dirty = \' >> ${GIT_PATH}
+    COMMAND sh -c \"git status --short --untracked-files=no | grep -q . && echo -n true || echo -n false\" >> ${GIT_PATH}
+    COMMAND echo \'\;\' >> ${GIT_PATH}
+
     COMMAND echo \'}\' >> ${GIT_PATH}
     
 )

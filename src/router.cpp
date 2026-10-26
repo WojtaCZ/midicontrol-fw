@@ -6,10 +6,15 @@
 #include "led.hpp"
 #include "ringbuffer.hpp"
 #include "debug.hpp"
+#include "fault.hpp"
+#include "git.hpp"
+#include "resetcause.hpp"
+#include "settings.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
 #include <cmsis_compiler.h>
+#include <cstdio>
 #include <cstring>
 
 #include <tusb.h>
@@ -21,6 +26,7 @@
 #include "protocol/parser.hpp"
 #include "protocol/codec.hpp"
 #include "protocol/constants.hpp"
+#include "protocol/info.hpp"
 #include "boot/fw_progress.hpp"
 
 using namespace stmcpp::units;
@@ -293,6 +299,37 @@ namespace router {
 		}
 	}
 
+	// INFO_RESP payload (lib/protocol inc/protocol/info.hpp): firmware, uptime, reset cause, BLE and device state
+	static size_t buildInfo(uint8_t *buf, size_t cap) {
+		using namespace protocol::info;
+		Writer w(buf, cap);
+		char built[24];
+		snprintf(built, sizeof(built), "%s %s UTC", git::build_date.c_str(), git::build_time.c_str());
+		w.str(Tag::REVISION, git::revision.c_str(), 12);
+		w.str(Tag::BRANCH, git::branch.c_str(), 24);
+		w.str(Tag::BUILT, built);
+		w.u8(Tag::DIRTY, git::dirty ? 1 : 0);
+		w.u32(Tag::UPTIME_MS, stmcpp::systick::getTicks());
+		w.u8(Tag::RESET_CAUSE, static_cast<uint8_t>((resetcause::last() >> 24) & 0xFEU));
+		const fault::Record *f = fault::saved();
+		w.u8(Tag::FAULT_COUNT, f ? f->count : 0);
+		uint8_t ble = 0;
+		if (Bluetooth::isConnected()) ble |= BLE_CONNECTED;
+		if (Bluetooth::isStreamOpen()) ble |= BLE_STREAM_OPEN;
+		if (Bluetooth::isPeerAccepted()) ble |= BLE_SECURED;
+		if (Bluetooth::isBonded()) ble |= BLE_BONDED;
+		if (Bluetooth::isUp()) ble |= BLE_MODULE_UP;
+		if (isRemoteAlive()) ble |= BLE_PEER_ALIVE;
+		if (isPcAlive()) ble |= BLE_PC_ALIVE;
+		w.u8(Tag::BLE_FLAGS, ble);
+		w.str(Tag::BLE_PEER, settings::remoteAddr(), 12);
+		w.str(Tag::BLE_NAME, Bluetooth::name());
+		w.u8(Tag::BLE_PAIRING, static_cast<uint8_t>(Bluetooth::pairingState()));
+		w.u8(Tag::DISPLAY, display::isConnected() ? 1 : 0);
+		w.u8(Tag::SSR, base::current::isEnabled() ? 1 : 0);
+		return w.len();
+	}
+
 	// ── Local handling of packets for the Base ─────────────────────────────
 
 	static void handleLocal(const Packet &pkt, Transport via) {
@@ -331,6 +368,16 @@ namespace router {
 				resp.payload[3] = static_cast<uint8_t>(isPcAlive());
 				resp.payloadLen = 4;
 				sendReliable(resp); // The response is acknowledged too
+				break;
+			}
+
+			case MsgType::GET_INFO: {
+				if (ack) sendAck(pkt, via);
+				Packet resp = {};
+				resp.dest = pkt.source;
+				resp.msgType = MsgType::INFO_RESP;
+				resp.payloadLen = static_cast<uint8_t>(buildInfo(resp.payload, sizeof(resp.payload)));
+				sendReliable(resp); // acknowledged like STATUS_RESP
 				break;
 			}
 
