@@ -25,4 +25,21 @@ namespace blestatus {
 		return true;
 	}
 
+	Health health(bool starting, bool configured, bool resetOk, unsigned long rxBytes) {
+		if (configured) return resetOk ? Health::OK : Health::OK_NO_RESET;
+		if (starting) return Health::STARTING;
+		return rxBytes > 0 ? Health::NO_REPLY : Health::SILENT;
+	}
+
+	const char *healthText(Health h) {
+		switch (h) {
+			case Health::STARTING:    return "Modul: start...";
+			case Health::OK:          return "Modul: OK";
+			case Health::OK_NO_RESET: return "Modul: OK, bez RST";
+			case Health::NO_REPLY:    return "Modul: neodpovida";
+			case Health::SILENT:      return "Modul: mlci";
+		}
+		return "Modul: ?";
+	}
+
 }

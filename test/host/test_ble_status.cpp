@@ -2,6 +2,7 @@
 // RNBD350 strings are from the bench capture of 2026-11-04 (remote module 40:84:32:04:62:5F).
 #include <gtest/gtest.h>
 #include "ble_status.hpp"
+#include <cstring>
 
 using namespace blestatus;
 
@@ -61,4 +62,36 @@ TEST(BleStatusConnect, TruncatesToBuffer) {
 	int type = -1;
 	ASSERT_TRUE(parseConnect("CONNECT,0,10B1DF04F934,0072", type, mac, sizeof(mac)));
 	EXPECT_STREQ(mac, "10B1");
+}
+
+// Module self-test shown on the Bluetooth info page (bench check without a probe after soldering)
+TEST(BleHealth, StartingWhileTheConfigurationRuns) {
+	EXPECT_EQ(health(true, false, false, 0), Health::STARTING);
+}
+
+TEST(BleHealth, OkWhenConfiguredAfterAResetPulse) {
+	EXPECT_EQ(health(false, true, true, 120), Health::OK);
+}
+
+TEST(BleHealth, ResetLineBrokenButCommandsWork) {
+	EXPECT_EQ(health(false, true, false, 120), Health::OK_NO_RESET);
+}
+
+TEST(BleHealth, ModuleSendsButDoesNotAnswer) {
+	EXPECT_EQ(health(false, false, false, 59), Health::NO_REPLY);
+	EXPECT_EQ(health(false, false, true, 10), Health::NO_REPLY);
+}
+
+TEST(BleHealth, NothingEverReceived) {
+	EXPECT_EQ(health(false, false, false, 0), Health::SILENT);
+}
+
+TEST(BleHealth, TextsFitTheDisplayLine) {
+	for (Health h : {Health::STARTING, Health::OK, Health::OK_NO_RESET, Health::NO_REPLY, Health::SILENT}) {
+		const char *t = healthText(h);
+		ASSERT_NE(t, nullptr);
+		EXPECT_GT(strlen(t), 0u);
+		EXPECT_LE(strlen(t), 18u) << t; // 7x10 font: 18 characters per line
+	}
+	EXPECT_STREQ(healthText(Health::OK), "Modul: OK");
 }

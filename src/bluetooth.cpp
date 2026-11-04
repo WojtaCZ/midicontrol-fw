@@ -55,6 +55,9 @@ namespace Bluetooth{
 	static uint8_t _rxStatusIndex = 0;
 	static bool _receivingStatus = false;
 	static volatile bool _rebootSeen = false;
+	// Module self-test (Bluetooth info page): bytes received since power-on, %REBOOT% after the last RST pulse
+	[[gnu::used]] static volatile uint32_t _rxBytes = 0;
+	static bool _resetOk = false;
 
 	// Received protocol packets (filled by process())
 	static RingBuffer<protocol::Packet, 4> _rxPackets;
@@ -473,7 +476,8 @@ namespace Bluetooth{
 		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + REBOOT_TIMEOUT)){ wdg::kick(); }
 
 		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
-		if(command && command->getType() == Bluetooth::Command::Type::REBOOT){
+		_resetOk = command && command->getType() == Bluetooth::Command::Type::REBOOT;
+		if(_resetOk){
 			_mode = Mode::DATA;
 			return 0; // Successful init after reboot
 		}else return 1;
@@ -588,8 +592,10 @@ namespace Bluetooth{
 			_restartTimestamp = now;
 		} else if (_rebootSeen) {
 			_mode = Mode::DATA;
+			_resetOk = true;
 			_restartState = RestartState::SUCCEEDED;
 		} else if ((now - _restartTimestamp) > REBOOT_TIMEOUT) {
+			_resetOk = false;
 			_restartState = RestartState::FAILED;
 		}
 	}
@@ -615,6 +621,8 @@ namespace Bluetooth{
 	ConfigState configState() { return _configState; }
 	bool wedged() { return _dollarTimeouts >= WEDGED_TIMEOUTS; }
 	bool isUp() { return _moduleUp; }
+	bool resetConfirmed() { return _resetOk; }
+	uint32_t rxByteCount() { return _rxBytes; }
 	void setUp(bool up) { _moduleUp = up; }
 
 	bool isIdle() { return _engineState == EngineState::IDLE && _jobCount == 0 && _mode == Mode::DATA; }
@@ -707,6 +715,7 @@ namespace Bluetooth{
 
 		if(isr & USART_ISR_RXNE){
 			char c = static_cast<char>(USART2->RDR);
+			_rxBytes = _rxBytes + 1;
 			if (!_receivingStatus && c == STATUS_DELIMITER){
 				// Start of a status message
 				_receivingStatus = true;

@@ -543,16 +543,21 @@ static void bleFailed(uint16_t code, const char *what) {
 }
 
 // Start at boot (before USB): blocking init, then the configuration goes into the state machine
+// No %REBOOT% after the RST pulse: configure anyway. A module whose RST line is broken (bad joint) still works over UART,
+// and the Bluetooth info page tells the two faults apart ("Modul: OK, bez RST" vs "neodpovida" / "nic neposila").
 static void bleBootStart() {
-	if (Bluetooth::init()) {
-		bleFailed(fault::ERR_BLE_INIT, "init");
-		return;
-	}
+	if (Bluetooth::init()) Debug::log(Debug::Level::WARNING, "ble", "no %%REBOOT%% after reset, configuring anyway");
 	if (Bluetooth::configure()) {
-		bleFailed(fault::ERR_BLE_CONFIGURE, "configure");
+		bleFailed(Bluetooth::resetConfirmed() ? fault::ERR_BLE_CONFIGURE : fault::ERR_BLE_INIT, Bluetooth::resetConfirmed() ? "configure" : "init");
 		return;
 	}
 	_bleState = BleState::CONFIGURING;
+}
+
+// Configuration failed: "init" when the reset did not bring a %REBOOT% either (module silent), else "configure"
+static void bleConfigFailed() {
+	if (Bluetooth::resetConfirmed()) bleFailed(fault::ERR_BLE_CONFIGURE, "configure");
+	else bleFailed(fault::ERR_BLE_INIT, "init");
 }
 
 // Once per pass through the loop; nothing blocks
@@ -567,7 +572,7 @@ static void bleProcess() {
 				if (_bleWasDown) Debug::log(Debug::Level::INFO, "ble", "RN4870 init ok after retry");
 				_bleWasDown = false;
 			} else if (Bluetooth::configState() == CS::FAILED) {
-				bleFailed(fault::ERR_BLE_CONFIGURE, "configure");
+				bleConfigFailed();
 			}
 			break;
 		case BleState::READY:
@@ -585,8 +590,10 @@ static void bleProcess() {
 				if (Bluetooth::configure()) bleFailed(fault::ERR_BLE_CONFIGURE, "configure");
 				else _bleState = BleState::CONFIGURING;
 			} else if (Bluetooth::restartState() == RS::FAILED) {
+				// No %REBOOT%: configure anyway (see bleBootStart)
 				Bluetooth::restartAck();
-				bleFailed(fault::ERR_BLE_INIT, "init");
+				if (Bluetooth::configure()) bleFailed(fault::ERR_BLE_INIT, "init");
+				else _bleState = BleState::CONFIGURING;
 			}
 			break;
 	}

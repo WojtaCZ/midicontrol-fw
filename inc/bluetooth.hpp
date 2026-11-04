@@ -256,6 +256,10 @@ namespace Bluetooth{
     // The main loop reports whether BLE is usable (menu: pairing when BLE is down)
     bool isUp();
     void setUp(bool up);
+    // Module self-test (Bluetooth info page, logic/ble_status health()): %REBOOT% came after the last RST pulse
+    // (init() / restart()), and the number of bytes received from the module since power-on
+    bool resetConfirmed();
+    uint32_t rxByteCount();
 
     // Queues the module configuration (SN, SA, SR, SS, R,1). Non-blocking — performed by process().
     uint8_t configure();

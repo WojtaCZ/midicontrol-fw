@@ -6,6 +6,7 @@
 #include "git.hpp"
 #include "display.hpp"
 #include "bluetooth.hpp"
+#include "logic/ble_status.hpp"
 #include "settings.hpp"
 #include "router.hpp"
 
@@ -203,7 +204,9 @@ static bool setLine(char (&line)[40], const char* fmt, const char* value) {
 static void updateBluetoothInfo() {
     bool changed = false;
     const char* remote = settings::remoteAddr();
-    changed |= setLine(bleLine0, "%s", Bluetooth::name());
+    // Module self-test instead of the fixed name: after a re-solder the joints can be checked without a probe
+    bool starting = Bluetooth::configState() == Bluetooth::ConfigState::PENDING || Bluetooth::restartState() == Bluetooth::RestartState::RUNNING;
+    changed |= setLine(bleLine0, "%s", blestatus::healthText(blestatus::health(starting, Bluetooth::isUp(), Bluetooth::resetConfirmed(), Bluetooth::rxByteCount())));
     changed |= setLine(bleLine1, "Spojeni: %s", Bluetooth::isConnected() ? "Ano" : "Ne");
     changed |= setLine(bleLine2, "Sparovano: %s", Bluetooth::isPeerAccepted() ? "Ano" : "Ne");
     changed |= setLine(bleLine3, "Ovladac: %s", router::isRemoteAlive() ? "Ano" : "Ne");
