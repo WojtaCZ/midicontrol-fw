@@ -1,3 +1,17 @@
+# Native unit tests for the hardware-independent logic (src/logic), in their own build dir with no
+# toolchain file: cmake -S . -B build-host -G Ninja -DHOST_TESTS=ON && cmake --build build-host && ctest --test-dir build-host
+option(HOST_TESTS "Build native unit tests instead of firmware" OFF)
+if(HOST_TESTS)
+	cmake_minimum_required(VERSION 3.20)
+	project(midicontrol-fw-host-tests LANGUAGES CXX)
+	include(/opt/embedded/cmake/host-test.cmake)
+	add_host_test_suite(logic_tests
+		SOURCES    test/host/test_ble_status.cpp
+		UNDER_TEST src/logic/ble_status.cpp
+		INCLUDES   src/logic)
+	return()
+endif()
+
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 set(CMAKE_COLOR_MAKEFILE FALSE)
@@ -27,6 +41,7 @@ set(SOURCES
 	${SOURCE_BASE}/display.cpp
 	${SOURCE_BASE}/menu.cpp
 	${SOURCE_BASE}/bluetooth.cpp
+	${SOURCE_BASE}/logic/ble_status.cpp
 	${SOURCE_BASE}/led.cpp
 	${SOURCE_BASE}/midi.cpp
 	${SOURCE_BASE}/oled.cpp

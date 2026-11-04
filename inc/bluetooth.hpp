@@ -237,11 +237,11 @@ namespace Bluetooth{
     };
     
 
-    // USART2/DMA initialization and module reset. Blocking (max. DEFAULT_TIMEOUT), called only at startup
+    // USART2/DMA initialization and module reset. Blocking (%REBOOT% wait max. 3 s, the RNBD350 boot time is not specified), called only at startup
     // (before USB). Later module restarts are done by the non-blocking restart().
     uint8_t init(void);
 
-    // Non-blocking module restart via RST (RST low for 100 ms, then high, wait for %REBOOT% ≤ DEFAULT_TIMEOUT),
+    // Non-blocking module restart via RST (RST low for 100 ms, then high, wait for %REBOOT% ≤ 3 s),
     // performed by process(). Result: restartState() SUCCEEDED/FAILED, acknowledge with restartAck().
     enum class RestartState : uint8_t { IDLE, RUNNING, SUCCEEDED, FAILED };
     void restart();

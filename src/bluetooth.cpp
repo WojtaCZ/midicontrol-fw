@@ -3,6 +3,7 @@
 #include "debug.hpp"
 #include "led.hpp"
 #include "ringbuffer.hpp"
+#include "logic/ble_status.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -102,7 +103,7 @@ namespace Bluetooth{
 	static uint8_t _dollarTimeouts = 0; // consecutive "$$$" timeouts (module is silent)
 	static constexpr uint8_t WEDGED_TIMEOUTS = 3;
 
-	// Non-blocking module restart via RST (PA1, active low): RST low 100 ms → high → wait for %REBOOT% ≤ 1 s
+	// Non-blocking module restart via RST (PA1, active low): RST low 100 ms → high → wait for %REBOOT% ≤ REBOOT_TIMEOUT
 	static RestartState _restartState = RestartState::IDLE;
 	static duration _restartTimestamp = 0_ms;
 	static bool _restartRstHigh = false;
@@ -154,7 +155,7 @@ namespace Bluetooth{
 			_mode = Mode::COMMAND;
 		} else if (endsWith("AOK", 3)) {
 			_sawAok = true;
-		} else if (endsWith("ERR", 3)) {
+		} else if (endsWith("ERR", 3) || endsWith("Err", 3)) { // RNBD350 user guide: "Err"
 			_sawErr = true;
 		} else if (endsWith("END", 3)) {
 			_sawEnd = true;
@@ -292,30 +293,30 @@ namespace Bluetooth{
 	static std::unique_ptr<Command> _build_command_from_string(const char *rxCmd) {
 
 		// --- Simple (non-parameterized) commands ---
-		if      (!strcmp(rxCmd, "ADV_TIMEOUT"))      return make_unique<Command>(Command::Type::ADV_TIMEOUT);
-		else if (!strcmp(rxCmd, "BONDED"))           return make_unique<Command>(Command::Type::BONDED);
-		else if (!strcmp(rxCmd, "DISCONNECT"))       return make_unique<Command>(Command::Type::DISCONNECT);
-		else if (!strcmp(rxCmd, "ERR_CONNPARAM"))    return make_unique<Command>(Command::Type::ERR_CONNPARAM);
-		else if (!strcmp(rxCmd, "ERR_MEMORY"))       return make_unique<Command>(Command::Type::ERR_MEMORY);
-		else if (!strcmp(rxCmd, "ERR_READ"))         return make_unique<Command>(Command::Type::ERR_READ);
-		else if (!strcmp(rxCmd, "ERR_RMT_CMD"))      return make_unique<Command>(Command::Type::ERR_RMT_CMD);
-		else if (!strcmp(rxCmd, "ERR_SEC"))          return make_unique<Command>(Command::Type::ERR_SEC);
-		else if (!strcmp(rxCmd, "KEY_REQ"))          return make_unique<Command>(Command::Type::KEY_REQ);
-		else if (!strcmp(rxCmd, "PIO1H"))            return make_unique<Command>(Command::Type::PIO1H);
-		else if (!strcmp(rxCmd, "PIO1L"))            return make_unique<Command>(Command::Type::PIO1L);
-		else if (!strcmp(rxCmd, "PIO2H"))            return make_unique<Command>(Command::Type::PIO2H);
-		else if (!strcmp(rxCmd, "PIO2L"))            return make_unique<Command>(Command::Type::PIO2L);
-		else if (!strcmp(rxCmd, "PIO3H"))            return make_unique<Command>(Command::Type::PIO3H);
-		else if (!strcmp(rxCmd, "PIO3L"))            return make_unique<Command>(Command::Type::PIO3L);
-		else if (!strcmp(rxCmd, "RE_DISCV"))         return make_unique<Command>(Command::Type::RE_DISCV);
-		else if (!strcmp(rxCmd, "REBOOT"))           return make_unique<Command>(Command::Type::REBOOT);
-		else if (!strcmp(rxCmd, "RMT_CMD_OFF"))      return make_unique<Command>(Command::Type::RMT_CMD_OFF);
-		else if (!strcmp(rxCmd, "RMT_CMD_ON"))       return make_unique<Command>(Command::Type::RMT_CMD_ON);
-		else if (!strcmp(rxCmd, "SECURED"))          return make_unique<Command>(Command::Type::SECURED);
-		else if (!strcmp(rxCmd, "STREAM_OPEN"))      return make_unique<Command>(Command::Type::STREAM_OPEN);
-		else if (!strcmp(rxCmd, "TMR1"))             return make_unique<Command>(Command::Type::TMR1);
-		else if (!strcmp(rxCmd, "TMR2"))             return make_unique<Command>(Command::Type::TMR2);
-		else if (!strcmp(rxCmd, "TMR3"))             return make_unique<Command>(Command::Type::TMR3);
+		if (blestatus::isWord(rxCmd, "ADV_TIMEOUT")) return make_unique<Command>(Command::Type::ADV_TIMEOUT);
+		else if (blestatus::isWord(rxCmd, "BONDED")) return make_unique<Command>(Command::Type::BONDED);
+		else if (blestatus::isWord(rxCmd, "DISCONNECT")) return make_unique<Command>(Command::Type::DISCONNECT);
+		else if (blestatus::isWord(rxCmd, "ERR_CONNPARAM")) return make_unique<Command>(Command::Type::ERR_CONNPARAM);
+		else if (blestatus::isWord(rxCmd, "ERR_MEMORY")) return make_unique<Command>(Command::Type::ERR_MEMORY);
+		else if (blestatus::isWord(rxCmd, "ERR_READ")) return make_unique<Command>(Command::Type::ERR_READ);
+		else if (blestatus::isWord(rxCmd, "ERR_RMT_CMD")) return make_unique<Command>(Command::Type::ERR_RMT_CMD);
+		else if (blestatus::isWord(rxCmd, "ERR_SEC")) return make_unique<Command>(Command::Type::ERR_SEC);
+		else if (blestatus::isWord(rxCmd, "KEY_REQ")) return make_unique<Command>(Command::Type::KEY_REQ);
+		else if (blestatus::isWord(rxCmd, "PIO1H")) return make_unique<Command>(Command::Type::PIO1H);
+		else if (blestatus::isWord(rxCmd, "PIO1L")) return make_unique<Command>(Command::Type::PIO1L);
+		else if (blestatus::isWord(rxCmd, "PIO2H")) return make_unique<Command>(Command::Type::PIO2H);
+		else if (blestatus::isWord(rxCmd, "PIO2L")) return make_unique<Command>(Command::Type::PIO2L);
+		else if (blestatus::isWord(rxCmd, "PIO3H")) return make_unique<Command>(Command::Type::PIO3H);
+		else if (blestatus::isWord(rxCmd, "PIO3L")) return make_unique<Command>(Command::Type::PIO3L);
+		else if (blestatus::isWord(rxCmd, "RE_DISCV")) return make_unique<Command>(Command::Type::RE_DISCV);
+		else if (blestatus::isWord(rxCmd, "REBOOT")) return make_unique<Command>(Command::Type::REBOOT);
+		else if (blestatus::isWord(rxCmd, "RMT_CMD_OFF")) return make_unique<Command>(Command::Type::RMT_CMD_OFF);
+		else if (blestatus::isWord(rxCmd, "RMT_CMD_ON")) return make_unique<Command>(Command::Type::RMT_CMD_ON);
+		else if (blestatus::isWord(rxCmd, "SECURED")) return make_unique<Command>(Command::Type::SECURED);
+		else if (blestatus::isWord(rxCmd, "STREAM_OPEN")) return make_unique<Command>(Command::Type::STREAM_OPEN);
+		else if (blestatus::isWord(rxCmd, "TMR1")) return make_unique<Command>(Command::Type::TMR1);
+		else if (blestatus::isWord(rxCmd, "TMR2")) return make_unique<Command>(Command::Type::TMR2);
+		else if (blestatus::isWord(rxCmd, "TMR3")) return make_unique<Command>(Command::Type::TMR3);
 
 		// --- Parameterized messages ---
 		else if (strncmp(rxCmd, "CONN_PARAM,", 10) == 0) {
@@ -324,8 +325,9 @@ namespace Bluetooth{
 				return make_unique<ConnParamCommand>(interval, latency, timeout);
 		}
 		else if (strncmp(rxCmd, "CONNECT", 7) == 0) {
-			int connected; char addr[32];
-			if (sscanf(rxCmd, "CONNECT,%d,%31[^%%]", &connected, addr) == 2)
+			// RN4870 CONNECT,<type>,<MAC>; RNBD350 CONNECT,<type>,<MAC>,<handle>: the MAC stops at the comma
+			int connected; char addr[13];
+			if (blestatus::parseConnect(rxCmd, connected, addr, sizeof(addr)))
 				return make_unique<ConnectCommand>(connected, addr);
 		}
 		else if (strncmp(rxCmd, "KEY:", 4) == 0) {
@@ -364,7 +366,7 @@ namespace Bluetooth{
 				return make_unique<WvCommand>(hdl, hex);
 		}
 
-		else if (!strcmp(rxCmd, "ERR_CONN")) return make_unique<Command>(Command::Type::ERR_CONN);
+		else if (blestatus::isWord(rxCmd, "ERR_CONN")) return make_unique<Command>(Command::Type::ERR_CONN);
 
 		// --- Scan results (F) ---
 		// Connectable:      <address 12 hex>,<type 0/1>,<name>,<UUID>,<RSSI hex>   (name and UUID may be empty)
@@ -467,7 +469,8 @@ namespace Bluetooth{
 		// One-time wait for %REBOOT% at startup (before the main loop starts)
 		duration timestamp = stmcpp::systick::getDuration();
 		// Up to ~1.1 s together with the 100 ms above: kick, otherwise the loop watchdog (1000 ms) would record LOOP_STALL
-		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + DEFAULT_TIMEOUT)){ wdg::kick(); }
+		// REBOOT_TIMEOUT, not DEFAULT_TIMEOUT: the RNBD350 boot time is not specified
+		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + REBOOT_TIMEOUT)){ wdg::kick(); }
 
 		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
 		if(command && command->getType() == Bluetooth::Command::Type::REBOOT){
@@ -586,7 +589,7 @@ namespace Bluetooth{
 		} else if (_rebootSeen) {
 			_mode = Mode::DATA;
 			_restartState = RestartState::SUCCEEDED;
-		} else if ((now - _restartTimestamp) > DEFAULT_TIMEOUT) {
+		} else if ((now - _restartTimestamp) > REBOOT_TIMEOUT) {
 			_restartState = RestartState::FAILED;
 		}
 	}
@@ -712,7 +715,7 @@ namespace Bluetooth{
 				// End of a status message → queue (no heap)
 				_rxStatus.text[_rxStatusIndex] = '\0';
 				_receivingStatus = false;
-				if (strcmp(_rxStatus.text, "REBOOT") == 0) _rebootSeen = true;
+				if (blestatus::isWord(_rxStatus.text, "REBOOT")) _rebootSeen = true;
 				if (!_statusQueue.push(_rxStatus)) Debug::logFromIsr(Debug::ISR_BLE_STATUS_OVERFLOW);
 				_rxStatusIndex = 0;
 			}else if (_receivingStatus){
