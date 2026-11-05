@@ -371,48 +371,19 @@ namespace Bluetooth{
 
 		else if (blestatus::isWord(rxCmd, "ERR_CONN")) return make_unique<Command>(Command::Type::ERR_CONN);
 
-		// --- Scan results (F) ---
-		// Connectable:      <address 12 hex>,<type 0/1>,<name>,<UUID>,<RSSI hex>   (name and UUID may be empty)
-		// Non-connectable:  <address 12 hex>,<type 0/1>,<RSSI hex>,Brcst:<data hex>
-		// On the bench e.g. "D88039FE5996,0,MIDIControlRemote,,F5" and "CAD46E49E827,1,AD,Brcst:07FF4C0012020001".
+		// --- Scan results (F): RN4870 and RNBD350 formats, blestatus::parseScan (host tests) ---
 		else {
-			const char *field[5] = {};
-			size_t fieldLen[5] = {};
-			uint8_t count = 0;
-			const char *p = rxCmd;
-			while (count < 5) {
-				const char *comma = (count < 4) ? strchr(p, ',') : nullptr;
-				field[count] = p;
-				fieldLen[count] = comma ? static_cast<size_t>(comma - p) : strlen(p);
-				count++;
-				if (!comma) break;
-				p = comma + 1;
-			}
-
-			auto isHex = [](const char *f, size_t len) {
-				if (len == 0) return false;
-				for (size_t i = 0; i < len; ++i) {
-					if (!isxdigit(static_cast<unsigned char>(f[i]))) return false;
-				}
-				return true;
-			};
-			auto toStr = [](const char *f, size_t len) { return std::string(f, len); };
-
-			bool addrOk = count >= 4 && fieldLen[0] == 12 && isHex(field[0], 12) && fieldLen[1] == 1 && (field[1][0] == '0' || field[1][0] == '1');
-			if (addrOk) {
-				int type = field[1][0] - '0';
-				if (count == 4 && strncmp(field[3], "Brcst:", 6) == 0 && isHex(field[2], fieldLen[2])) {
-					int rssi = static_cast<int8_t>(strtol(toStr(field[2], fieldLen[2]).c_str(), nullptr, 16));
-					return make_unique<AdvNonConnectableCommand>(toStr(field[0], 12), type, rssi, std::string(field[3] + 6));
-				}
-				if (count == 5 && isHex(field[4], fieldLen[4])) {
-					int rssi = static_cast<int8_t>(strtol(field[4], nullptr, 16));
-					return make_unique<AdvConnectableCommand>(toStr(field[0], 12), type, toStr(field[2], fieldLen[2]), toStr(field[3], fieldLen[3]), rssi);
-				}
+			blestatus::ScanResult scan;
+			if (blestatus::parseScan(rxCmd, scan)) {
+				std::string addr(scan.addr.p, scan.addr.len);
+				if (!scan.connectable) return make_unique<AdvNonConnectableCommand>(addr, scan.type, scan.rssi, std::string(scan.data.p, scan.data.len));
+				return make_unique<AdvConnectableCommand>(addr, scan.type, std::string(scan.name.p, scan.name.len),
+				                                          std::string(scan.uuids.p, scan.uuids.len), scan.rssi);
 			}
 		}
 
-		// If no match was found, return an 'UNKNOWN' command
+		// If no match was found, return an 'UNKNOWN' command; the raw text goes to the debug log (new module firmware formats)
+		Debug::log(Debug::Level::DEBUG, "ble", "status ?: %.60s", rxCmd);
 		return make_unique<Command>(Command::Type::UNKNOWN);
 	}
 

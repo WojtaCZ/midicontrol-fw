@@ -24,4 +24,29 @@ namespace blestatus {
 	Health health(bool starting, bool configured, bool resetOk, unsigned long rxBytes);
 	// One display line (at most 18 characters, 7x10 font)
 	const char *healthText(Health h);
+
+	// ── Scan results (F) ──
+	// A field of a status line: points into the parsed text, not NUL-terminated
+	struct ScanField {
+		const char *p = "";
+		size_t len = 0;
+	};
+	struct ScanResult {
+		ScanField addr{};   // 12 hex digits
+		int type = 0;     // address type, 0 public / 1 random (what C,<type>,<addr> takes)
+		bool connectable = false;
+		ScanField name{};   // connectable only, may be empty
+		ScanField uuids{};  // connectable only, may be empty
+		ScanField data{};   // non-connectable only: advertising data after "Brcst:"
+		int rssi = 0;     // dBm; informational only, nothing decides on it
+	};
+	// One advertisement reported by F. The fields are hex; the RSSI is a two's complement byte on the RN4870 and
+	// signed on the RNBD350 (sign and two hex digits, assumed hex like every other RN number; bench 2026-11-05).
+	//   RN4870  connectable      <addr>,<0|1>,<name>,<uuids>,<rssi>                 D88039FE5996,0,MIDIControlRemote,,F5
+	//           non-connectable  <addr>,<0|1>,<rssi>,Brcst:<data>                   CAD46E49E827,1,AD,Brcst:07FF4C0012020001
+	//   RNBD350 connectable      <addr>,<00|01>,<name>,<uuids>,<rssi>,<x>,<y>       40843204625F,00,MIDIControlRemote,FEDA,-35,01,00
+	//           non-connectable  <addr>,<00|01>,<rssi>,<x>,<y>,Brcst:<data>         8C79F5D3DE29,00,-59,01,00,Brcst:1BFF7500...
+	// The RNBD350 reports the advertisement and the scan response separately (the same address twice).
+	// false for any other text (status events etc.).
+	bool parseScan(const char *s, ScanResult &out);
 }
