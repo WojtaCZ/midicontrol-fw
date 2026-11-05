@@ -257,6 +257,10 @@ namespace Bluetooth{
 					_jobIndex++;
 					if (_jobIndex < _jobCount) {
 						_engineState = EngineState::SEND;
+					} else if (strcmp(_jobCommands[_jobIndex - 1], "F") == 0 && _sawProgress && !_sawErr) {
+						// A running scan keeps the RNBD350 in command mode: it answers neither "---" (no END, bench 2026-11-05)
+						// nor "$$$". Stay in command mode so the X and C queued after "remote found" go straight out.
+						_finishJobKeepQueued(_jobIndex);
 					} else {
 						// Return to data mode
 						_clearResponseFlags();
@@ -285,6 +289,7 @@ namespace Bluetooth{
 
 			case EngineState::EXIT_CMD:
 				if (_sawEnd || (now - _engineTimestamp) > EXIT_TIMEOUT) {
+					Debug::log(Debug::Level::DEBUG, "ble", "exit cmd: %s", _sawEnd ? "END" : "timeout");
 					_mode = Mode::DATA;
 					// Commands queued while waiting for END (e.g. X + C after advertising, B after %CONNECT%) → next session
 					_finishJobKeepQueued(_jobIndex);
