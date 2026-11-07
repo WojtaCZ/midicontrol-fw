@@ -33,6 +33,14 @@ namespace linkstats {
 		uint16_t lastReconnectMs = 0; // from the last loss to the next %STREAM_OPEN% (saturating)
 	};
 
+	// The three INFO_RESP link tags (protocol::info::Tag::LINK_RSSI / LINK_PARAMS / LINK_COUNTERS), 20 bytes with the TLV headers:
+	// the remote's payload is nearly full, so the values are packed (RSSI own + peer, latency / PHY as bytes, 8-bit counters)
+	struct InfoFields {
+		uint8_t rssi[2];     // i8 own, i8 peer; 0x80 unknown
+		uint8_t params[6];   // u16 interval, u16 timeout (little-endian), u8 latency, u8 tx << 4 | rx PHY
+		uint8_t counters[6]; // u8 losses, errConn, reboots, secureRetries; u16 last reconnect ms
+	};
+
 	struct Stats {
 		Counters c;
 		int8_t rssi = RSSI_UNKNOWN;
@@ -61,5 +69,7 @@ namespace linkstats {
 		bool onStatus(const char *s);
 		int8_t rssiNow(uint32_t nowMs) const;
 		int8_t peerRssiNow(uint32_t nowMs) const;
+		// live = a connection exists (otherwise the RSSI values read unknown)
+		InfoFields infoFields(uint32_t nowMs, bool live) const;
 	};
 }

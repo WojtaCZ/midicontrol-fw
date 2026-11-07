@@ -35,7 +35,7 @@ bond, `diag`/`status` round trip through the remote. NOT run, because the bench 
 
 ## BLE range / link tuning: still to verify (2026-11-07)
 
-Applied and verified on the bench: `SGA/SGC,0F` (module caps at +14 dBm), `ST` + per-connection `T` (20 ms / 0 / 2.5 s), Coded PHY S8 via `CSPHY` after `%SECURED%`, RSSI by `M` (hex), INFO_RESP tags 0x14-0x18 on both nodes, RSSI in KEEPALIVE/KEEPALIVE_ACK (`tools/basetest/test_link_stats.py`, `test_link_loss.py`).
+Applied and verified on the bench: `SGA/SGC,0F` (module caps at +14 dBm), `ST` + per-connection `T` (20 ms / 0 / 2.5 s), Coded PHY S8 via `CSPHY` after `%SECURED%`, RSSI by `M` (hex), INFO_RESP tags 0x14 / 0x15 / 0x17 on both nodes (packed, written last: the remote INFO payload is 122 of 128 bytes), RSSI in KEEPALIVE/KEEPALIVE_ACK (`tools/basetest/test_link_stats.py`, `test_link_loss.py`).
 
 - **Range itself is unverified**: the bench only shows the settings were applied and the RSSI plausible (-45 dBm at the bench). Walk the church with the remote and compare the Bluetooth page (signal, link losses, last reconnect) with the previous settings; if Coded S8 is a problem, S2 is `CSPHY,<h>,04,04,01`, 2M/1M is `03`.
 - Coded S8 slows the firmware relay (OTA) over BLE: time `test_ota` / an update from the PC against the old duration; the relay never runs the RSSI poll.

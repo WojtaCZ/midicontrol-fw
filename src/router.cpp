@@ -327,26 +327,15 @@ namespace router {
 		w.str(Tag::BLE_PEER, settings::remoteAddr(), 12);
 		w.str(Tag::BLE_NAME, Bluetooth::name());
 		w.u8(Tag::BLE_PAIRING, static_cast<uint8_t>(Bluetooth::pairingState()));
-		{
-			// Link quality (proposals 1-3 of the RNBD350 review): RSSI of the base, of the remote, live parameters, PHY, counters
-			const linkstats::Stats &ls = Bluetooth::linkStats();
-			uint32_t t = stmcpp::systick::getTicks();
-			bool live = Bluetooth::isConnected();
-			w.u8(Tag::LINK_RSSI, static_cast<uint8_t>(live ? ls.rssiNow(t) : linkstats::RSSI_UNKNOWN));
-			w.u8(Tag::LINK_PEER_RSSI, static_cast<uint8_t>(live ? ls.peerRssiNow(t) : linkstats::RSSI_UNKNOWN));
-			const uint16_t params[3] = {ls.params.interval, ls.params.latency, ls.params.timeout};
-			uint8_t pb[6];
-			for (int i = 0; i < 3; ++i) { pb[2 * i] = static_cast<uint8_t>(params[i]); pb[2 * i + 1] = static_cast<uint8_t>(params[i] >> 8); }
-			w.bytes(Tag::LINK_PARAMS, pb, sizeof(pb));
-			const uint8_t phy[2] = {ls.phyTx, ls.phyRx};
-			w.bytes(Tag::LINK_PHY, phy, sizeof(phy));
-			const uint16_t counters[5] = {ls.c.losses, ls.c.errConn, ls.c.reboots, ls.c.secureRetries, ls.c.lastReconnectMs};
-			uint8_t cb[10];
-			for (int i = 0; i < 5; ++i) { cb[2 * i] = static_cast<uint8_t>(counters[i]); cb[2 * i + 1] = static_cast<uint8_t>(counters[i] >> 8); }
-			w.bytes(Tag::LINK_COUNTERS, cb, sizeof(cb));
-		}
 		w.u8(Tag::DISPLAY, display::isConnected() ? 1 : 0);
 		w.u8(Tag::SSR, base::current::isEnabled() ? 1 : 0);
+		{
+			// Link quality last: the payload limit drops these before anything older (the remote's payload is nearly full)
+			const linkstats::InfoFields lf = Bluetooth::linkStats().infoFields(stmcpp::systick::getTicks(), Bluetooth::isConnected());
+			w.bytes(Tag::LINK_RSSI, lf.rssi, sizeof(lf.rssi));
+			w.bytes(Tag::LINK_PARAMS, lf.params, sizeof(lf.params));
+			w.bytes(Tag::LINK_COUNTERS, lf.counters, sizeof(lf.counters));
+		}
 		return w.len();
 	}
 

@@ -103,3 +103,29 @@ TEST(LinkStats, ConnectHandle) {
 	EXPECT_FALSE(connectHandle("CONNECT,0,10B1DF04F934", h, sizeof(h))); // RN4870, no handle
 	EXPECT_FALSE(connectHandle("DISCONNECT,0072", h, sizeof(h)));
 }
+
+TEST(LinkStats, InfoFieldsArePackedAndSaturate) {
+	Stats s;
+	s.setRssi(-45, 100);
+	s.setPeerRssi(-48, 100);
+	s.params = {16, 0, 250};
+	s.phyTx = 3;
+	s.phyRx = 3;
+	s.c.losses = 1000;
+	s.c.errConn = 2;
+	s.c.lastReconnectMs = 4107;
+	InfoFields f = s.infoFields(200, true);
+	EXPECT_EQ(static_cast<int8_t>(f.rssi[0]), -45);
+	EXPECT_EQ(static_cast<int8_t>(f.rssi[1]), -48);
+	EXPECT_EQ(f.params[0], 16);
+	EXPECT_EQ(f.params[1], 0);
+	EXPECT_EQ(f.params[2], 250);
+	EXPECT_EQ(f.params[4], 0);
+	EXPECT_EQ(f.params[5], 0x33);
+	EXPECT_EQ(f.counters[0], 255); // saturated
+	EXPECT_EQ(f.counters[1], 2);
+	EXPECT_EQ(f.counters[4] | (f.counters[5] << 8), 4107);
+	InfoFields down = s.infoFields(200, false);
+	EXPECT_EQ(static_cast<int8_t>(down.rssi[0]), RSSI_UNKNOWN);
+	EXPECT_EQ(static_cast<int8_t>(down.rssi[1]), RSSI_UNKNOWN);
+}

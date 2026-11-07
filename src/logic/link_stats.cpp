@@ -159,4 +159,24 @@ namespace linkstats {
 
 	int8_t Stats::rssiNow(uint32_t nowMs) const { return (rssiEver && nowMs - rssiAt <= RSSI_STALE_MS) ? rssi : RSSI_UNKNOWN; }
 	int8_t Stats::peerRssiNow(uint32_t nowMs) const { return (peerRssiEver && nowMs - peerRssiAt <= RSSI_STALE_MS) ? peerRssi : RSSI_UNKNOWN; }
+
+	InfoFields Stats::infoFields(uint32_t nowMs, bool live) const {
+		auto sat8 = [](uint16_t v) { return static_cast<uint8_t>(v > 255 ? 255 : v); };
+		InfoFields f{};
+		f.rssi[0] = static_cast<uint8_t>(live ? rssiNow(nowMs) : RSSI_UNKNOWN);
+		f.rssi[1] = static_cast<uint8_t>(live ? peerRssiNow(nowMs) : RSSI_UNKNOWN);
+		f.params[0] = static_cast<uint8_t>(params.interval);
+		f.params[1] = static_cast<uint8_t>(params.interval >> 8);
+		f.params[2] = static_cast<uint8_t>(params.timeout);
+		f.params[3] = static_cast<uint8_t>(params.timeout >> 8);
+		f.params[4] = sat8(params.latency);
+		f.params[5] = static_cast<uint8_t>(((phyTx & 0x0F) << 4) | (phyRx & 0x0F));
+		f.counters[0] = sat8(c.losses);
+		f.counters[1] = sat8(c.errConn);
+		f.counters[2] = sat8(c.reboots);
+		f.counters[3] = sat8(c.secureRetries);
+		f.counters[4] = static_cast<uint8_t>(c.lastReconnectMs);
+		f.counters[5] = static_cast<uint8_t>(c.lastReconnectMs >> 8);
+		return f;
+	}
 }
