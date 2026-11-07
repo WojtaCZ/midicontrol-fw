@@ -100,6 +100,9 @@ namespace Bluetooth{
 	// ── Non-blocking command mode state machine ──────────────────────────
 	static constexpr uint8_t MAX_JOB_COMMANDS = 10; // the configuration job alone is 8 commands
 	static constexpr uint8_t MAX_COMMAND_LEN = 32;
+	static constexpr uint8_t MAX_LINE_LEN = 96; // CE (connect on 1M and Coded) is 81 characters; job slots stay small (RAM)
+	static char _ceLine[MAX_LINE_LEN];   // the CE line, queued as the token "@CE"
+	static constexpr char CE_TOKEN[] = "@CE";
 	static constexpr duration CMD_TIMEOUT = 1000_ms;
 	static constexpr duration EXIT_TIMEOUT = 500_ms;
 	static constexpr duration REBOOT_TIMEOUT = 3000_ms;
@@ -278,8 +281,8 @@ namespace Bluetooth{
 				break;
 
 			case EngineState::SEND: {
-				char line[MAX_COMMAND_LEN + 1];
-				const char *cmd = _jobCommands[_jobIndex];
+				char line[MAX_LINE_LEN + 1];
+				const char *cmd = strcmp(_jobCommands[_jobIndex], CE_TOKEN) == 0 ? _ceLine : _jobCommands[_jobIndex];
 				snprintf(line, sizeof(line), "%s\r", cmd);
 				_clearResponseFlags();
 				_rebootSeen = false;
@@ -532,11 +535,19 @@ namespace Bluetooth{
 		return 0;
 	}
 
-	uint8_t reconnect() {
+	// CE for both PHYs (see reconnect): 1M for a legacy advertiser, Coded for the remote's extended advertising
+	static void _formatConnect(char *out, size_t size, uint8_t addrType, const char *addr) {
+		snprintf(out, size, "CE,%u,%s,05,0060,0030,0010,0010,0000,00FA,0060,0030,0010,0010,0000,00FA", static_cast<unsigned>(addrType), addr);
+	}
+
+	uint8_t reconnect(const char *addr) {
 		if (_engineState != EngineState::IDLE || _jobCount != 0) return 1;
-		// Z: cancel a possible attempt in progress (ERR when none is running — harmless)
-		// C: connect to the last bonded device (the link is secured automatically)
-		static const char *const commands[] = {"Z", "C"};
+		// Z: cancel a possible attempt in progress (ERR when none is running, harmless)
+		// CE: connect to the stored remote on 1M (legacy advertising, pairing) and on the Coded PHY (extended advertising of the
+		//     remote, long range), each PHY with scan interval/window 60 ms / 30 ms and the same 20 ms / 0 / 2.5 s parameters as ST.
+		//     Unlike C it does not secure the link; B follows after %STREAM_OPEN% (main.cpp), as for every connection.
+		_formatConnect(_ceLine, sizeof(_ceLine), 0, addr);
+		const char *const commands[] = {"Z", CE_TOKEN};
 		return _queueJob(commands, 2) ? 0 : 1;
 	}
 
@@ -555,8 +566,9 @@ namespace Bluetooth{
 		if (isPairing()) return 1;
 		// If connected, disconnect first (K,1) — the Remote does not advertise while connected.
 		// Z: cancel a connection attempt in progress (auto-reconnect "C"), otherwise the module scans nothing.
-		// F: scan (results arrive as %...% even in data mode, each device once).
-		static const char *const withDisconnect[] = {"K,1", "Z", "F"};
+		// FE: scan on 1M and Coded (375 ms / 250 ms, no filter; the remote advertises on Coded only; results arrive as %...% even
+		//     in data mode, each device once).
+		static const char *const withDisconnect[] = {"K,1", "Z", "FE,01E0,0190,03,00"};
 		const char *const *commands = _connected ? withDisconnect : withDisconnect + 1;
 		uint8_t count = _connected ? 3 : 2;
 		if (!_queueJob(commands, count)) return 1;
@@ -575,9 +587,9 @@ namespace Bluetooth{
 	bool connectTo(uint8_t addrType, const char *addr) {
 		strncpy(_connectAddr, addr, sizeof(_connectAddr) - 1);
 		_connectAddr[sizeof(_connectAddr) - 1] = '\0';
-		char cmd[MAX_COMMAND_LEN];
-		snprintf(cmd, sizeof(cmd), "C,%u,%s", static_cast<unsigned>(addrType), addr);
-		return queueCommand(cmd);
+		// The line is built now and read when the job runs (a queued X may still be ahead of it)
+		_formatConnect(_ceLine, sizeof(_ceLine), addrType, addr);
+		return queueCommand(CE_TOKEN);
 	}
 
 	PairingState pairingState() { return _pairingState; }

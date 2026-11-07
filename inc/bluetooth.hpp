@@ -267,8 +267,8 @@ namespace Bluetooth{
     // Queues the module configuration (SN, SA, SR, SS, R,1). Non-blocking — performed by process().
     uint8_t configure();
 
-    // Queues an attempt to connect to the last bonded device (Z + C). Non-blocking.
-    uint8_t reconnect();
+    // Queues an attempt to connect to the last bonded device (Z + CE on 1M and Coded). Non-blocking.
+    uint8_t reconnect(const char *addr);
 
     // Main loop handler: parsing of received data, command-mode state machine.
     void process();

@@ -62,7 +62,12 @@ static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
 	Bluetooth::setPairingState(ok ? PS::DONE : PS::FAILED);
 	if (ok) {
 		Debug::log(Debug::Level::INFO, "ble", "pairing done, remote %s", Bluetooth::pendingConnectAddr());
-		_reconnectNeeded = false;
+		// A link that was created together with a new bond over the remote's Coded advertising goes silent after a few seconds
+		// (bench 2026-11-07: module link up, no frames either way; legacy advertising and every later reconnect are fine). Dropping
+		// it once and reconnecting with the stored bond is the path that is known to work, and proves the bond at the same time.
+		if (Bluetooth::isConnected() && !Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
+		_reconnectNeeded = true;
+		_lastReconnectAttempt = stmcpp::systick::getDuration();
 		// Store the remote's address permanently in the settings: only with it is the link secured after %CONNECT% (even after a base reset)
 		if (strcmp(settings::remoteAddr(), Bluetooth::pendingConnectAddr()) != 0) {
 			settings::setRemoteAddr(Bluetooth::pendingConnectAddr());
@@ -372,7 +377,7 @@ extern "C" int main(void) {
 			&& (stmcpp::systick::getDuration() - _lastReconnectAttempt) > RECONNECT_INTERVAL) {
 			_lastReconnectAttempt = stmcpp::systick::getDuration();
 			Debug::log(Debug::Level::DEBUG, "ble", "reconnect attempt");
-			Bluetooth::reconnect();
+			Bluetooth::reconnect(settings::remoteAddr());
 		}
 
 		while (Bluetooth::isCommandAvailable()) {
