@@ -143,6 +143,7 @@ static void secureWatchdog() {
 	_secureWatchSince = now;
 	if (_secureWatch == SecureWatch::WAIT_SECURE && _peerAddrMatched && Bluetooth::isStreamOpen()) {
 		_secureWatch = SecureWatch::WAIT_RETRY;
+		Bluetooth::linkStats().onSecureRetry();
 		if (Bluetooth::queueCommand("B")) {
 			Debug::log(Debug::Level::WARNING, "ble", "link not secured in 3 s, B again");
 			return;
@@ -151,6 +152,7 @@ static void secureWatchdog() {
 		Debug::log(Debug::Level::WARNING, "ble", "link not secured, B not queued, K,1");
 	} else {
 		_secureWatch = SecureWatch::WAIT_RETRY;
+		Bluetooth::linkStats().onSecureRetry();
 		Debug::log(Debug::Level::WARNING, "ble", "link not accepted, K,1");
 	}
 	// On failure (or when %DISCONNECT% does not arrive) K,1 is tried again after the next timeout
@@ -400,6 +402,22 @@ extern "C" int main(void) {
 					}
 					break;
 
+				case Bluetooth::Command::Type::CONN_PARAM: {
+					const linkstats::ConnParams &p = Bluetooth::linkStats().params;
+					Debug::log(Debug::Level::INFO, "ble", "conn params: interval %u.%02u ms, latency %u, timeout %u ms", static_cast<unsigned>(p.interval * 125 / 100),
+							   static_cast<unsigned>(p.interval * 125 % 100), static_cast<unsigned>(p.latency), static_cast<unsigned>(p.timeout * 10));
+					break;
+				}
+
+				case Bluetooth::Command::Type::PHY_UPDATED:
+					Debug::log(Debug::Level::INFO, "ble", "phy tx %u rx %u (1 = 1M, 2 = 2M, 3 = coded)", static_cast<unsigned>(Bluetooth::linkStats().phyTx),
+							   static_cast<unsigned>(Bluetooth::linkStats().phyRx));
+					break;
+
+				case Bluetooth::Command::Type::ERR_PHYUPDATE:
+					Debug::log(Debug::Level::WARNING, "ble", "phy update refused");
+					break;
+
 				case Bluetooth::Command::Type::BONDED:
 				case Bluetooth::Command::Type::SECURED:
 					Debug::log(Debug::Level::INFO, "ble", "%s", command->getType() == Bluetooth::Command::Type::BONDED ? "bonded" : "secured");
@@ -407,6 +425,8 @@ extern "C" int main(void) {
 					if (_peerAddrMatched && (pairing == PS::BONDING || !Bluetooth::isPairing())) {
 						Bluetooth::setBonded(true);
 						Bluetooth::setPeerAccepted();
+						// Long range: ask for Coded PHY S8 on this link (not remembered by the module, so on every connection)
+						if (!Bluetooth::requestCodedPhy()) Debug::log(Debug::Level::DEBUG, "ble", "coded PHY request not queued");
 						if (pairing == PS::BONDING) pairingFinished(true, pairing);
 					} else {
 						Debug::log(Debug::Level::WARNING, "ble", "secured link from unexpected peer, K,1");
@@ -434,6 +454,7 @@ extern "C" int main(void) {
 					_secureOnStreamOpen = false;
 					_peerAddrMatched = false;
 					Bluetooth::resetPeer();
+					Bluetooth::linkStats().onConnect();
 					Bluetooth::setConnected(true);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = false;
@@ -476,6 +497,7 @@ extern "C" int main(void) {
 
 				case Bluetooth::Command::Type::STREAM_OPEN:
 					Debug::log(Debug::Level::INFO, "ble", "stream open");
+					Bluetooth::linkStats().onStreamOpen(stmcpp::systick::getTicks());
 					Bluetooth::setConnected(true);
 					Bluetooth::setStreamOpen(true);
 					secureWatchArm();
@@ -503,7 +525,14 @@ extern "C" int main(void) {
 						Debug::log(Debug::Level::DEBUG, "ble", "connect attempt failed");
 						break;
 					}
-					Debug::log(Debug::Level::INFO, "ble", command->getType() == Bluetooth::Command::Type::ERR_CONN ? "link lost (ERR_CONN)" : "disconnect");
+					{
+						linkstats::Stats &ls = Bluetooth::linkStats();
+						bool errConn = command->getType() == Bluetooth::Command::Type::ERR_CONN;
+						Debug::log(Debug::Level::INFO, "ble", "%s, last rssi %d dBm, conn %u/%u/%u", errConn ? "link lost (ERR_CONN)" : "disconnect",
+								   static_cast<int>(ls.rssiNow(stmcpp::systick::getTicks())), static_cast<unsigned>(ls.params.interval),
+								   static_cast<unsigned>(ls.params.latency), static_cast<unsigned>(ls.params.timeout));
+						ls.onLost(errConn, stmcpp::systick::getTicks());
+					}
 					_secureOnStreamOpen = false;
 					_peerAddrMatched = false;
 					Bluetooth::setConnected(false);
@@ -521,7 +550,15 @@ extern "C" int main(void) {
 					break;
 
 				case Bluetooth::Command::Type::REBOOT:
-					Debug::log(Debug::Level::WARNING, "ble", "module reboot");
+					{
+						uint32_t since = 0;
+						if (Bluetooth::noteReboot(since)) {
+							// Not after our own R,1 / RST: brown-out or reset of the module itself (it would otherwise look like a lost link)
+							Debug::log(Debug::Level::WARNING, "ble", "module reboot (unexpected), %lu ms since the last one", static_cast<unsigned long>(since));
+						} else {
+							Debug::log(Debug::Level::WARNING, "ble", "module reboot");
+						}
+					}
 					_secureOnStreamOpen = false;
 					_peerAddrMatched = false;
 					Bluetooth::setConnected(false);

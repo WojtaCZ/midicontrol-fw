@@ -11,6 +11,7 @@
 #include "stmcpp/systick.hpp"
 #include "protocol/parser.hpp"
 #include "protocol/codec.hpp"
+#include "logic/link_stats.hpp"
 
 namespace Bluetooth{
 
@@ -92,7 +93,9 @@ namespace Bluetooth{
                 WV, // Received write request for characteristic handle
                 ADV_CONNECTABLE, // Received connectable advertisement
                 ADV_NON_CONNECTABLE, // Received non-connectable advertisement
-                ERR_CONN, // Connection attempt cancelled (Z) or failed
+				ERR_CONN, // Connection attempt cancelled (Z) or failed; while connected: the peer vanished (supervision timeout)
+				PHY_UPDATED, // %PHY_UPDATED,<handle>,<tx>,<rx>%
+				ERR_PHYUPDATE, // the PHY change was refused
                 UNKNOWN // Unrecognized message
             };
 
@@ -294,7 +297,14 @@ namespace Bluetooth{
     // SCANNING, CONNECTING or BONDING
     bool isPairing();
 
-    // true if the command-mode state machine is doing nothing and the module is in data mode
+	// Link quality: RSSI (polled with M), connection parameters (%CONN_PARAM%), PHY and counters, see logic/link_stats.hpp
+	linkstats::Stats &linkStats();
+	// Call on %REBOOT%: true when the module restarted by itself (not after our R,1 / RST). sinceLastMs = ms since the previous one.
+	bool noteReboot(uint32_t &sinceLastMs);
+	// Asks for Coded PHY S8 on the live connection (CSPHY); call once the link is secured. false: no handle or queue full
+	bool requestCodedPhy();
+
+	// true if the command-mode state machine is doing nothing and the module is in data mode
     bool isIdle();
 
     // Device name set with SN (shown in Nastaveni → Bluetooth)

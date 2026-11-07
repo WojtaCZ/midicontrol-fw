@@ -32,3 +32,13 @@ bond, `diag`/`status` round trip through the remote. NOT run, because the bench 
   merge and flash, check `rev` matches `git rev-parse --short HEAD`.
 - Replace the temporary `exit cmd: END/timeout` debug line in `src/bluetooth.cpp` if it is too chatty at debug level
   (it logs once per command-mode session).
+
+## BLE range / link tuning: still to verify (2026-11-07)
+
+Applied and verified on the bench: `SGA/SGC,0F` (module caps at +14 dBm), `ST` + per-connection `T` (20 ms / 0 / 2.5 s), Coded PHY S8 via `CSPHY` after `%SECURED%`, RSSI by `M` (hex), INFO_RESP tags 0x14-0x18 on both nodes, RSSI in KEEPALIVE/KEEPALIVE_ACK (`tools/basetest/test_link_stats.py`, `test_link_loss.py`).
+
+- **Range itself is unverified**: the bench only shows the settings were applied and the RSSI plausible (-45 dBm at the bench). Walk the church with the remote and compare the Bluetooth page (signal, link losses, last reconnect) with the previous settings; if Coded S8 is a problem, S2 is `CSPHY,<h>,04,04,01`, 2M/1M is `03`.
+- Coded S8 slows the firmware relay (OTA) over BLE: time `test_ota` / an update from the PC against the old duration; the relay never runs the RSSI poll.
+- A 1-2 s flip-flop (2M / 720 ms) after every stream open before the final Coded / 2.5 s state: the remote module re-proposes its defaults even with `ST` set in its config. Harmless, but see whether the remote can be silenced.
+- Charting of the RSSI (PC) is not built: the values are in `/api/status` fields (`link_rssi`, `link_peer_rssi`, ...) and on the Bluetooth page only.
+- Base side has no diag ring: an unexpected module `%REBOOT%` is a WARNING log line plus the counter (the remote writes diag records `BLE_MODULE_REBOOT` / `BLE_ERR_CONN`).

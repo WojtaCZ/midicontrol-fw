@@ -4,6 +4,7 @@
 #include "led.hpp"
 #include "ringbuffer.hpp"
 #include "logic/ble_status.hpp"
+#include "logic/link_stats.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -78,8 +79,23 @@ namespace Bluetooth{
 	// "Trying" (C) a "Scanning" (F): the module does not send the "CMD> " prompt after them, they are complete responses
 	static bool _sawProgress = false;
 
+	// ── Link quality (RSSI, connection parameters, PHY, counters) ─────────
+	// [[gnu::used]]: the bench tests read the counters through the debugger
+	[[gnu::used]] static linkstats::Stats _stats;
+	static char _connHandle[8] = "";          // handle of the live connection from %CONNECT% (RNBD350 only)
+	static char _lineBuf[8];                  // current text line of a command reply (for the reply to M)
+	static uint8_t _lineLen = 0;
+	static bool _lineOver = false;
+	static bool _rssiPending = false;         // the command in flight is M
+	static bool _rebootExpected = true;       // %REBOOT% after our own R,1 / RST (false: the module restarted by itself)
+	static duration _nextRssiPoll = 0_ms;
+	// Link parameters: interval 20 ms (min = max), latency 0, supervision timeout 2.5 s (0xFA x 10 ms); rule 5.3.4.3: 20 * 5 < 2500
+	static constexpr const char *LINK_PARAMS_COMMAND = "T,0010,0010,0000,00FA";
+	static constexpr duration RSSI_POLL_INTERVAL = 10000_ms;
+	static constexpr duration RSSI_POLL_QUIET = 300_ms; // no data from the remote for this long: a command session costs nothing
+
 	// ── Non-blocking command mode state machine ──────────────────────────
-	static constexpr uint8_t MAX_JOB_COMMANDS = 8;
+	static constexpr uint8_t MAX_JOB_COMMANDS = 10; // the configuration job alone is 8 commands
 	static constexpr uint8_t MAX_COMMAND_LEN = 32;
 	static constexpr duration CMD_TIMEOUT = 1000_ms;
 	static constexpr duration EXIT_TIMEOUT = 500_ms;
@@ -153,9 +169,30 @@ namespace Bluetooth{
 
 		auto endsWith = [](const char *suffix, size_t len) { return memcmp(_respWindow + sizeof(_respWindow) - len, suffix, len) == 0; };
 
+		// Text lines of replies (only the reply to M is evaluated: a bare "-35")
+		if (c == '\r' || c == '\n') {
+			if (_lineLen > 0) Debug::log(Debug::Level::DEBUG, "ble", "reply \"%s\"%s", _lineBuf, _lineOver ? "..." : "");
+			if (_rssiPending && _lineLen > 0 && !_lineOver) {
+				int8_t dbm;
+				if (linkstats::parseRssi(_lineBuf, dbm)) {
+					_stats.setRssi(dbm, stmcpp::systick::getTicks());
+					_rssiPending = false;
+				}
+			}
+			_lineLen = 0;
+			_lineOver = false;
+		} else if (_lineLen < sizeof(_lineBuf) - 1) {
+			_lineBuf[_lineLen++] = static_cast<char>(c);
+			_lineBuf[_lineLen] = '\0';
+		} else {
+			_lineOver = true;
+		}
+
 		if (endsWith("CMD> ", 5)) {
 			_sawPrompt = true;
 			_mode = Mode::COMMAND;
+			_lineLen = 0; // the reply starts after the prompt
+			_lineOver = false;
 		} else if (endsWith("AOK", 3)) {
 			_sawAok = true;
 		} else if (endsWith("ERR", 3) || endsWith("Err", 3)) { // RNBD350 user guide: "Err"
@@ -186,6 +223,7 @@ namespace Bluetooth{
 	}
 
 	static void _finishJob() {
+		_rssiPending = false;
 		_jobCount = 0;
 		_jobIndex = 0;
 		_engineState = EngineState::IDLE;
@@ -194,6 +232,7 @@ namespace Bluetooth{
 	// End of a command mode session: commands from index `keepFrom` (queued only during EXIT_CMD / WAIT_REBOOT, when
 	// the state machine no longer sends them) are moved to the start and executed by the next "$$$" session — they must not be lost.
 	static void _finishJobKeepQueued(uint8_t keepFrom) {
+		_rssiPending = false;
 		uint8_t remaining = (keepFrom < _jobCount) ? static_cast<uint8_t>(_jobCount - keepFrom) : 0;
 		for (uint8_t i = 0; i < remaining; ++i) {
 			memcpy(_jobCommands[i], _jobCommands[keepFrom + i], MAX_COMMAND_LEN);
@@ -242,6 +281,8 @@ namespace Bluetooth{
 				_clearResponseFlags();
 				_rebootSeen = false;
 				if (!_sendString(line)) break; // TX queue full, try next time
+				_rssiPending = (strcmp(cmd, "M") == 0);
+				if (strcmp(cmd, "R,1") == 0) _rebootExpected = true;
 				Debug::log(Debug::Level::DEBUG, "ble", "cmd %s", cmd);
 				_engineTimestamp = now;
 				_engineState = (strcmp(cmd, "R,1") == 0) ? EngineState::WAIT_REBOOT : EngineState::WAIT_RESP;
@@ -327,16 +368,22 @@ namespace Bluetooth{
 		else if (blestatus::isWord(rxCmd, "TMR3")) return make_unique<Command>(Command::Type::TMR3);
 
 		// --- Parameterized messages ---
-		else if (strncmp(rxCmd, "CONN_PARAM,", 10) == 0) {
-			int interval, latency, timeout;
-			if (sscanf(rxCmd, "CONN_PARAM,%d,%d,%d", &interval, &latency, &timeout) == 3)
-				return make_unique<ConnParamCommand>(interval, latency, timeout);
+		else if (strncmp(rxCmd, "CONN_PARAM,", 11) == 0) {
+			// The values are HEX (interval 1.25 ms, latency, timeout 10 ms); the old %d scan read "0048" as 48
+			if (_stats.onStatus(rxCmd))
+				return make_unique<ConnParamCommand>(_stats.params.interval, _stats.params.latency, _stats.params.timeout);
 		}
+		else if (strncmp(rxCmd, "PHY_UPDATED,", 12) == 0) {
+			if (_stats.onStatus(rxCmd)) return make_unique<Command>(Command::Type::PHY_UPDATED);
+		}
+		else if (blestatus::isWord(rxCmd, "ERR_PHYUPDATE")) return make_unique<Command>(Command::Type::ERR_PHYUPDATE);
 		else if (strncmp(rxCmd, "CONNECT", 7) == 0) {
 			// RN4870 CONNECT,<type>,<MAC>; RNBD350 CONNECT,<type>,<MAC>,<handle>: the MAC stops at the comma
 			int connected; char addr[13];
-			if (blestatus::parseConnect(rxCmd, connected, addr, sizeof(addr)))
+			if (blestatus::parseConnect(rxCmd, connected, addr, sizeof(addr))) {
+				if (!linkstats::connectHandle(rxCmd, _connHandle, sizeof(_connHandle))) _connHandle[0] = '\0';
 				return make_unique<ConnectCommand>(connected, addr);
+			}
 		}
 		else if (strncmp(rxCmd, "KEY:", 4) == 0) {
 			int key;
@@ -454,6 +501,7 @@ namespace Bluetooth{
 		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
 		_resetOk = command && command->getType() == Bluetooth::Command::Type::REBOOT;
 		if(_resetOk){
+			_rebootExpected = false; // this %REBOOT% was ours (RST pulse above)
 			_mode = Mode::DATA;
 			return 0; // Successful init after reboot
 		}else return 1;
@@ -471,7 +519,10 @@ namespace Bluetooth{
 		//          The "CMD> " prompt stays enabled, the state machine waits for it.
 		// SS,C0: Device Information + UART Transparent.
 		// R,1: restart so the changes take effect; after %REBOOT% the module is in data mode.
-		static const char *const commands[] = {NAME_COMMAND, "SA,2", "SR,0000", "SS,C0", "R,1"};
+		// SGA,0F / SGC,0F: maximum RF output power (+15 dBm EIRP) while advertising and connected (DS50003684B 5.3.1.4, default 0A / 0F)
+		// ST: initial connection parameters of the central (this module): 20 ms interval, no latency (latency would delay
+		//     notes), supervision timeout 2.5 s (default 720 ms drops the link in every fade; 5.3.4.1: 20 ms * 1.25 * 5 < timeout)
+		static const char *const commands[] = {NAME_COMMAND, "SA,2", "SR,0000", "SS,C0", "SGA,0F", "SGC,0F", "ST,0010,0010,0000,00FA", "R,1"};
 		if (!_queueJob(commands, sizeof(commands) / sizeof(commands[0]))) return 1;
 		_configJob = true;
 		_configState = ConfigState::PENDING;
@@ -530,6 +581,18 @@ namespace Bluetooth{
 	void setPairingState(PairingState state) { _pairingState = state; }
 	duration pairingElapsed() { return stmcpp::systick::getDuration() - _pairingStart; }
 
+	// RSSI of the live link (M) every 10 s while the link is accepted, the engine is idle and the remote has been quiet for a moment.
+	// M needs a "$$$" session, which interrupts the data stream for a few ms; during heavy traffic (firmware relay) it never runs.
+	static void _pollRssi() {
+		duration now = stmcpp::systick::getDuration();
+		if (now < _nextRssiPoll) return;
+		if (!_connected || !_streamOpen || !_peerAccepted || !isIdle()) return;
+		if ((now - _dataReceivedTimestamp) < RSSI_POLL_QUIET) return;
+		_nextRssiPoll = now + RSSI_POLL_INTERVAL;
+		const char *const commands[] = {"M"};
+		_queueJob(commands, 1);
+	}
+
 	// noinline: a safe place in the main loop for tests to halt at (dbg.Target.call)
 	[[gnu::noinline]] void process() {
 		uint8_t c;
@@ -555,6 +618,7 @@ namespace Bluetooth{
 
 		_runRestart();
 		_runEngine();
+		_pollRssi();
 	}
 
 	static void _runRestart() {
@@ -587,6 +651,7 @@ namespace Bluetooth{
 		_streamOpen = false;
 		_bonded = false;
 		resetPeer();
+		_rebootExpected = true;
 		GPIOA->BSRR = (1u << (1 + 16)); // RST low
 		_restartRstHigh = false;
 		_restartTimestamp = stmcpp::systick::getDuration();
@@ -600,6 +665,28 @@ namespace Bluetooth{
 	bool resetConfirmed() { return _resetOk; }
 	uint32_t rxByteCount() { return _rxBytes; }
 	void setUp(bool up) { _moduleUp = up; }
+
+	linkstats::Stats &linkStats() { return _stats; }
+
+	bool noteReboot(uint32_t &sinceLastMs) {
+		bool unexpected = !_rebootExpected;
+		_rebootExpected = false;
+		if (unexpected) sinceLastMs = _stats.onUnexpectedReboot(stmcpp::systick::getTicks());
+		return unexpected;
+	}
+
+	bool requestCodedPhy() {
+		if (_connHandle[0] == '\0') return false;
+		// CSPHY,<handle>,<tx bitmap>,<rx bitmap>,<option>: 04 = Coded PHY, option 02 = S8 (125 kbit/s, about +12 dB link budget over 1M).
+		// The preference is not kept: it is sent again for every connection. Answer: %PHY_UPDATED% or %ERR_PHYUPDATE%.
+		char cmd[MAX_COMMAND_LEN];
+		snprintf(cmd, sizeof(cmd), "CSPHY,%s,04,04,02", _connHandle);
+		bool ok = queueCommand(cmd);
+		// Connection parameters for THIS link (T is lost on reboot, so every connection): the module's initial ST values alone did not
+		// take effect on the bench (the link still ran 720 ms, the remote's default preference). The central accepts what it requests itself.
+		queueCommand(LINK_PARAMS_COMMAND);
+		return ok;
+	}
 
 	bool isIdle() { return _engineState == EngineState::IDLE && _jobCount == 0 && _mode == Mode::DATA; }
 
