@@ -91,7 +91,10 @@ namespace Bluetooth{
 	static duration _nextRssiPoll = 0_ms;
 	// Link parameters: interval 20 ms (min = max), latency 0, supervision timeout 2.5 s (0xFA x 10 ms); rule 5.3.4.3: 20 * 5 < 2500
 	static constexpr const char *LINK_PARAMS_COMMAND = "T,0010,0010,0000,00FA";
-	static constexpr duration RSSI_POLL_INTERVAL = 10000_ms;
+	// 7 s, not 10: the PC polls the remote's diagnostics every 10 s, and a poll that coincides gets NAK BUSY and backs off a whole tick
+	static constexpr duration RSSI_POLL_INTERVAL = 7000_ms;
+	// Bench switch (tools/basetest conftest sets it): the poll's `$$$` sessions would break tests that halt at an idle engine or capture the exact UART text
+	[[gnu::used]] static volatile uint8_t _rssiPollDisabled = 0;
 	static constexpr duration RSSI_POLL_QUIET = 300_ms; // no data from the remote for this long: a command session costs nothing
 
 	// ── Non-blocking command mode state machine ──────────────────────────
@@ -581,11 +584,11 @@ namespace Bluetooth{
 	void setPairingState(PairingState state) { _pairingState = state; }
 	duration pairingElapsed() { return stmcpp::systick::getDuration() - _pairingStart; }
 
-	// RSSI of the live link (M) every 10 s while the link is accepted, the engine is idle and the remote has been quiet for a moment.
+	// RSSI of the live link (M) every 7 s while the link is accepted, the engine is idle and the remote has been quiet for a moment.
 	// M needs a "$$$" session, which interrupts the data stream for a few ms; during heavy traffic (firmware relay) it never runs.
 	static void _pollRssi() {
 		duration now = stmcpp::systick::getDuration();
-		if (now < _nextRssiPoll) return;
+		if (now < _nextRssiPoll || _rssiPollDisabled) return;
 		if (!_connected || !_streamOpen || !_peerAccepted || !isIdle()) return;
 		if ((now - _dataReceivedTimestamp) < RSSI_POLL_QUIET) return;
 		_nextRssiPoll = now + RSSI_POLL_INTERVAL;

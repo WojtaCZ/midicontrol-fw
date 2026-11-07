@@ -29,6 +29,10 @@ def link():
 def base():
     import dbg
     t = dbg.Target("base")
+    try:  # the RSSI poll ($$$ ... M ... ---) every 7 s would break tests that halt at an idle engine or capture the exact UART text
+        t.write(t.sym("Bluetooth::_rssiPollDisabled"), b"\x01")
+    except Exception as e:  # older image: no flag (a base reset clears it; test_link_stats turns the poll on itself)
+        print(f"rssiPollDisabled not set: {e}")
     yield t
     t.stop()
 
@@ -39,6 +43,7 @@ def remote():
     t = dbg.Target("remote")
     try:  # the remote switches itself off after 20 min without a key press; a long suite must not be cut short
         t.write(t.sym("base::Power::autoOffDisabled"), b"\x01")
+        t.write(t.sym("Bluetooth::rssiPollDisabled"), b"\x01")  # the remote's RSSI session (11 s) would disturb command/data mode tests
     except Exception as e:  # older remote image without the flag, or no probe: tests that need the remote skip/fail on their own
         print(f"autoOffDisabled not set: {e}")
     yield t

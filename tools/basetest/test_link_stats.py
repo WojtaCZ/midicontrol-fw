@@ -32,8 +32,14 @@ def tlv(payload: bytes) -> dict:
 
 
 def info(link, dst):
-    link.send_msg(GET_INFO, dst=dst)
-    pkt = link.recv(4, lambda p: p.mtype == INFO_RESP and p.src == dst)
+    # The base drops a request whose packet id equals the last one it executed (duplicate detection), and every new process
+    # numbers its packets from 1: a second try gets a fresh id
+    pkt = None
+    for _ in range(3):
+        link.send_msg(GET_INFO, dst=dst)
+        pkt = link.recv(2.5, lambda p: p.mtype == INFO_RESP and p.src == dst)
+        if pkt is not None:
+            break
     assert pkt is not None, f"no INFO_RESP from {dst}"
     # INFO_RESP is a reliable message: without our ACK the node retransmits it 3 times, and the copies land in the next test
     link.send(Packet(proto.ADDR_PC, dst, 0, proto.MT.ACK, bytes([pkt.pid])))
@@ -41,10 +47,18 @@ def info(link, dst):
 
 
 @pytest.fixture(scope="module")
-def linked(link, base):
+def linked(link, base, remote):
+    # conftest switches the RSSI polls off for the other suites: these tests need them on (a base reset clears the flag anyway)
+    base.write(base.sym("Bluetooth::_rssiPollDisabled"), b"\x00")
+    remote.write(remote.sym("Bluetooth::rssiPollDisabled"), b"\x00")
     wait_until(lambda: remote_alive(base), 30, interval=0.5, what="remote alive")
     # the first RSSI poll comes within ~10 s of the secured link
-    wait_until(lambda: struct.unpack("2b", info(link, proto.ADDR_BASE).get(TAG_RSSI, b"\x80\x80"))[0] != UNKNOWN, 25, interval=1.0, what="base RSSI")
+    # the polls run every 7 s (base) and 11 s (remote)
+    for dst, name in ((proto.ADDR_BASE, "base"), (proto.ADDR_REMOTE, "remote")):
+        wait_until(lambda: struct.unpack("2b", info(link, dst).get(TAG_RSSI, b"\x80\x80"))[0] != UNKNOWN, 30, interval=1.0, what=f"{name} RSSI")
+    yield
+    base.write(base.sym("Bluetooth::_rssiPollDisabled"), b"\x01")
+    remote.write(remote.sym("Bluetooth::rssiPollDisabled"), b"\x01")
 
 
 @pytest.mark.parametrize("dst", [proto.ADDR_BASE, proto.ADDR_REMOTE])
