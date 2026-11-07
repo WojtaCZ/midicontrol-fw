@@ -17,7 +17,7 @@ from conftest import remote_alive, wait_until
 from proto import ADDR_BASE, ADDR_REMOTE, MT
 
 STRANGER = "10B1DF04F934"  # address of the PC's BT adapter
-REMOTE = "D88039FE5996"
+REMOTE = "40843204625F"
 BAUD = 115200
 
 

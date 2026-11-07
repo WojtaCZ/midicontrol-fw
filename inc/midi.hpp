@@ -11,6 +11,8 @@ namespace midi{
 
     // Main loop: DIN → USB and our own SysEx into TinyUSB (never from an interrupt)
     void process();
+    // All Notes Off + All Sound Off on every channel (DIN OUT), blocking ~35 ms; after a watchdog/fault reset
+    void sendStuckNoteCleanup();
 
     // Queues our own SysEx (USB-MIDI packets) for sending to the PC; it is sent whole and not interleaved
     // with DIN SysEx. Returns false when the previous one has not been sent yet.

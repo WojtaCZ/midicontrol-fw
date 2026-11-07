@@ -1,4 +1,5 @@
 #include "midi.hpp"
+#include "logic/recovery.hpp"
 #include "wdg.hpp"
 #include "base.hpp"
 #include "led.hpp"
@@ -48,6 +49,15 @@ namespace midi {
 		// Enable USART3
 		stmcpp::reg::set(std::ref(USART3->CR1), USART_CR1_UE); 
 
+	}
+
+	void sendStuckNoteCleanup() {
+		for (unsigned i = 0; i < recovery::cleanupMessageCount(); ++i) {
+			uint8_t m[3];
+			recovery::cleanupMessage(i, m);
+			uint8_t packet[4] = {MIDI_CIN_CONTROL_CHANGE, m[0], m[1], m[2]};
+			send(packet);
+		}
 	}
 
 	uint8_t messageSize(uint8_t messageType) {

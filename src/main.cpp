@@ -13,6 +13,7 @@
 #include "router.hpp"
 #include "fault.hpp"
 #include "wdg.hpp"
+#include "logic/recovery.hpp"
 
 #include <cstring>
 
@@ -257,6 +258,9 @@ extern "C" int main(void) {
 	// IWDG (~2 s) + loop watchdog (1000 ms) right after the clocks, before the blocking peripheral initialization
 	wdg::start();
 
+	// Stuck-note recovery (TODO): decided before the banner clears RCC->CSR and marks the fault record announced
+	const bool noteCleanup = recovery::needsNoteCleanup(RCC->CSR, fault::saved() != nullptr && !fault::announced());
+
 	// Initial log lines: firmware, revision, reset cause (this clears RCC->CSR), saved fault record.
 	// Before peripheral initialization: an initialization failure (signalError) is thus logged and recorded.
 	Debug::banner();
@@ -276,6 +280,12 @@ extern "C" int main(void) {
 	Oled::flush(500);
 	splashDismissScheduler.start();
 	midi::init();
+	// The SSR (organ power) pin is an output driven low from the static initialisation, so the organ's current source is off
+	// after every reset; on a watchdog/fault reset also silence notes the organ may still hold (before the PC can send anything)
+	if (noteCleanup) {
+		Debug::log(Debug::Level::WARNING, "sys", "reset after hang/fault: SSR off, All Notes Off sent");
+		midi::sendStuckNoteCleanup();
+	}
 
 	LED::init();
 	ledScheduler.start(); // Start the LED scheduler
@@ -485,7 +495,15 @@ extern "C" int main(void) {
 					break;
 
 				case Bluetooth::Command::Type::DISCONNECT:
-					Debug::log(Debug::Level::INFO, "ble", "disconnect");
+				case Bluetooth::Command::Type::ERR_CONN:
+					// RNBD350 bench 2026-11-07: when the peer vanishes (remote module reset or powered off) the module reports
+					// %ERR_CONN% and never %DISCONNECT%; without this the base stayed "connected" with a dead link forever.
+					// ERR_CONN while not connected is just a failed/cancelled connection attempt (Z, C timeout).
+					if (command->getType() == Bluetooth::Command::Type::ERR_CONN && !Bluetooth::isConnected()) {
+						Debug::log(Debug::Level::DEBUG, "ble", "connect attempt failed");
+						break;
+					}
+					Debug::log(Debug::Level::INFO, "ble", command->getType() == Bluetooth::Command::Type::ERR_CONN ? "link lost (ERR_CONN)" : "disconnect");
 					_secureOnStreamOpen = false;
 					_peerAddrMatched = false;
 					Bluetooth::setConnected(false);

@@ -13,7 +13,7 @@ import dbg
 import la
 from conftest import remote_alive, wait_until
 
-REMOTE_ADDR = "D88039FE5996"
+REMOTE_ADDR = "40843204625F"
 SETTINGS_ADDR = 0x0801F800
 BAUD = 115200
 LOG = os.environ.get("PAIRING_LOG", os.path.join(tempfile.gettempdir(), "basetest-pairing.log"))

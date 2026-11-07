@@ -136,6 +136,7 @@ def test_loop_stall_record(link, log, base):
         assert fn.startswith("fault::testSpin"), (hex(pc), fn)
         assert any(re.search(r"reset: .*SOFTWARE", l) for l in lines), lines
         assert not any("IWDG" in l for l in lines if "reset:" in l), lines
+        assert any("All Notes Off sent" in l for l in lines), lines  # stuck-note recovery after a loop stall
     finally:
         log.close()
 
@@ -148,6 +149,7 @@ def test_iwdg_reset(link, log, base):
         assert any(re.search(r"reset: .*IWDG", l) for l in lines), lines
         # With interrupts disabled SysTick does not run: no new record (E), at most an older one that was already announced (I)
         assert not [l for l in lines if " E fault: " in l], lines
+        assert any("All Notes Off sent" in l for l in lines), lines  # stuck-note recovery after an IWDG reset
     finally:
         log.close()
 

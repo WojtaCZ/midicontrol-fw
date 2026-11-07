@@ -1,15 +1,12 @@
 # TODO
 
-## Stuck base / stuck notes (watchdog)
+## Stuck base / stuck notes (watchdog) - done 2026-11-07, one check left
 
-- If the base firmware hangs, the organ can be left with notes stuck on.
-- Use a watchdog: on a hang the base resets, and on the way back up it must clear the
-  stuck notes, probably by switching off the organ's current source (power) and/or sending
-  All Notes Off / Note Off for all notes.
-- Make sure the outputs that drive the organ power go to a safe state during and after the reset.
-- Note: the base already has an IWDG (~2 s timeout, `src/wdg.cpp`). What is
-  missing is the stuck-note cleanup after a watchdog reset and checking that a reset really
-  fires in every way the base can get stuck.
+- Done: after an IWDG/WWDG reset or a fault reset the base sends All Sound Off + All Notes Off on all 16 DIN channels at boot
+  (`logic/recovery`, `midi::sendStuckNoteCleanup`); PA4 (SSR) is low after any reset (static GPIO init), so the organ's
+  current source is off. Hardware tests: `test_fault.py` (loop stall + IWDG, "All Notes Off sent" in the log).
+- Open: check on a real organ that the notes really stop (the DIN link was never verified on the bench) and that PA4 has a
+  pull-down on the board (before `current_enable` is configured the pin floats for a few ms after reset).
 
 ## RNBD350 migration: checks still to run on a full bench (open since 2026-11-05)
 
@@ -17,7 +14,7 @@ Verified by hand on 2026-11-05: pairing (F, X, C, bond, settings saved), reconne
 bond, `diag`/`status` round trip through the remote. NOT run, because the bench lacked the base ST-Link
 (AP access fails, only IDCODE reads) and the fx2lafw logic analyzer:
 
-- `tools/basetest` `pytest -m hw` (whole suite) against the RNBD350 base, remote ST-Link on.
+- `tools/basetest` `pytest -m hw`: ran 2026-11-07 (96 passed, 21 failed). Failures are not BLE regressions: no logic analyzer attached (test_display, test_relay LA tests, test_pairing/test_ble_security UART parts), remote DWARF ELF missing (`BASETEST_REMOTE_ELF`, KeyError `&GUI::mainScreen`, test_relay), `BASETEST_UPDATE_*` unset (test_ota), DIN dead (test_midi), `test_set_current_on_off` uses a stale menu index (power checkbox moved to Nastaveni), `test_log::test_positions_survive_uint32_wrap` gets a stray partial line `ype 0x01 len 1` in the `level d` reply (not analysed). Re-run with the analyzer and the -g remote ELF. Passing now: test_ble_down (window widened to 95 s), test_link_loss (new), test_fault, test_lifecycle, test_cdc_robust.
 - `test_pairing.py` and `test_ble_security.py`: `REMOTE_ADDR`/`REMOTE` is still the RN4870 address `D88039FE5996`
   (also in `src/logic/ble_status.hpp`); the RNBD350 remote is `40843204625F`. Expect failures until updated; the
   UART-level assertions (`$$$`, `A`, `%CONNECT%` text) may also need RNBD350 formats. Remaining RN4870 wording in

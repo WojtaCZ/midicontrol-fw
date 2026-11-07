@@ -37,6 +37,10 @@ def base():
 def remote():
     import dbg
     t = dbg.Target("remote")
+    try:  # the remote switches itself off after 20 min without a key press; a long suite must not be cut short
+        t.write(t.sym("base::Power::autoOffDisabled"), b"\x01")
+    except Exception as e:  # older remote image without the flag, or no probe: tests that need the remote skip/fail on their own
+        print(f"autoOffDisabled not set: {e}")
     yield t
     t.stop()
 

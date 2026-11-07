@@ -57,7 +57,7 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
         # >= 70 s with RST held: covers at least one 60 s retry (the module restart must be non-blocking). KEEPALIVE
         # is answered by router::process() from the main loop, so RTT = loop period (no USB/protocol freeze).
         rtts, missed = [], 0
-        t_end = time.monotonic() + 72.0
+        t_end = time.monotonic() + 95.0  # first failure ~17 s after boot (3 x $$$ timeout), retry 60 s later, then its own timeouts
         while time.monotonic() < t_end:
             t = time.monotonic()
             link.send_msg(MT.KEEPALIVE)

@@ -7,7 +7,7 @@ actions; the fx2lafw logic analyzer (`la.py`) checks the UARTs. Everything here 
 
 ## Bench
 
-- Base on ST-Link serial `39FF71064B43353943122243` (openocd gdb 3334, tcl 6668, telnet 6667).
+- Base on ST-Link serial `004200443335510C35383531` (openocd gdb 3334, tcl 6668, telnet 6667).
 - Remote on ST-Link serial `37FF70064E59313840161343` (gdb 3333, tcl 6666, telnet 6665), ON/OFF held.
 - Never run `st-info --probe` (resets and halts the core). Before a gdb `detach` send `monitor resume` (dbg.py does).
 - Only one openocd per probe; `dbg.Target` starts and stops its own - no other server may be running.
@@ -18,7 +18,7 @@ actions; the fx2lafw logic analyzer (`la.py`) checks the UARTs. Everything here 
 ```bash
 uv venv .venv && uv pip install --python .venv/bin/python pyserial pytest
 # flash the base (never the plain .hex; -update.hex or -full.hex)
-openocd -c "adapter serial 39FF71064B43353943122243" -f openocd.cfg -c "program build/midicontrol-fw-update.hex verify reset exit"
+openocd -c "adapter serial 004200443335510C35383531" -f openocd.cfg -c "program build/midicontrol-fw-update.hex verify reset exit"
 ```
 
 Symbols of globals (`Debug::_log`, ...) are resolved from the ELF symbol table (`nm -C`), so the normal Release

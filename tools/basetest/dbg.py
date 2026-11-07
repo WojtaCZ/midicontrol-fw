@@ -16,7 +16,7 @@ GDB = "arm-none-eabi-gdb"
 NM = "arm-none-eabi-nm"
 
 CONFIGS = {
-    "base": dict(serial="39FF71064B43353943122243", cfg=os.path.join(FW, "openocd.cfg"), elf=os.path.join(FW, "build", "midicontrol-fw.elf"),
+    "base": dict(serial="004200443335510C35383531", cfg=os.path.join(FW, "openocd.cfg"), elf=os.path.join(FW, "build", "midicontrol-fw.elf"),
                  gdb=3334, tcl=6668, telnet=6667, cwd=FW, gpio=0x48000000, safe_bp="Bluetooth::process"),
     "remote": dict(serial="37FF70064E59313840161343", cfg=os.path.join(REMOTE_FW, "openocd.cfg"),
                    # The remote Release ELF has no DWARF; BASETEST_REMOTE_ELF = a -g copy with the same code (README)
