@@ -220,12 +220,12 @@ VS: +BATT ─JP3─ VS ─F1 200 mA─ SYS (BQ SYS / L1)
 
 Answer each one when known. D10 closed the question of whether the RNBD350 adapter is the production fit. D11 closed the question of which schematic is authoritative.
 
-1. **BLE adapter, P1_2/P1_3.** What does the adapter connect to the RN4870 pads P1_2/P1_3 (U4.13/14, on the I2C bus)? Can they load the bus?
-2. **BLE adapter, VDD_IO.** U4.6/7 have no net. What does the adapter do with VDD_IO?
-3. **BLE adapter, TX pull-up.** (MODE resolved D22: not wired.) Does the adapter have the recommended 10k pull-up on the RNBD350 TX (PA5)?
-4. **PB13 change.** What exactly changed on 2026-10-19 (R27, Q3, R26)? Is it on every board?
-5. **R18.** Removed or DNP on every board?
-6. **R24/R25.** Keep them unfitted on future boards (the firmware relies on the dead-battery Rd + UCPD)?
+1. ~~BLE adapter, P1_2/P1_3.~~ RESOLVED D28: unconnected on the adapter.
+2. ~~BLE adapter, VDD_IO.~~ RESOLVED D28: unconnected.
+3. ~~BLE adapter, TX pull-up.~~ RESOLVED D28: the adapter has the 10k pull-up on RNBD350 TX. (MODE: not wired, D22.)
+4. **PB13 change.** What exactly changed on 2026-10-19 (R27, Q3, R26)? Is it on every board? Owner does not know (2026-11-12); trace it on a board.
+5. ~~R18.~~ RESOLVED D28: removed on every board.
+6. ~~R24/R25.~~ RESOLVED D28: stay unfitted.
 7. **USB D+/D- crossing.** Fix it in a revision, or accept it (the firmware compensates via CC)?
 8. **F2/F3.** The schematic says "xxA". What is fitted? F2 has a 2.6 A hold per CL:53; F3 is unknown.
 9. **JP3 / F1.** Which way is JP3 set? Is F1 really 200 mA in the BQ SYS path?
@@ -235,7 +235,7 @@ Answer each one when known. D10 closed the question of whether the RNBD350 adapt
 13. **R34.** "910k / 4k7": which value is fitted?
 14. **ADC filter.** Add a capacitor on PA0/PA5 in a revision?
 15. **Charger variant.** BQ24195 or BQ24195L (different VINDPM/IINLIM defaults)?
-16. **BOOT0.** Which side is JP1 bridged to? What are the G0 option bytes (nBOOT_SEL, nBOOT0), i.e. is the pin sampled at all?
-17. **Cells.** Are the two NCR18650B really 2P on J1? With one protection circuit, or none?
+16. **BOOT0 (low priority, owner: "do not worry").** Which side is JP1 bridged to? What are the G0 option bytes (nBOOT_SEL, nBOOT0), i.e. is the pin sampled at all?
+17. ~~Cells.~~ RESOLVED D28: 2P NCR18650B (may change later). Protection circuit: not stated.
 
 Firmware housekeeping (not hardware): TIM3 is clocked but unused (`src/base.cpp:88`). `.mcu-profile.json` sizeBudget uses 32768 B RAM; the device has 36 KB.

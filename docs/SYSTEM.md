@@ -2,8 +2,8 @@
 
 # MIDIcontrol system specification
 
-Version 2026-11-12. Owner decisions D1-D22 applied (binding). Items marked **(proposed default)** come from
-P1-P12: proposed, not yet vetoed by the owner. Code reference: base `midicontrol-fw` 6a68acc, remote
+Version 2026-11-12. Owner decisions D1-D30 applied (binding). Items marked **(proposed default)** come from
+P1-P12: technical choices the owner delegated to the developers (D30); change them only with a reason. Code reference: base `midicontrol-fw` 6a68acc, remote
 `midicontroller-fw` 7539b85, PC `midicontrolpy-sw` main 8a7ed0f (the docker branch is not covered).
 Wire protocol: `midicontrol-protocol/PROTOCOL.md`.
 
@@ -158,8 +158,8 @@ power policy and serves a status web page.
 | SYS-USE-14 | Recording is a required feature; see sec. 4.13 SYS-REC (D6, D9) | partial | see SYS-REC |
 | SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | implemented | base menu.cpp |
 | SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC |
-| SYS-USE-17 | Indicator shows a song as 4 digit positions (0-9 or blank) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | implemented (thousands range open, O-1) | PC display.cpp, base display.cpp |
-| SYS-USE-18 | 512/513 example files have shifted digit positions; PC right-aligns | implemented (intent OPEN, O-2) | PC display.cpp |
+| SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank (songs 0-9999, any thousands digit, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | partial (gap) | base `setSong()` caps at 1999 |
+| SYS-USE-18 | Digits are ones-first and right-aligned as the V2 text says; V2's "song 12" example is a typo. Shifted digits in a song file are authoring mistakes (512.mid: verse in the tens position, 513.mid: song shifted left): the PC right-aligns them and songcheck should warn (D24) | implemented (songcheck warning: verify) | PC display.cpp |
 | SYS-USE-19 | Song without a usable display anchor: PC uses the song code from the file name for the indicator AND flags the file (songcheck warning) (D15) | implemented, not bench-verified | PC playback.cpp:110 fallback; songcheck flags "empty display anchor" / "no display anchors" |
 | SYS-USE-20 | Song config without stops: PC sends a configured **default registration** at song start (not "leave stops as they are") (D16) | NOT IMPLEMENTED (gap) | PC organ/stops: no default registration setting |
 | SYS-USE-21 | Resume: a resume command from the remote or base continues the paused song at the same spot (same section, same position); SIGNAL_PLAYING sent again (D6) | NOT IMPLEMENTED (gap) | no resume message in PROTOCOL.md, no UI |
@@ -192,10 +192,10 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-ORG-01 | SSR switched by SET_CURRENT from the PC or the base menu checkbox "Napajeni varhan"; checkbox follows the real state | implemented, not bench-verified | router.cpp:364, menu.cpp:460; LED on bench, not real SSR |
-| SYS-ORG-02 | SSR off after any base reset | implemented (fw) | base main.cpp:290; no hardware pull-down on PA4 (O-5) |
+| SYS-ORG-02 | SSR off after any base reset | implemented (fw) | base main.cpp:290; no hardware pull-down on PA4; the float until GPIO init is accepted (D28) |
 | SYS-ORG-03 | Organ on before first note + WarmupMs; if already on, start immediately | implemented, not bench-verified | PC |
-| SYS-ORG-04 | Between songs the organ stays on. The PC owns the policy: organ on at play, off after a configurable idle time (minutes, value X: O-3) (D2, D5) | differs from code (gap) | PC switches off after each song (KeepPowerOn=false) |
-| SYS-ORG-05 | Idle-off: PC switches the organ off after X min without playback/recording; a paused song is NOT idle (D18); setting in PC config (D5) | NOT IMPLEMENTED (gap) | with KeepPowerOn=true it never goes off |
+| SYS-ORG-04 | Between songs the organ stays on. The PC owns the policy: organ on at play, off after a configurable idle time (default 30 min, D27) (D2, D5) | differs from code (gap) | PC switches off after each song (KeepPowerOn=false) |
+| SYS-ORG-05 | Idle-off: PC switches the organ off after X min (default 30, D27) without playback/recording; a paused song is NOT idle (D18); setting in PC config (D5) | NOT IMPLEMENTED (gap) | with KeepPowerOn=true it never goes off |
 | SYS-ORG-06 | SSR drive (LM317L constant-current, <= ~104 mA) must match the installed SSR | open (D12: SSR type unknown, O-4) | hardware |
 | SYS-ORG-07 | Manual organ-on from the base menu or the remote: organ stays on (overrides song-end handling) until the next idle timeout; the PC must see the manual state and run its idle timer (D2) | partial | base checkbox exists; remote has no control; PC switches it off at song end and has no idle timer |
 
@@ -221,7 +221,7 @@ power policy and serves a status web page.
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-BAT-01 | 2P NCR18650B (~7 Ah); BQ24195 charge 2048 mA, term 256 mA, 12 h timer; input limit from Type-C Rp / D+D- | implemented, not bench-verified | values OPEN (O-8) |
+| SYS-BAT-01 | 2P NCR18650B (~7 Ah); BQ24195 charge 2048 mA, term 256 mA, 12 h timer; input limit from Type-C Rp / D+D- | implemented, not bench-verified | confirmed by the owner (D28); the pack may change later |
 | SYS-BAT-02 | SOC: 47 ms samples, trimmed mean, EMA, hysteresis; 4180 mV = 100 %, 3300 mV = 0 % | implemented | remote logic/battery_soc |
 | SYS-BAT-03 | Critical: 5 consecutive 1 s means < 3300 mV -> "Slaba baterie", shutdown, diag slot saved | implemented, not bench-verified | remote battery.cpp |
 | SYS-BAT-04 | Remote cannot switch off or read its button while USB is plugged in | implemented | by hardware |
@@ -266,11 +266,14 @@ power policy and serves a status web page.
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-REC-01 | Organist starts and stops recording from the remote or the base; PC confirms with SIGNAL_RECORDING; remote and base show "recording" | partial | base menu "Nahraj" exists; RECORD_SONG / SIGNAL_RECORDING "reserved" in PROTOCOL.md; remote has no UI |
+| SYS-REC-01 | Recording is started and stopped **from the base only** (menu); the remote has no recording control. PC confirms with SIGNAL_RECORDING; base (and remote, display only) show "recording" (D29) | partial | base menu "Nahraj" exists; RECORD_SONG / SIGNAL_RECORDING "reserved" in PROTOCOL.md |
 | SYS-REC-02 | PC records the organ's MIDI from DIN (via base USB-MIDI in) into a new song file in the song store | partial | PC `record` spawns arecordmidi (comm.cpp:887); DIN-in path never verified |
 | SYS-REC-03 | Every indicator-bus frame seen during recording (from the base or any manual controller) is written into the file at its time position as the same embedded display SysEx the player parses today | NOT IMPLEMENTED (gap) | base echoes bus frames as SysEx to USB; PC does not merge them into the file |
 | SYS-REC-04 | A recorded file plays back like any other song: sections from the recorded anchors, songcheck-clean | NOT IMPLEMENTED (gap) | depends on SYS-REC-03 |
-| SYS-REC-05 | Recording device / file naming / song code of the new file / organ power during recording: details TBD (D6) | open (O-9) | - |
+| SYS-REC-05 | Starting a recording switches the organ on (same as play, SYS-ORG-03) and resets the idle timer; recording is not idle (D29) | NOT IMPLEMENTED (gap) | PC |
+| SYS-REC-06 | A recording gets a name with NO song number, from its start date and time (suggested `REC_YYYY-MM-DD_HHMM.mid`); the owner renames it to a song code later (D29) | NOT IMPLEMENTED (gap) | PC |
+| SYS-REC-07 | The silence between recording start and the first note is cut, so playback starts at the first note. Stop changes and other non-note events do not count as the first note (D29) | NOT IMPLEMENTED (gap) | PC |
+| SYS-REC-08 | The organist sets the stops while recording. The PC parses the stop changes from the recorded MIDI and writes `<name>.conf` from them (the registration in effect at the first note); those initial stop changes are taken out of the leading silence. Stop changes later in the song stay in the file (D29) | NOT IMPLEMENTED (gap) | PC organ/stops, stops_file |
 
 ### 4.14 Shared indicator bus (new group, D9, D13, D14)
 
@@ -283,10 +286,10 @@ The base is one writer among several.
 | SYS-BUS-02 | A foreign song number on the bus (manual controller) is mirrored on the base OLED and on the remote; playback is NOT touched (D13) | NOT IMPLEMENTED (gap) | base fw (OLED + forward to remote), remote fw (display), protocol (message) |
 | SYS-BUS-03 | While recording, foreign frames are recorded into the MIDI file (D9, SYS-REC-03) | NOT IMPLEMENTED (gap) | see SYS-REC-03 |
 | SYS-BUS-04 | The base writes to the bus only on NOW_PLAYING_INFO from the PC; PC start/restart does not write to the bus (D14) | implemented | base display.cpp, PC |
-| SYS-BUS-05 | Base transmits without corrupting a frame from another master (bus idle check / collision handling) | open (O-10) | single-wire isolated UART; V2 defines no arbitration (sec. 5) |
+| SYS-BUS-05 | Before transmitting, the base waits until the bus has been quiet for a short time (a few byte times; suggested 25 ms = 3 bytes at 1200 Bd) and is not receiving a frame; then it sends (D25) | NOT IMPLEMENTED (gap) | base sends whenever it has a change |
 | SYS-BUS-06 | Base hot-plug sense of the bus (PC13); no frames sent while the bus is absent | implemented, not bench-verified | base display.cpp; bench has no indicator |
 | SYS-BUS-07 | On stop / song end the indicator is cleared only if it still shows the number we sent; if another master wrote since, leave it (D20) | differs from code (gap, verify) | clearing today is unconditional (SYS-USE-08/10) |
-| SYS-BUS-08 | A received frame is accepted only if it is 9 bytes and starts with the `0xB0` flag; anything else is dropped and does not change the base's state (INDICATOR-BUS.md) | partial | base display.cpp checks the length only, not the flag |
+| SYS-BUS-08 | A received frame is accepted only if it is 9 bytes and starts with the `0xB0` flag; anything else is dropped and does not change the base's state (D26) | partial (gap) | base display.cpp checks the length only, not the flag |
 
 ### 4.15 Documentation (new group)
 
@@ -313,13 +316,14 @@ NOW_PLAYING_INFO and the display SysEx). In the firmware repos it is under `lib/
 - **Frame.** 9 bytes: `B0` flag, verse ones, verse tens, song ones, tens, hundreds, thousands, letter (`0A`-`0D` = A-D),
   LED (`20` red, `21` yellow, `22` green, `23` blue). Upper nibble `E` in any byte = that field blank (LED off).
 - **Multi-master.** Every controller (ours and the manual ones) transmits on the same line. V2 defines no arbitration
-  or collision rule (O-10).
+  rule; the base waits for a short quiet bus before sending (D25, SYS-BUS-05) and accepts only frames that start
+  with `B0` (D26).
 - **Colour numbering differs.** SysEx and NOW_PLAYING_INFO use 1 red, 2 green, 3 blue, 4 yellow. The bus uses `20` red,
   `21` yellow, `22` green, `23` blue. Convert by table.
-- **Song code set (D7).** 4 digit positions (0-9 or blank), letter A-D or blank. V2 does not limit the range; the
-  firmware caps `setSong()` at 1999 (probably only a "1" in the thousands position on the board, O-1).
-- **V2 contradiction (O-2).** V2's second example ("song 12") puts the digits in the hundreds/thousands bytes,
-  against its own ones-first rule. This may be the same effect as the shifted 512/513 files.
+- **Song code set (D7).** 4 digit positions (0-9 or blank), letter A-D or blank. Any thousands digit 0-9, songs up to
+  9999 (D23); the base firmware still caps `setSong()` at 1999 (gap). All four LED colours exist on the board (D26).
+- **Digit order (D24).** The V2 text rule holds: ones first, numbers right-aligned. V2's second example ("song 12")
+  is a typo. Song files with shifted digits (512, 513) are authoring mistakes.
 
 ---
 
@@ -343,7 +347,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 12 | SYS-USE-09, SYS-NOTE-01 | Real pause: halt, All Notes Off, keep position (D6) | midicontrolpy-sw, midicontroller-fw, midicontrol-fw (OLED) |
 | 13 | SYS-USE-21 | Resume at the same spot; resume message + UI (D6) | midicontrol-protocol, midicontrolpy-sw, midicontroller-fw, midicontrol-fw |
 | 14 | SYS-USE-20 | Default registration for songs without stops (D16) | midicontrolpy-sw |
-| 15 | SYS-USE-14, SYS-REC-01 | Record start/stop from remote and base; RECORD_SONG / SIGNAL_RECORDING defined (D9) | midicontrol-protocol, midicontrolpy-sw, midicontroller-fw, midicontrol-fw |
+| 15 | SYS-USE-14, SYS-REC-01 | Record start/stop from the base; RECORD_SONG / SIGNAL_RECORDING defined (D9, D29) | midicontrol-protocol, midicontrolpy-sw, midicontrol-fw |
 | 16 | SYS-REC-02 | Record organ MIDI from DIN into a new song file; verify DIN-in path | midicontrolpy-sw, midicontrol-fw |
 | 17 | SYS-REC-03, SYS-REC-04, SYS-BUS-03 | Embed bus frames seen during recording as display SysEx; recorded file plays back with anchors (D9) | midicontrolpy-sw (+ midicontrol-fw if the echo is incomplete) |
 | 18 | SYS-BUS-01, SYS-BUS-02 | Observe the shared bus; mirror foreign song number on base OLED and remote, playback untouched (D13) | midicontrol-fw, midicontroller-fw, midicontrol-protocol |
@@ -356,6 +360,10 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 25 | SYS-DOC-02 | Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
 | 26 | SYS-DOC-03 | Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
 | 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20) | midicontrol-fw, midicontrolpy-sw |
+| 28 | SYS-USE-17 | Allow songs up to 9999 (remove the 1999 cap) (D23) | midicontrol-fw (+ check midicontrolpy-sw) |
+| 29 | SYS-BUS-05 | Wait for a short quiet bus before transmitting (D25) | midicontrol-fw |
+| 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrolpy-sw |
+| 31 | SYS-USE-18 | songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
 
 ---
 
@@ -377,7 +385,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | USB | USB-C full-speed device: CDC protocol + USB-MIDI + CDC log | USB-C power/charging only (UCPD CC sense, BQ24195 D+/D-) |
 | Storage | internal flash (BL 32 K / app 94 K / settings 2 K) | W25Q32 4 MB SPI NOR (OTA staging, diag slots); internal flash BL 16 K / app 110 K / settings 2 K |
 | Debug | SWD 2x3 header (no VTref unless JP2 bridged), STLINK-V3 | SWD 5-pin header, ST-LINK/V2 |
-| Open HW points | SSR type unknown (D12); no pull-down on PA4 (SSR during reset window) | battery / charge current to confirm (O-8) |
+| Open HW points | SSR type unknown (D12, O-4); DIN link never worked on the bench (O-7) | PB13 change of 2026-10-19 undocumented |
 
 ---
 
@@ -398,7 +406,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | FW chunk | <= 120 B; base multiple of 8 B |
 | PC GET_STATUS / GET_INFO / DIAG | 5 s (2 s timeout) / 15 s / 10 s |
 | PC warm-up | WarmupMs 3000 ms |
-| Organ idle-off | X min, configurable on the PC (value: O-3) |
+| Organ idle-off | 30 min default, configurable on the PC (D27) |
 | Stops | AllOffDelayMs 100, StopDelayMs per stop |
 | Verse gap | VerseGapMs 0 |
 | Remote idle off / power button | 20 min / hold 5 s |
@@ -445,18 +453,18 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 
 | # | Item | Source | Blocks |
 |---|---|---|---|
-| O-1 | V2 protocol documented (sec. 5). Still open: can the thousands position show only "1" (firmware caps at 1999) or any digit? | D7 | sec. 5, SYS-USE-17 |
-| O-2 | 512/513 digit shift: show as authored or treat as authoring mistake? Related: V2's "song 12" example puts the digits in the hundreds/thousands bytes. Typo, or do short numbers really go left-aligned? | Q15 (OPEN) | SYS-USE-18, sec. 5 |
-| O-3 | Organ idle-off time X (minutes, default value) | D2 | SYS-ORG-04/05 |
-| O-4 | SSR type installed (bare-LED input vs 3-32 VDC input) | D12, Q19 | SYS-ORG-06 |
-| O-5 | Hardware pull-down on PA4 (SSR off during reset/bootloader)? Base HW draft: none on the net | Q18 | SYS-ORG-02 |
-| O-6 | Church range walk: who, and minimum distance required (proposed default, P3: owner, open) | Q11, P3 | - |
-| O-7 | DIN MIDI never verified on hardware; bench DIN link repair before installation? | Q26 (OPEN) | SYS-NOTE-02, SYS-REC-02 |
-| O-8 | Battery 2P NCR18650B and 2048 mA charge current: confirm | Q27 (OPEN) | SYS-BAT-01 |
-| O-9 | Recording details: start device(s), stop condition, new file name / song code, organ power while recording | D6, D9 | SYS-REC-05 |
-| O-10 | Shared bus: collision handling / when the base may transmit (stop/song-end clearing decided: D20, only our own number) | D9, D13 (derived) | SYS-BUS-05, SYS-USE-08/10 |
+| O-1 | RESOLVED D23: any thousands digit 0-9 | D23 | SYS-USE-17 |
+| O-2 | RESOLVED D24: V2 text rule holds; example 2 is a typo; shifted files are authoring mistakes | D24 | SYS-USE-18 |
+| O-3 | RESOLVED D27: idle-off default 30 min | D27 | SYS-ORG-04/05 |
+| O-4 | SSR type installed (bare-LED input vs 3-32 VDC input): unknown for now (owner, 2026-11-12) | D12, Q19 | SYS-ORG-06 |
+| O-5 | RESOLVED D28: no PA4 pull-down; float accepted | D28 | SYS-ORG-02 |
+| O-6 | Church range walk not done yet (owner, 2026-11-12) | Q11, P3 | - |
+| O-7 | MIDI over the DIN cable (base <-> organ) has never worked on the bench (HARDWARE-base open item 9). Find the fault before installation? | Q26 (OPEN) | SYS-NOTE-02, SYS-REC-02 |
+| O-8 | RESOLVED D28: 2P NCR18650B, 2048 mA confirmed; the pack may change later | D28 | SYS-BAT-01 |
+| O-9 | RESOLVED D29: base only, date/time name, organ on, leading silence cut, stops parsed to `.conf` | D29 | SYS-REC-01, -05..-08 |
+| O-10 | RESOLVED D25: wait for a short quiet bus before transmitting | D25 | SYS-BUS-05 |
 | O-11 | RESOLVED D18: a paused song is NOT idle | D18 | SYS-ORG-05, SYS-USE-09 |
 | O-12 | RESOLVED D21: Just Works accepted (with the D3 bonded-base whitelist) | D21 | SYS-PAIR-01 |
 | O-13 | RESOLVED D19: cut-off only on the transition PC present -> PC lost; manual use with no PC ever present keeps power | D19 | SYS-PC-03, SYS-ORG-07 |
-| O-14 | Organ stop mapping for Opus 910 (ProgramOffset -1, octal numbering) unverified: who verifies; content of the default registration | Q25, D16 | SYS-USE-20 |
-| O-15 | All "(proposed default)" items P1-P12: owner may still veto | P1-P12 | marked rows |
+| O-14 | Stop mapping for Opus 910 (ProgramOffset -1, octal numbering) still unverified. For recorded songs the stops come from the recording (D29); content of the default registration for other songs still open | Q25, D16 | SYS-USE-20, SYS-REC-08 |
+| O-15 | RESOLVED D30: P1-P12 delegated to the developers | D30 | marked rows |

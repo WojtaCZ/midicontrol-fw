@@ -252,15 +252,15 @@ Source: `midicontrol-hw` (D11: historical reference). Use it for parts the firmw
 
 Answer each one when known. Decisions D10 (BLE fit) and D11 (which source is authoritative) closed the earlier questions on module fit and schematic currency.
 
-1. **BLE adapter, P1_2/P1_3.** What does the RNBD350 adapter connect to the RN4870 pads P1_2/P1_3 (U17.11/12, on the I2C bus)? Can they load the bus?
-2. **BLE adapter, VDD_IO.** U17.4/5 (RN4870 VDD_IO) have no net in the PCB. What does the adapter do with VDD_IO?
+1. ~~BLE adapter, P1_2/P1_3.~~ RESOLVED D28: unconnected on the adapter; no load on I2C.
+2. ~~BLE adapter, VDD_IO.~~ RESOLVED D28: unconnected.
 3. ~~BLE adapter, MODE.~~ RESOLVED D22: the RNBD350 has no MODE pin; P2_0 (PA0) is not wired.
 4. **SSR type (D12).** What SSR is fitted at the organ, and what is RV1 set to? The source gives at most ~104 mA at 1.5-1.9 V headroom.
-5. **PA4 pull-down.** Accept the float from reset until GPIO init, or add a pull-down in a revision?
-6. **R33 1k5 D+ pull-up.** Is it fitted? If so, why is it not effective? R33 and DPPU together is out of spec.
+5. ~~PA4 pull-down.~~ RESOLVED D28: the float is accepted; no pull-down.
+6. ~~R33 1k5 D+ pull-up.~~ RESOLVED D28: not fitted; the internal DPPU is the only pull-up.
 7. **ATtiny.** Does its firmware drive PA5/PA6/PA7 or the I2C lines, or answer on I2C (collision with 0x3C)? Is its source available?
 8. **MIDI A / B.** Which port does the ATtiny make OUT and which IN? What are R21/R22 to ATtiny PB2/PB3 for?
-9. **DIN link dead.** Cause not traced (cable, ATtiny direction, MIDI_TX_VCC_ON). TX polarity to the DIN pins not verified.
+9. **DIN link dead (O-7).** Cause not traced (cable, ATtiny direction, MIDI_TX_VCC_ON). TX polarity to the DIN pins not verified.
 10. **Display echo and polarity.** Confirm on a real display: the line idles undriven, and the firmware's RX-DMA gating is enough to reject its own echo. "Half-duplex" in fw:CLAUDE.md:56 describes the single wire, not the USART mode.
 11. **USB-C CC.** Are R37/R38 fitted? Are D10/D11 (DNP) needed? Is UCPD ever to be used?
 12. **Rear fuse F1.** The value is "xxA". What is fitted?
