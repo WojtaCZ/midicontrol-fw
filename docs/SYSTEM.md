@@ -119,12 +119,12 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-PWR-01 | Base power-up: SSR off, USB enumerates (2 CDC + MIDI), log banner with git revision and reset cause | implemented | base main.cpp:290 |
-| SYS-PWR-02 | Base power-up with a stored remote: BLE reconnect starts; link up in ~6-8 s **on the first attempt**. A failing first attempt after each boot is a known issue to investigate, not accepted behaviour (proposed default, P1) | partial | base bluetooth.cpp: first attempt ends in %ERR_CONN% (link_losses starts at 1) |
+| SYS-PWR-02 | Base power-up with a stored remote: BLE reconnect starts; link up in ~6-8 s **on the first attempt**. A failing first attempt after each boot is a known issue to investigate, not accepted behaviour (proposed default, P1) | implemented (2026-11-12) | link up on the first CE, STREAM_OPEN ~7.4 s after reset. The %CONNECT% + %ERR_CONN% seen right after boot is a connection setup that fails while the remote restarts advertising after losing the old link; the module retries by itself within ~200 ms and it is no longer counted as a loss (link_stats onLost before STREAM_OPEN). Test: basetest test_ble_boot.py, host LinkStats.SetupFailureBeforeStreamOpenIsNotALoss |
 | SYS-PWR-03 | Base BLE init failure is non-fatal: USB-MIDI/SSR/indicator keep working; BLE init retried every 60 s | implemented | base main.cpp |
 | SYS-PWR-04 | Remote power-on by button; firmware holds the latch; shows "Cekam na zakladnu", then "Cekam na PC" until both are alive | implemented | remote base.cpp, menu.cpp |
 | SYS-PWR-05 | Remote: long halt / power loss switches it off; short resets keep it on | implemented | latch |
 | SYS-PWR-06 | PC service starts at boot (systemd user unit, linger), Type=notify, WatchdogSec 30, Restart=always 5 s, single instance | implemented, not bench-verified | docker variant pending |
-| SYS-PWR-07 | PC service start/restart: send All Notes Off and switch organ power off (SET_CURRENT 0) = clean state. Do NOT touch the indicator (shared bus) (D14) | differs from code (gap) | PC comm.cpp: no action at start, organ state "unknown" until first STATUS_RESP |
+| SYS-PWR-07 | PC service start/restart: send All Notes Off and switch organ power off (SET_CURRENT 0) = clean state. Do NOT touch the indicator (shared bus) (D14) | implemented (2026-11-12) | PC startup_reset.cpp, comm.cpp: on the first keepalive ACK unless a command already claimed the organ; tests test_startup_reset.cpp until first STATUS_RESP |
 
 ### 4.2 Pairing
 
@@ -159,7 +159,7 @@ power policy and serves a status web page.
 | SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | implemented | base menu.cpp |
 | SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC |
 | SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank, songs up to **1999** (thousands digit blank or 1, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | implemented | base `setSong()` caps at 1999 |
-| SYS-USE-18 | Digits are ones-first and right-aligned as the V2 text says; V2's "song 12" example is a typo. Shifted digits in a song file are authoring mistakes (512.mid: verse in the tens position, 513.mid: song shifted left): the PC right-aligns them and songcheck should warn (D24) | implemented (songcheck warning: verify) | PC display.cpp |
+| SYS-USE-18 | Digits are ones-first and right-aligned as the V2 text says; V2's "song 12" example is a typo. Shifted digits in a song file are authoring mistakes (512.mid: verse in the tens position, 513.mid: song shifted left): the PC right-aligns them and songcheck should warn (D24) | implemented (songcheck warning 2026-11-12: songcheck_warns_*) | PC display.cpp |
 | SYS-USE-19 | Song without a usable display anchor: PC uses the song code from the file name for the indicator AND flags the file (songcheck warning) (D15) | implemented, not bench-verified | PC playback.cpp:110 fallback; songcheck flags "empty display anchor" / "no display anchors" |
 | SYS-USE-20 | Song config without stops: PC sends a configured **default registration** at song start (not "leave stops as they are") (D16) | NOT IMPLEMENTED (gap) | PC organ/stops: no default registration setting |
 | SYS-USE-21 | Resume: a resume command from the remote or base continues the paused song at the same spot (same section, same position); SIGNAL_PLAYING sent again (D6) | NOT IMPLEMENTED (gap) | no resume message in PROTOCOL.md, no UI |
@@ -182,7 +182,7 @@ power policy and serves a status web page.
 |---|---|---|---|
 | SYS-PC-01 | Base: PC lost -> overlay "Odpojeno / Cekam na PC"; remote learns it from KEEPALIVE `[pcAlive]` and shows "Cekam na PC" | implemented | router.cpp, remote |
 | SYS-PC-02 | Remote commands to an absent PC -> NAK UNREACHABLE | implemented | base router |
-| SYS-PC-03 | PC lost mid-song (USB gone, PC dead, keepalive timeout): base IMMEDIATELY sends All Notes Off (CC120 + CC123, 16 ch) to DIN AND switches the SSR off (D1). Fires only on the transition PC present -> PC lost; manual use of the base with no PC ever present keeps power (D19). This is the backstop for the PC-owned power policy (D5) | NOT IMPLEMENTED (gap) | base router.cpp has no handler |
+| SYS-PC-03 | PC lost mid-song (USB gone, PC dead, keepalive timeout): base IMMEDIATELY sends All Notes Off (CC120 + CC123, 16 ch) to DIN AND switches the SSR off (D1). Fires only on the transition PC present -> PC lost; manual use of the base with no PC ever present keeps power (D19). This is the backstop for the PC-owned power policy (D5) | implemented (2026-11-12; DIN half unverified until SYS-NOTE-05) | base router.cpp logChanges + logic/recovery.hpp PcLossGuard; tests host PcLossGuard.*, hw test_pc_loss.py |
 | SYS-PC-04 | PC loses USB (base reset): playback stopped, organ state "unknown"; reconnects on USB return | implemented | PC comm.cpp:990 |
 | SYS-PC-05 | PC service shutdown (SIGTERM): stop, clear, SIGNAL_STOPPED, organ off. Interactive Ctrl-C may exit without cleanup; SYS-PC-03 and SYS-PWR-07 cover it | implemented | PC comm.cpp:998 |
 | SYS-PC-06 | systemd watchdog ping every 5 s only if worker threads progressed within 10 s | implemented, not bench-verified | PC sd_notify |
@@ -205,8 +205,8 @@ power policy and serves a status web page.
 |---|---|---|---|
 | SYS-NOTE-01 | PC sends CC123 on all 16 channels at song end, stop, pause, and before each add-verse replay | partial (pause: SYS-USE-09) | PC playback.cpp:152 |
 | SYS-NOTE-02 | Base after IWDG/WWDG or fault reset: CC120 + CC123 on 16 ch to DIN, SSR off | implemented (DIN path broken on the bench, SYS-NOTE-05) | base logic/recovery.* |
-| SYS-NOTE-03 | Base on PC loss / USB unplug mid-note: All Notes Off + SSR off immediately (D1, same as SYS-PC-03) | NOT IMPLEMENTED (gap) | - |
-| SYS-NOTE-04 | PC service start/restart: All Notes Off (D14, same as SYS-PWR-07) | differs from code (gap) | PC |
+| SYS-NOTE-03 | Base on PC loss / USB unplug mid-note: All Notes Off + SSR off immediately (D1, same as SYS-PC-03) | implemented (2026-11-12) | base router.cpp (see SYS-PC-03) |
+| SYS-NOTE-04 | PC service start/restart: All Notes Off (D14, same as SYS-PWR-07) | implemented (2026-11-12) | PC startup_reset.cpp (see SYS-PWR-07) |
 | SYS-NOTE-05 | MIDI over DIN works in both directions (base -> organ for playback and All Notes Off, organ -> base for recording); the bench fault is found and fixed and the link verified before installation (D31) | NOT IMPLEMENTED (gap) | never worked on the bench; cause not traced (HARDWARE-base open item 9) |
 
 ### 4.8 Idle / auto-off / remote power
@@ -334,8 +334,8 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 
 | # | Requirement(s) | Gap | Repo(s) to change |
 |---|---|---|---|
-| 1 | SYS-PC-03, SYS-NOTE-03 | Base: on PC loss (USB gone / keepalive timeout) send All Notes Off + SSR off immediately (D1) | midicontrol-fw |
-| 2 | SYS-PWR-07, SYS-NOTE-04 | PC start/restart: All Notes Off + organ off, indicator untouched (D14) | midicontrolpy-sw |
+| 1 | SYS-PC-03, SYS-NOTE-03 | CLOSED 2026-11-12 (PcLossGuard, test_pc_loss.py; DIN half waits for gap 28): Base: on PC loss (USB gone / keepalive timeout) send All Notes Off + SSR off immediately (D1) | midicontrol-fw |
+| 2 | SYS-PWR-07, SYS-NOTE-04 | CLOSED 2026-11-12 (startup_reset.cpp, test_startup_reset.cpp): PC start/restart: All Notes Off + organ off, indicator untouched (D14) | midicontrolpy-sw |
 | 3 | SYS-ORG-04, SYS-USE-10 | Organ stays on between songs; no off at song end/stop (D2, D5) | midicontrolpy-sw |
 | 4 | SYS-ORG-05 | Configurable idle-off timer on the PC (D5) | midicontrolpy-sw |
 | 5 | SYS-ORG-07 | Manual organ-on from base/remote overrides until the next idle timeout; PC learns manual state; remote control | midicontrolpy-sw, midicontroller-fw, midicontrol-protocol (if a new message), midicontrol-fw |
@@ -344,7 +344,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 8 | SYS-LINK-05 | Remote ignores RN status text injected by a peer (F2/F4) | midicontroller-fw |
 | 9 | SYS-LINK-06 | Remote requests now-playing after the link is secured (D8) | midicontroller-fw, midicontrolpy-sw (answer), midicontrol-protocol (if a new message) |
 | 10 | SYS-LINK-07 | GET_STATUS BLE "connected" only when secured (P5) | midicontrol-fw |
-| 11 | SYS-PWR-02 | First BLE attempt after base boot fails; investigate and fix (P1) | midicontrol-fw |
+| 11 | SYS-PWR-02 | CLOSED 2026-11-12: first BLE attempt after base boot fails; cause = remote advertising restart collides with the first connection setup, now a non-counted setup failure, link up on the first CE (P1) | midicontrol-fw |
 | 12 | SYS-USE-09, SYS-NOTE-01 | Real pause: halt, All Notes Off, keep position (D6) | midicontrolpy-sw, midicontroller-fw, midicontrol-fw (OLED) |
 | 13 | SYS-USE-21 | Resume at the same spot; resume message + UI (D6) | midicontrol-protocol, midicontrolpy-sw, midicontroller-fw, midicontrol-fw |
 | 14 | SYS-USE-20 | Default registration for songs without stops (D16) | midicontrolpy-sw |
@@ -364,7 +364,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 28 | SYS-NOTE-05 | Find and fix the DIN MIDI fault (cable / ATtiny port direction / MIDI_TX_VCC_ON / TX polarity); verify both directions before installation (D31) | midicontrol-fw, midicontrol-hw (ATtiny fw?) |
 | 29 | SYS-BUS-05 | Wait for a short quiet bus before transmitting (D25) | midicontrol-fw |
 | 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrolpy-sw |
-| 31 | SYS-USE-18 | songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
+| 31 | SYS-USE-18 | CLOSED 2026-11-12 (songcheck_warns_*): songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
 
 ---
 
