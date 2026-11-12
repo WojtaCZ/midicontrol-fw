@@ -2,7 +2,7 @@
 
 # MIDIcontrol system specification
 
-Version 2026-11-12. Owner decisions D1-D30 applied (binding). Items marked **(proposed default)** come from
+Version 2026-11-12. Owner decisions D1-D31 applied (binding). Items marked **(proposed default)** come from
 P1-P12: technical choices the owner delegated to the developers (D30); change them only with a reason. Code reference: base `midicontrol-fw` 6a68acc, remote
 `midicontroller-fw` 7539b85, PC `midicontrolpy-sw` main 8a7ed0f (the docker branch is not covered).
 Wire protocol: `midicontrol-protocol/PROTOCOL.md`.
@@ -158,7 +158,7 @@ power policy and serves a status web page.
 | SYS-USE-14 | Recording is a required feature; see sec. 4.13 SYS-REC (D6, D9) | partial | see SYS-REC |
 | SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | implemented | base menu.cpp |
 | SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC |
-| SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank (songs 0-9999, any thousands digit, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | partial (gap) | base `setSong()` caps at 1999 |
+| SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank, songs up to **1999** (thousands digit blank or 1, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | implemented | base `setSong()` caps at 1999 |
 | SYS-USE-18 | Digits are ones-first and right-aligned as the V2 text says; V2's "song 12" example is a typo. Shifted digits in a song file are authoring mistakes (512.mid: verse in the tens position, 513.mid: song shifted left): the PC right-aligns them and songcheck should warn (D24) | implemented (songcheck warning: verify) | PC display.cpp |
 | SYS-USE-19 | Song without a usable display anchor: PC uses the song code from the file name for the indicator AND flags the file (songcheck warning) (D15) | implemented, not bench-verified | PC playback.cpp:110 fallback; songcheck flags "empty display anchor" / "no display anchors" |
 | SYS-USE-20 | Song config without stops: PC sends a configured **default registration** at song start (not "leave stops as they are") (D16) | NOT IMPLEMENTED (gap) | PC organ/stops: no default registration setting |
@@ -204,9 +204,10 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-NOTE-01 | PC sends CC123 on all 16 channels at song end, stop, pause, and before each add-verse replay | partial (pause: SYS-USE-09) | PC playback.cpp:152 |
-| SYS-NOTE-02 | Base after IWDG/WWDG or fault reset: CC120 + CC123 on 16 ch to DIN, SSR off | implemented (DIN path unverified, O-7) | base logic/recovery.* |
+| SYS-NOTE-02 | Base after IWDG/WWDG or fault reset: CC120 + CC123 on 16 ch to DIN, SSR off | implemented (DIN path broken on the bench, SYS-NOTE-05) | base logic/recovery.* |
 | SYS-NOTE-03 | Base on PC loss / USB unplug mid-note: All Notes Off + SSR off immediately (D1, same as SYS-PC-03) | NOT IMPLEMENTED (gap) | - |
 | SYS-NOTE-04 | PC service start/restart: All Notes Off (D14, same as SYS-PWR-07) | differs from code (gap) | PC |
+| SYS-NOTE-05 | MIDI over DIN works in both directions (base -> organ for playback and All Notes Off, organ -> base for recording); the bench fault is found and fixed and the link verified before installation (D31) | NOT IMPLEMENTED (gap) | never worked on the bench; cause not traced (HARDWARE-base open item 9) |
 
 ### 4.8 Idle / auto-off / remote power
 
@@ -320,8 +321,8 @@ NOW_PLAYING_INFO and the display SysEx). In the firmware repos it is under `lib/
   with `B0` (D26).
 - **Colour numbering differs.** SysEx and NOW_PLAYING_INFO use 1 red, 2 green, 3 blue, 4 yellow. The bus uses `20` red,
   `21` yellow, `22` green, `23` blue. Convert by table.
-- **Song code set (D7).** 4 digit positions (0-9 or blank), letter A-D or blank. Any thousands digit 0-9, songs up to
-  9999 (D23); the base firmware still caps `setSong()` at 1999 (gap). All four LED colours exist on the board (D26).
+- **Song code set (D7).** 4 digit positions (0-9 or blank), letter A-D or blank. Songs go up to 1999 only
+  (thousands digit blank or 1, D23); the base `setSong()` caps there. All four LED colours exist on the board (D26).
 - **Digit order (D24).** The V2 text rule holds: ones first, numbers right-aligned. V2's second example ("song 12")
   is a typo. Song files with shifted digits (512, 513) are authoring mistakes.
 
@@ -360,7 +361,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 25 | SYS-DOC-02 | Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
 | 26 | SYS-DOC-03 | Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
 | 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20) | midicontrol-fw, midicontrolpy-sw |
-| 28 | SYS-USE-17 | Allow songs up to 9999 (remove the 1999 cap) (D23) | midicontrol-fw (+ check midicontrolpy-sw) |
+| 28 | SYS-NOTE-05 | Find and fix the DIN MIDI fault (cable / ATtiny port direction / MIDI_TX_VCC_ON / TX polarity); verify both directions before installation (D31) | midicontrol-fw, midicontrol-hw (ATtiny fw?) |
 | 29 | SYS-BUS-05 | Wait for a short quiet bus before transmitting (D25) | midicontrol-fw |
 | 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrolpy-sw |
 | 31 | SYS-USE-18 | songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
@@ -385,7 +386,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | USB | USB-C full-speed device: CDC protocol + USB-MIDI + CDC log | USB-C power/charging only (UCPD CC sense, BQ24195 D+/D-) |
 | Storage | internal flash (BL 32 K / app 94 K / settings 2 K) | W25Q32 4 MB SPI NOR (OTA staging, diag slots); internal flash BL 16 K / app 110 K / settings 2 K |
 | Debug | SWD 2x3 header (no VTref unless JP2 bridged), STLINK-V3 | SWD 5-pin header, ST-LINK/V2 |
-| Open HW points | SSR type unknown (D12, O-4); DIN link never worked on the bench (O-7) | PB13 change of 2026-10-19 undocumented |
+| Open HW points | SSR type unknown (D12, O-4); DIN link never worked on the bench (SYS-NOTE-05, must be fixed) | PB13 change of 2026-10-19 undocumented |
 
 ---
 
@@ -453,13 +454,13 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 
 | # | Item | Source | Blocks |
 |---|---|---|---|
-| O-1 | RESOLVED D23: any thousands digit 0-9 | D23 | SYS-USE-17 |
+| O-1 | RESOLVED D23: songs up to 1999 | D23 | SYS-USE-17 |
 | O-2 | RESOLVED D24: V2 text rule holds; example 2 is a typo; shifted files are authoring mistakes | D24 | SYS-USE-18 |
 | O-3 | RESOLVED D27: idle-off default 30 min | D27 | SYS-ORG-04/05 |
 | O-4 | SSR type installed (bare-LED input vs 3-32 VDC input): unknown for now (owner, 2026-11-12) | D12, Q19 | SYS-ORG-06 |
 | O-5 | RESOLVED D28: no PA4 pull-down; float accepted | D28 | SYS-ORG-02 |
 | O-6 | Church range walk not done yet (owner, 2026-11-12) | Q11, P3 | - |
-| O-7 | MIDI over the DIN cable (base <-> organ) has never worked on the bench (HARDWARE-base open item 9). Find the fault before installation? | Q26 (OPEN) | SYS-NOTE-02, SYS-REC-02 |
+| O-7 | RESOLVED D31: the DIN fault must be found and fixed before installation | D31 | SYS-NOTE-05 |
 | O-8 | RESOLVED D28: 2P NCR18650B, 2048 mA confirmed; the pack may change later | D28 | SYS-BAT-01 |
 | O-9 | RESOLVED D29: base only, date/time name, organ on, leading silence cut, stops parsed to `.conf` | D29 | SYS-REC-01, -05..-08 |
 | O-10 | RESOLVED D25: wait for a short quiet bus before transmitting | D25 | SYS-BUS-05 |
