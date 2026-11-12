@@ -33,7 +33,7 @@ Read these before touching the base firmware.
 | Block | Fact | Source |
 |---|---|---|
 | MCU | STM32G431CBT6 (Cortex-M4F, 128 KB flash, 32 KB SRAM), LQFP48, SYSCLK 144 MHz | fw:src/base.cpp:37-67; fw:STM32G431CBTx_FLASH.ld |
-| BLE | **RNBD350 on an adapter board with the RN4870 footprint**, in all units (D10). Pins as on the RN4870: UART, RST, MODE. USART2 | D10; fw:src/bluetooth.cpp:449-500 |
+| BLE | **RNBD350 on an adapter board with the RN4870 footprint**, in all units (D10). UART and RST as on the RN4870. The RNBD350 has no MODE pin, so MODE is not wired (D22). USART2 | D10, D22; fw:src/bluetooth.cpp:449-500 |
 | MIDI DIN | USART3, 31250 Bd, one TX + one RX. Port switching (MIDI A / B) is done by the ATtiny U14 | fw:src/midi.cpp:31-35; fw:CLAUDE.md:100 |
 | Church display | USART1, 1200 Bd, 9-byte frames, presence sense on PC13 | fw:src/display.cpp |
 | Organ power | PA4 → SSR current source. SSR type unknown (D12) | fw:src/base.cpp:19 |
@@ -77,7 +77,7 @@ Only pins the firmware configures. The external net is listed where the schemati
 |---|---|---|---|---|---|---|
 | 2 | PC13 | `disp_sense` | GPIO in, EXTI both edges | Low = display powered (`connected = !read`) | Display sense opto U18 | fw:src/display.cpp:45,53 |
 | 5/6 | PF0/PF1 | — | HSE | 48 MHz | Y1 | fw:src/base.cpp |
-| 8 | PA0 | `mode` | GPIO out PP | Driven high (application mode) | BLE MODE (RN4870 P2_0 position) | fw:src/bluetooth.cpp:455 |
+| 8 | PA0 | `mode` | GPIO out PP | Driven high, drives nothing | Not connected on the RNBD350 adapter (D22) | fw:src/bluetooth.cpp:455 |
 | 9 | PA1 | `rst_n` | GPIO out PP | Active low, 100 ms pulse | BLE RST | fw:src/bluetooth.cpp:456,644,670 |
 | 10 | PA2 | `usart_tx` | USART2_TX AF7 | 115200 8N1 | BLE UART RX | fw:src/bluetooth.cpp:451,479 |
 | 11 | PA3 | `usart_rx` | USART2_RX AF7 | In | BLE UART TX | fw:src/bluetooth.cpp:452 |
@@ -108,7 +108,7 @@ The firmware does not touch: PA5, PA6, PA7 (ATtiny lines), PB4/PB6 (UCPD CC, res
 | Module | RNBD350 on an adapter with the RN4870 footprint (D10). The schematic still shows the RN4870U-V/RM118, which predates the adapter | D10; hw U17 |
 | UART | 115200 Bd, no RTS/CTS, module set to `SR,0000` | fw:src/bluetooth.cpp:20-25,479 |
 | DMA | TX: DMA1_Channel2 ← DMAMUX1_Channel1 req 27. RX: RXNE interrupt into a ring | fw:src/bluetooth.cpp:465-476 |
-| Control | PA0 MODE held high. PA1 RST, 100 ms low pulse, then up to 3 s wait for `%REBOOT%`. The module configures even without `%REBOOT%` | fw:src/bluetooth.cpp:449-500; fw:CLAUDE.md:53 |
+| Control | PA0 MODE is driven high but not wired (D22). PA1 RST, 100 ms low pulse, then up to 3 s wait for `%REBOOT%`. The module configures even without `%REBOOT%` | fw:src/bluetooth.cpp:449-500; fw:CLAUDE.md:53 |
 | Config | `SN,MIDIControlBase`, `SA,2`, `SR,0000`, `SS,C0`, `SGA/SGC,0F`, `ST,0010,0010,0000,00FA`. Coded PHY (`CSPHY`) and `T` sent per connection | fw:CLAUDE.md:53-55 |
 | Failure handling | A failed init is not fatal: one ERROR record, retried every 60 s | fw:CLAUDE.md:61 |
 
@@ -254,7 +254,7 @@ Answer each one when known. Decisions D10 (BLE fit) and D11 (which source is aut
 
 1. **BLE adapter, P1_2/P1_3.** What does the RNBD350 adapter connect to the RN4870 pads P1_2/P1_3 (U17.11/12, on the I2C bus)? Can they load the bus?
 2. **BLE adapter, VDD_IO.** U17.4/5 (RN4870 VDD_IO) have no net in the PCB. What does the adapter do with VDD_IO?
-3. **BLE adapter, MODE.** What does the adapter route the RN4870 P2_0 pad (PA0 MODE) to on the RNBD350? The RNBD350 has no boot-mode pin.
+3. ~~BLE adapter, MODE.~~ RESOLVED D22: the RNBD350 has no MODE pin; P2_0 (PA0) is not wired.
 4. **SSR type (D12).** What SSR is fitted at the organ, and what is RV1 set to? The source gives at most ~104 mA at 1.5-1.9 V headroom.
 5. **PA4 pull-down.** Accept the float from reset until GPIO init, or add a pull-down in a revision?
 6. **R33 1k5 D+ pull-up.** Is it fitted? If so, why is it not effective? R33 and DPPU together is out of spec.

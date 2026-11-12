@@ -2,7 +2,7 @@
 
 # MIDIcontrol system specification
 
-Version 2026-11-12. Owner decisions D1-D21 applied (binding). Items marked **(proposed default)** come from
+Version 2026-11-12. Owner decisions D1-D22 applied (binding). Items marked **(proposed default)** come from
 P1-P12: proposed, not yet vetoed by the owner. Code reference: base `midicontrol-fw` 6a68acc, remote
 `midicontroller-fw` 7539b85, PC `midicontrolpy-sw` main 8a7ed0f (the docker branch is not covered).
 Wire protocol: `midicontrol-protocol/PROTOCOL.md`.
@@ -158,7 +158,7 @@ power policy and serves a status web page.
 | SYS-USE-14 | Recording is a required feature; see sec. 4.13 SYS-REC (D6, D9) | partial | see SYS-REC |
 | SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | implemented | base menu.cpp |
 | SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC |
-| SYS-USE-17 | Indicator shows a song as 4 BCD digits + letter. Valid song code set: to be defined from the V2 protocol files (D7, sec. 5) | implemented (code set pending, O-1) | PC display.cpp |
+| SYS-USE-17 | Indicator shows a song as 4 digit positions (0-9 or blank) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | implemented (thousands range open, O-1) | PC display.cpp, base display.cpp |
 | SYS-USE-18 | 512/513 example files have shifted digit positions; PC right-aligns | implemented (intent OPEN, O-2) | PC display.cpp |
 | SYS-USE-19 | Song without a usable display anchor: PC uses the song code from the file name for the indicator AND flags the file (songcheck warning) (D15) | implemented, not bench-verified | PC playback.cpp:110 fallback; songcheck flags "empty display anchor" / "no display anchors" |
 | SYS-USE-20 | Song config without stops: PC sends a configured **default registration** at song start (not "leave stops as they are") (D16) | NOT IMPLEMENTED (gap) | PC organ/stops: no default registration setting |
@@ -283,15 +283,16 @@ The base is one writer among several.
 | SYS-BUS-02 | A foreign song number on the bus (manual controller) is mirrored on the base OLED and on the remote; playback is NOT touched (D13) | NOT IMPLEMENTED (gap) | base fw (OLED + forward to remote), remote fw (display), protocol (message) |
 | SYS-BUS-03 | While recording, foreign frames are recorded into the MIDI file (D9, SYS-REC-03) | NOT IMPLEMENTED (gap) | see SYS-REC-03 |
 | SYS-BUS-04 | The base writes to the bus only on NOW_PLAYING_INFO from the PC; PC start/restart does not write to the bus (D14) | implemented | base display.cpp, PC |
-| SYS-BUS-05 | Base transmits without corrupting a frame from another master (bus idle check / collision handling) | open (O-10) | single-wire isolated UART; electrical rules from the V2 protocol |
+| SYS-BUS-05 | Base transmits without corrupting a frame from another master (bus idle check / collision handling) | open (O-10) | single-wire isolated UART; V2 defines no arbitration (sec. 5) |
 | SYS-BUS-06 | Base hot-plug sense of the bus (PC13); no frames sent while the bus is absent | implemented, not bench-verified | base display.cpp; bench has no indicator |
 | SYS-BUS-07 | On stop / song end the indicator is cleared only if it still shows the number we sent; if another master wrote since, leave it (D20) | differs from code (gap, verify) | clearing today is unconditional (SYS-USE-08/10) |
+| SYS-BUS-08 | A received frame is accepted only if it is 9 bytes and starts with the `0xB0` flag; anything else is dropped and does not change the base's state (INDICATOR-BUS.md) | partial | base display.cpp checks the length only, not the flag |
 
 ### 4.15 Documentation (new group)
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-DOC-01 | Indicator bus protocol and song code set documented from the owner's V2 protocol files (D7), sec. 5 | NOT IMPLEMENTED (gap) | files not yet supplied |
+| SYS-DOC-01 | Indicator bus protocol and song code set documented from the owner's V2 protocol files (D7), sec. 5 | implemented | `midicontrol-protocol/INDICATOR-BUS.md` |
 | SYS-DOC-02 | `midicontrol-fw` IMPLEMENTATION_PROMPT.md marked obsolete (proposed default, P11) | NOT IMPLEMENTED (gap) | contradicts PROTOCOL.md |
 | SYS-DOC-03 | Doc inconsistencies resolved from code (RSSI poll 10 vs 11 s, ST-Link serials, ConfirmScreen language, JSON schema 1 vs 2, upload head limit 4 vs 8 KiB) (proposed default, P9) | NOT IMPLEMENTED (gap) | CLAUDE.md / docs in fw and PC repos |
 | SYS-DOC-04 | SysEx manufacturer ID 0x4D kept; the display format is fixed by existing church hardware (proposed default, P10) | implemented | - |
@@ -301,14 +302,24 @@ The base is one writer among several.
 
 ## 5. Church indicator / display bus protocol
 
-**Placeholder.** To be documented from the owner's original V2 protocol files
-(`/mnt/nas/vojta/OLD/MIDIControl/MISC/V2`, not yet supplied to the container) (D7). Must cover: frame format
-and timing, song code set (digits, letters, range), verse/letter/LED fields, special values, electrical layer,
-multi-master rules (who may send when, collision handling), and the embedded display SysEx in MIDI files.
+Full reference: **`midicontrol-protocol/INDICATOR-BUS.md`** (English translation of the owner's original V2 document,
+kept as `midicontrol-protocol/docs/indicator-bus/Komunikacni_protokol_svetelneho_ukazatele.odt`, plus the mapping to
+NOW_PLAYING_INFO and the display SysEx). In the firmware repos it is under `lib/protocol/`. Summary:
 
-Known today (from code, to be checked against V2): USART 1200 Bd, 9-byte frame (BCD song hi/lo, verse,
-letter 0xA-0xD / 0xF blank, LED); 0xFF = no change, 0xFE = blank field, empty = clear; presence sense on base
-PC13; SysEx manufacturer ID 0x4D.
+- **Electrical.** RJ11: pin 2 data, pin 4 GND, pin 5 supply 12-14 V from the indicator; pins 1/3/6 unused. One data
+  line for receive and transmit, about 14 V. Isolated interface: TX through PC817 -> PNP (BC807) -> diode -> 200-300 ohm
+  onto the line; RX through 4k7 -> PC817. The circuit inverts, so the MCU sees a plain 3.3 V UART.
+- **UART.** 1200 Bd (8N1 in the firmware), about 75 ms per frame.
+- **Frame.** 9 bytes: `B0` flag, verse ones, verse tens, song ones, tens, hundreds, thousands, letter (`0A`-`0D` = A-D),
+  LED (`20` red, `21` yellow, `22` green, `23` blue). Upper nibble `E` in any byte = that field blank (LED off).
+- **Multi-master.** Every controller (ours and the manual ones) transmits on the same line. V2 defines no arbitration
+  or collision rule (O-10).
+- **Colour numbering differs.** SysEx and NOW_PLAYING_INFO use 1 red, 2 green, 3 blue, 4 yellow. The bus uses `20` red,
+  `21` yellow, `22` green, `23` blue. Convert by table.
+- **Song code set (D7).** 4 digit positions (0-9 or blank), letter A-D or blank. V2 does not limit the range; the
+  firmware caps `setSong()` at 1999 (probably only a "1" in the thousands position on the board, O-1).
+- **V2 contradiction (O-2).** V2's second example ("song 12") puts the digits in the hundreds/thousands bytes,
+  against its own ones-first rule. This may be the same effect as the shifted 512/513 files.
 
 ---
 
@@ -341,7 +352,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 21 | SYS-FW-04 | Image without trailer must not boot (F5, P6) | midicontrol-bootloader, midicontrol-fw, midicontroller-fw (build flag) |
 | 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7) | midicontrolpy-sw |
 | 23 | SYS-DIAG-04 | PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
-| 24 | SYS-DOC-01 | Document indicator bus protocol + song code set from V2 files (D7) | midicontrolpy-sw/docs (this file, sec. 5), midicontrol-protocol |
+| 24 | SYS-BUS-08 | Check the `0xB0` flag on received indicator frames | midicontrol-fw |
 | 25 | SYS-DOC-02 | Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
 | 26 | SYS-DOC-03 | Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
 | 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20) | midicontrol-fw, midicontrolpy-sw |
@@ -352,20 +363,21 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 
 Details: `docs/HARDWARE.md` in `midicontrol-fw` (base) and `midicontroller-fw` (remote). **The firmware pin
 map and the bench are authoritative**; `midicontrol-hw` / `midicontroller-hw` are historical reference (D11).
-BLE in ALL units (base and remote): **RNBD350 on an RN4870-footprint adapter board**, pins as RN4870 (UART,
-RST, MODE); schematics showing an RN4870 are pre-adapter (D10).
+BLE in ALL units (base and remote): **RNBD350 on an RN4870-footprint adapter board**: UART and RST as on the RN4870.
+The RNBD350 has **no MODE pin, so MODE is not wired** (D22); the MCU MODE outputs (base PA0, remote PB9) drive
+nothing. Schematics showing an RN4870 are pre-adapter (D10).
 
 | Item | Base (`midicontrol-fw`) | Remote (`midicontroller-fw`) |
 |---|---|---|
 | MCU | STM32G431CBT6 (Cortex-M4F, 128 KB flash, 32 KB SRAM), 144 MHz from 48 MHz HSE | STM32G071CBT6 (Cortex-M0+, 128 KB flash, 36 KB SRAM), 64 MHz from HSI16 |
-| BLE | RNBD350 on adapter; USART2 PA2/PA3 115200, RST PA1, MODE PA0 | RNBD350 on adapter; USART2 PA2/PA3 |
+| BLE | RNBD350 on adapter; USART2 PA2/PA3 115200, RST PA1 (PA0 MODE output unconnected, D22) | RNBD350 on adapter; USART2 PA2/PA3 |
 | Display / input | SH1106 OLED (I2C), EC11 encoder with switch, WS2812B LEDs (4 front, 6 rear) | SH1106 OLED (I2C 0x3C), 5x3 key matrix + OK + power button |
 | Organ / bus I/O | 2 MIDI DIN ports (TX buffer, 6N138 opto RX, ports switched by an ATtiny1607 with its own fw); indicator bus: isolated single-wire UART (PC817) + presence sense PC13; SSR drive PA4 -> PC817 -> LM317L current source -> 500 mA fuse | - |
 | Power | USB VBUS 5 V; MC34063 buck to 3V3; supercap-backed 5VL rail | 2P NCR18650B; BQ24195 charger (I2C 0x6B); AP2112K-3.3 behind a latch (PA1 hold) |
 | USB | USB-C full-speed device: CDC protocol + USB-MIDI + CDC log | USB-C power/charging only (UCPD CC sense, BQ24195 D+/D-) |
 | Storage | internal flash (BL 32 K / app 94 K / settings 2 K) | W25Q32 4 MB SPI NOR (OTA staging, diag slots); internal flash BL 16 K / app 110 K / settings 2 K |
 | Debug | SWD 2x3 header (no VTref unless JP2 bridged), STLINK-V3 | SWD 5-pin header, ST-LINK/V2 |
-| Open HW points | SSR type unknown (D12); no pull-down on PA4 (SSR during reset window); RNBD350 MODE pin to re-check | battery / charge current to confirm (O-8) |
+| Open HW points | SSR type unknown (D12); no pull-down on PA4 (SSR during reset window) | battery / charge current to confirm (O-8) |
 
 ---
 
@@ -433,8 +445,8 @@ RST, MODE); schematics showing an RN4870 are pre-adapter (D10).
 
 | # | Item | Source | Blocks |
 |---|---|---|---|
-| O-1 | Song code set and indicator protocol: V2 files at `/mnt/nas/vojta/OLD/MIDIControl/MISC/V2` not mounted; owner to supply | D7, Q14 (OPEN) | sec. 5, SYS-USE-17, SYS-DOC-01, SYS-BUS-05 |
-| O-2 | 512/513 digit shift: show as authored or treat as authoring mistake? | Q15 (OPEN) | SYS-USE-18 |
+| O-1 | V2 protocol documented (sec. 5). Still open: can the thousands position show only "1" (firmware caps at 1999) or any digit? | D7 | sec. 5, SYS-USE-17 |
+| O-2 | 512/513 digit shift: show as authored or treat as authoring mistake? Related: V2's "song 12" example puts the digits in the hundreds/thousands bytes. Typo, or do short numbers really go left-aligned? | Q15 (OPEN) | SYS-USE-18, sec. 5 |
 | O-3 | Organ idle-off time X (minutes, default value) | D2 | SYS-ORG-04/05 |
 | O-4 | SSR type installed (bare-LED input vs 3-32 VDC input) | D12, Q19 | SYS-ORG-06 |
 | O-5 | Hardware pull-down on PA4 (SSR off during reset/bootloader)? Base HW draft: none on the net | Q18 | SYS-ORG-02 |
