@@ -13,6 +13,12 @@ namespace blestatus {
 	// false when the text is not a CONNECT event with an address type and a non-empty MAC.
 	bool parseConnect(const char *s, int &type, char *mac, size_t macSize);
 
+	// SYS-LINK-07: the remote link is usable only when connected, the stream is open and the peer accepted (secured with
+	// the bonded address). Used for GET_STATUS bleConnected and for BUSY vs UNREACHABLE.
+	constexpr bool linkUsable(bool connected, bool streamOpen, bool peerAccepted) {
+		return connected && streamOpen && peerAccepted;
+	}
+
 	// Module self-test for the Bluetooth info page, so a re-soldered module can be checked without a probe.
 	//   OK           configured, %REBOOT% came after the RST pulse
 	//   OK_NO_RESET  commands work, but no %REBOOT% after the RST pulse: RST -> NMCLR

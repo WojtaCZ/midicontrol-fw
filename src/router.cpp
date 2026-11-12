@@ -12,6 +12,7 @@
 #include "settings.hpp"
 #include "midi.hpp"
 #include "logic/recovery.hpp"
+#include "logic/ble_status.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -57,6 +58,10 @@ namespace router {
 	static boot::FwProgress _remoteFw(protocol::ADDR_REMOTE);
 
 	// Milliseconds for FwProgress (systick has 1 ms resolution; uint32_t wraparound is handled in the tracker)
+	static bool bleLinkUsable() {
+		return blestatus::linkUsable(Bluetooth::isConnected(), Bluetooth::isStreamOpen(), Bluetooth::isPeerAccepted());
+	}
+
 	static uint32_t nowMs() {
 		return static_cast<uint32_t>(stmcpp::systick::getDuration() / 1_ms);
 	}
@@ -374,7 +379,7 @@ namespace router {
 				Packet resp = {};
 				resp.dest = pkt.source;
 				resp.msgType = MsgType::STATUS_RESP;
-				resp.payload[0] = static_cast<uint8_t>(Bluetooth::isConnected());
+				resp.payload[0] = static_cast<uint8_t>(bleLinkUsable()); // SYS-LINK-07: only once secured
 				resp.payload[1] = static_cast<uint8_t>(base::current::isEnabled());
 				resp.payload[2] = static_cast<uint8_t>(display::isConnected());
 				resp.payload[3] = static_cast<uint8_t>(isPcAlive());
@@ -470,7 +475,7 @@ namespace router {
 		// but the TX path is briefly occupied (module command mode). Connected but the stream not yet open, or
 		// the link not yet secured (after %CONNECT%), is still UNREACHABLE for the PC: BUSY would force it to retry for as long as
 		// the Remote is unavailable.
-		bool linkUp = (to == Transport::BLE) ? (Bluetooth::isConnected() && Bluetooth::isStreamOpen() && Bluetooth::isPeerAccepted()) : pcReachable();
+		bool linkUp = (to == Transport::BLE) ? bleLinkUsable() : pcReachable();
 		sendNak(pkt, linkUp ? NakReason::BUSY : NakReason::UNREACHABLE, from);
 	}
 

@@ -40,20 +40,49 @@ def test_keepalive_ack(quiet):
     assert r is not None and r.src == ADDR_BASE and r.dst == ADDR_PC
 
 
-def test_get_status(quiet, base):
-    before = base.u("Bluetooth::_connected", 1)
+def link_usable(base) -> int:
+    return int(all(base.u(n, 1) for n in ("Bluetooth::_connected", "Bluetooth::_streamOpen", "Bluetooth::_peerAccepted")))
+
+
+def get_status(quiet):
+    """GET_STATUS -> (ack, STATUS_RESP); the response is acknowledged, otherwise the base would repeat it 3x and disturb
+    the other tests."""
     pid = quiet.send_msg(MT.GET_STATUS)
     ack = quiet.recv(1.0, is_reply(MT.ACK, pid))
     resp = quiet.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.STATUS_RESP)
-    after = base.u("Bluetooth::_connected", 1)
+    if resp is not None:
+        quiet.send(Packet(ADDR_PC, ADDR_BASE, 0, MT.ACK, bytes([resp.pid])))
+    return ack, resp
+
+
+def test_get_status(quiet, base):
+    before = link_usable(base)
+    ack, resp = get_status(quiet)
+    after = link_usable(base)
     assert ack is not None and resp is not None
     assert len(resp.payload) == 4
     ble, current, display, pc_alive = resp.payload
     assert pc_alive == 1
     assert ble in (before, after)
-    # STATUS_RESP is acknowledged, otherwise the base would repeat it 3x and disturb the other tests
-    quiet.send(Packet(ADDR_PC, ADDR_BASE, 0, MT.ACK, bytes([resp.pid])))
     assert quiet.expect_silence(0.7) == []
+
+
+def test_status_ble_only_when_secured(quiet, base):
+    """SYS-LINK-07 (gap 10): bleConnected is 1 only for a usable (secured) link. The probe clears _peerAccepted for one
+    request (connected + stream open, not secured: the state between %STREAM_OPEN% and %SECURED%), then restores it."""
+    from conftest import remote_alive, wait_until
+    wait_until(lambda: link_usable(base) and remote_alive(base), 15.0, what="secured remote link")
+    assert get_status(quiet)[1].payload[0] == 1
+    addr = base.sym("Bluetooth::_peerAccepted")
+    base.write(addr, b"\x00")
+    try:
+        assert base.u("Bluetooth::_connected", 1) and base.u("Bluetooth::_streamOpen", 1)
+        ack, resp = get_status(quiet)
+        assert ack is not None and resp is not None
+        assert resp.payload[0] == 0, f"connected but not secured reported as connected: {resp.payload.hex()}"
+    finally:
+        base.write(addr, b"\x01")
+    assert get_status(quiet)[1].payload[0] == 1
 
 
 def test_set_current_on_off(quiet, base):

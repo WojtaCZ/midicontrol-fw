@@ -175,3 +175,14 @@ TEST(BleScan, RejectsOtherStatusText) {
 	EXPECT_FALSE(parseScan("40843204625F,00,X,,-35,01", r));     // 6 fields, no Brcst
 	EXPECT_FALSE(parseScan("40843204625F,00,X,,ZZ,01,00", r));   // RSSI not hex
 }
+
+// SYS-LINK-07 (gap 10): the remote counts as connected (GET_STATUS bleConnected, BUSY vs UNREACHABLE) only once the link
+// is usable: connected, stream open and the peer accepted (secured with the matching address)
+TEST(BleLinkUsable, OnlyWhenConnectedStreamOpenAndAccepted) {
+	EXPECT_TRUE(blestatus::linkUsable(true, true, true));
+	EXPECT_FALSE(blestatus::linkUsable(true, false, false));  // right after %CONNECT%
+	EXPECT_FALSE(blestatus::linkUsable(true, true, false));   // stream open, not secured yet
+	EXPECT_FALSE(blestatus::linkUsable(true, false, true));
+	EXPECT_FALSE(blestatus::linkUsable(false, true, true));   // stale flags after a loss
+	EXPECT_FALSE(blestatus::linkUsable(false, false, false));
+}

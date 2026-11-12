@@ -174,7 +174,7 @@ power policy and serves a status web page.
 | SYS-LINK-04 | Frames PC -> remote while the link is down -> NAK UNREACHABLE | implemented | base router.cpp |
 | SYS-LINK-05 | Remote ignores RN status text injected by a peer over the data stream (F2/F4); follows from D3 | NOT IMPLEMENTED (gap) | remote bluetooth.cpp |
 | SYS-LINK-06 | On reconnect, right after the link is secured, the remote asks the PC for now-playing state and updates its screen (D8) | NOT IMPLEMENTED (gap) | remote waits for the next SIGNAL_* |
-| SYS-LINK-07 | GET_STATUS reports BLE "connected" only once the link is secured (proposed default, P5) | differs from code (gap) | base reports connected from %CONNECT% |
+| SYS-LINK-07 | GET_STATUS reports BLE "connected" only once the link is secured (proposed default, P5) | implemented 2026-11-12 | `blestatus::linkUsable` (connected, stream open, peer accepted), base router.cpp; same rule as BUSY vs UNREACHABLE |
 
 ### 4.5 PC absent / PC crash
 
@@ -343,7 +343,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 7 | SYS-PAIR-06 | Explicit "pair new base" action on the remote (D3) | midicontroller-fw |
 | 8 | SYS-LINK-05 | Remote ignores RN status text injected by a peer (F2/F4) | midicontroller-fw |
 | 9 | SYS-LINK-06 | Remote requests now-playing after the link is secured (D8) | midicontroller-fw, midicontrolpy-sw (answer), midicontrol-protocol (if a new message) |
-| 10 | SYS-LINK-07 | GET_STATUS BLE "connected" only when secured (P5) | midicontrol-fw |
+| 10 | SYS-LINK-07 | CLOSED 2026-11-12 (`test_cdc_local.py::test_status_ble_only_when_secured`, `BleLinkUsable.*`): GET_STATUS BLE "connected" only when secured (P5) | midicontrol-fw |
 | 11 | SYS-PWR-02 | CLOSED 2026-11-12: first BLE attempt after base boot fails; cause = remote advertising restart collides with the first connection setup, now a non-counted setup failure, link up on the first CE (P1) | midicontrol-fw |
 | 12 | SYS-USE-09, SYS-NOTE-01 | Real pause: halt, All Notes Off, keep position (D6) | midicontrolpy-sw, midicontroller-fw, midicontrol-fw (OLED) |
 | 13 | SYS-USE-21 | Resume at the same spot; resume message + UI (D6) | midicontrol-protocol, midicontrolpy-sw, midicontroller-fw, midicontrol-fw |
