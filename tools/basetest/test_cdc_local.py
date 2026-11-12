@@ -9,7 +9,7 @@ from proto import MT, NAK, Packet
 
 ADDR_PC, ADDR_BASE = proto.ADDR_PC, proto.ADDR_BASE
 
-# GUI::mainItems[2] (power checkbox): the size of ui::MenuItem and the offset of checked_ from DWARF (build with -g, see README). Without DWARF a struct field cannot be read any other way.
+# GUI::settingsItems[2] (power checkbox, moved from mainItems into the settings screen): the size of ui::MenuItem and the offset of checked_ from DWARF (build with -g, see README). Without DWARF a struct field cannot be read any other way.
 MENUITEM_SIZE, MENUITEM_CHECKED = 24, 0x14
 
 
@@ -31,7 +31,7 @@ def is_reply(mtype, pid=None):
 
 
 def checkbox_power(base) -> int:
-    return base.read(base.sym("GUI::mainItems") + 2 * MENUITEM_SIZE + MENUITEM_CHECKED, 1)[0]
+    return base.read(base.sym("GUI::settingsItems") + 2 * MENUITEM_SIZE + MENUITEM_CHECKED, 1)[0]
 
 
 def test_keepalive_ack(quiet):

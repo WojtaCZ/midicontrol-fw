@@ -35,3 +35,26 @@ TEST(Recovery, MessageSequence) {
 	cleanupMessage(31, m); EXPECT_EQ(m[0], 0xBF); EXPECT_EQ(m[1], 120);
 	cleanupMessage(30, m); EXPECT_EQ(m[0], 0xBF); EXPECT_EQ(m[1], 123);
 }
+
+// SYS-PC-03 / D1 / D19: cut-off only on the transition PC present -> PC lost
+TEST(PcLossGuard, NeverFiresWithoutAPcEverPresent) {
+	PcLossGuard g;
+	for (int i = 0; i < 5; ++i) EXPECT_FALSE(g.update(false));
+}
+
+TEST(PcLossGuard, FiresOnceOnLoss) {
+	PcLossGuard g;
+	EXPECT_FALSE(g.update(true));
+	EXPECT_FALSE(g.update(true));
+	EXPECT_TRUE(g.update(false));
+	EXPECT_FALSE(g.update(false));
+	EXPECT_FALSE(g.update(false));
+}
+
+TEST(PcLossGuard, RearmsWhenThePcReturns) {
+	PcLossGuard g;
+	g.update(true);
+	EXPECT_TRUE(g.update(false));
+	EXPECT_FALSE(g.update(true));
+	EXPECT_TRUE(g.update(false));
+}

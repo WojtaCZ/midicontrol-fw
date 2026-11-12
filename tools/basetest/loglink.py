@@ -34,6 +34,7 @@ class LogLink:
         self.history = []  # [(receive time, line)] all whole lines
         self.raw = b""
         self._buf = b""
+        self._synced = False  # first line after open may be cut (see _read_loop)
         self._pos = 0  # cursor for lines()/wait_for()
         self._cv = threading.Condition()
         self._stop = threading.Event()
@@ -55,7 +56,16 @@ class LogLink:
                 with self._cv:
                     self.raw += data
                     self._buf += data
-                    while b"\n" in self._buf:
+                    if not self._synced:
+                        # Opening the tty raises DTR, the base starts replaying its ring at once, and pyserial's open()
+                        # then flushes the input buffer (TCIFLUSH): the first line can arrive without its beginning.
+                        # Whole lines start with "[" (log) or "-" (markers); anything else up to the first newline is a stub.
+                        if self._buf[:1] in (b"[", b"-"):
+                            self._synced = True
+                        elif b"\n" in self._buf:
+                            self._buf = self._buf.split(b"\n", 1)[1]
+                            self._synced = True
+                    while self._synced and b"\n" in self._buf:
                         line, self._buf = self._buf.split(b"\n", 1)
                         self.history.append((time.monotonic(), line.rstrip(b"\r").decode(errors="replace")))
                     self._cv.notify_all()
@@ -115,7 +125,14 @@ class LogLink:
         """Sends a command + CRLF; returns the reply lines (lines without the log prefix and not markers). Log lines received
         in the meantime stay in the history (the cursor is not advanced by them)."""
         with self._cv:
+            # Right after open the replay (with a possibly cut first line) may still be on its way: give it a moment
+            # so the cut line is recognised as such and not mistaken for the reply.
+            end_wait = time.monotonic() + 0.5
+            while not self._synced and time.monotonic() < end_wait:
+                self._cv.wait(0.05)
             start = len(self.history)
+            if not self._synced and not self._buf:
+                self._synced = True  # nothing pending from the open: the next bytes are the reply, which may not start with "["
         self.ser.write(text.encode() + b"\r\n")
         self.ser.flush()
         end = time.monotonic() + timeout

@@ -10,6 +10,8 @@
 #include "git.hpp"
 #include "resetcause.hpp"
 #include "settings.hpp"
+#include "midi.hpp"
+#include "logic/recovery.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -69,6 +71,7 @@ namespace router {
 
 	// Diagnostics (log): last reported state of the peers, dropped frames and a full CDC buffer
 	static bool _pcAliveLogged = false;
+	static recovery::PcLossGuard _pcLossGuard;
 	static bool _remoteAliveLogged = false;
 	static uint16_t _badFrames = 0;
 	static uint16_t _cdcOverflows = 0;
@@ -513,6 +516,14 @@ namespace router {
 
 	// Changes in PC/Remote availability and a summary of dropped frames (at most once per second) into the log
 	static void logChanges() {
+		// SYS-PC-03: PC present -> lost (USB unplugged/unmounted or keepalive timeout): stop the organ sounding
+		// and switch the SSR off. Once per transition; a base that never saw a PC keeps power (D19).
+		if (_pcLossGuard.update(tud_mounted() && isPcAlive())) {
+			midi::sendStuckNoteCleanup();
+			base::current::disable();
+			GUI::syncPowerCheckbox();
+			Debug::log(Debug::Level::WARNING, "router", "PC lost: all notes off, organ power off");
+		}
 		bool pc = isPcAlive();
 		if (pc != _pcAliveLogged) {
 			_pcAliveLogged = pc;

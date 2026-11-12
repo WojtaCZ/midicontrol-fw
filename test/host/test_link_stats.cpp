@@ -46,9 +46,11 @@ TEST(LinkStats, RssiLine) {
 TEST(LinkStats, CountersAndReconnectTime) {
 	Stats s;
 	s.onConnect();
-	s.onLost(true, 10000);
+	s.onStreamOpen(5000);
+	EXPECT_TRUE(s.onLost(true, 10000));
 	EXPECT_EQ(s.c.losses, 1);
 	EXPECT_EQ(s.c.errConn, 1);
+	s.onConnect();
 	s.onStreamOpen(10000 + 2300);
 	EXPECT_EQ(s.c.lastReconnectMs, 2300);
 	s.onStreamOpen(99999); // no loss pending: unchanged
@@ -58,6 +60,28 @@ TEST(LinkStats, CountersAndReconnectTime) {
 	EXPECT_EQ(s.c.errConn, 1);
 	s.onStreamOpen(20000 + 200000); // saturates
 	EXPECT_EQ(s.c.lastReconnectMs, 0xFFFF);
+}
+
+// RNBD350 bench 2026-11-12 (FAULTS 2.2): right after a base boot the first CE ends in %CONNECT% then %ERR_CONN% ~120 ms later,
+// before %STREAM_OPEN%, and the module itself connects again ~200 ms later. A link that never opened its stream is a failed
+// connection setup, not a lost link: no loss, no ERR_CONN counted, and the reconnect time keeps running to the real stream open.
+TEST(LinkStats, SetupFailureBeforeStreamOpenIsNotALoss) {
+	Stats s;
+	s.onConnect();
+	EXPECT_FALSE(s.onLost(true, 5728));
+	EXPECT_EQ(s.c.losses, 0);
+	EXPECT_EQ(s.c.errConn, 0);
+	s.onConnect();
+	s.onStreamOpen(7370);
+	EXPECT_EQ(s.c.lastReconnectMs, 0); // nothing was lost
+	EXPECT_TRUE(s.onLost(true, 20000));
+	s.onConnect();
+	EXPECT_FALSE(s.onLost(true, 21000)); // setup of the reconnect fails: still one loss
+	s.onConnect();
+	s.onStreamOpen(23000);
+	EXPECT_EQ(s.c.losses, 1);
+	EXPECT_EQ(s.c.errConn, 1);
+	EXPECT_EQ(s.c.lastReconnectMs, 3000); // measured from the real loss
 }
 
 TEST(LinkStats, RebootInterval) {
@@ -77,6 +101,8 @@ TEST(LinkStats, CountersSaturate) {
 TEST(LinkStats, RssiGoesStaleAndClearsOnLoss) {
 	Stats s;
 	EXPECT_EQ(s.rssiNow(0), RSSI_UNKNOWN);
+	s.onConnect();
+	s.onStreamOpen(500);
 	s.setRssi(-60, 1000);
 	EXPECT_EQ(s.rssiNow(2000), -60);
 	EXPECT_EQ(s.rssiNow(1000 + RSSI_STALE_MS + 1), RSSI_UNKNOWN);

@@ -102,15 +102,19 @@ namespace linkstats {
 		peerRssiEver = false;
 		params = {};
 		phyTx = phyRx = 0;
+		established = false;
 	}
 
-	void Stats::onLost(bool isErrConn, uint32_t nowMs) {
+	bool Stats::onLost(bool isErrConn, uint32_t nowMs) {
+		rssi = RSSI_UNKNOWN;
+		rssiEver = false;
+		if (!established) return false; // setup failed (FAULTS 2.2): a pending reconnect time keeps running
+		established = false;
 		c.losses = sat(c.losses);
 		if (isErrConn) c.errConn = sat(c.errConn);
 		lossAt = nowMs;
 		lossPending = true;
-		rssi = RSSI_UNKNOWN;
-		rssiEver = false;
+		return true;
 	}
 
 	uint32_t Stats::onUnexpectedReboot(uint32_t nowMs) {
@@ -122,6 +126,7 @@ namespace linkstats {
 	}
 
 	void Stats::onStreamOpen(uint32_t nowMs) {
+		established = true;
 		if (!lossPending) return;
 		lossPending = false;
 		uint32_t d = nowMs - lossAt;

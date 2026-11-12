@@ -254,8 +254,11 @@ def test_positions_survive_uint32_wrap(link, log, base):
         magic, head, tail, dropped, _ = struct.unpack("<5I", base.read(hdr, 20))
         sent = base.u("Debug::_sent")
         boot = base.u("Debug::_bootPos")
-        target = 0xFFFFFFFF - 600  # tail just below 2^32: further lines cross the wrap
-        delta = ((target - tail) // size) * size
+        # head (not tail) just below 2^32, so the next line would cross the wrap unless append() rebases first. A tail
+        # near 2^32 would put head past it: a masked head jumps 1024 ring bytes (2^32 % 1536), a state the firmware never
+        # reaches (it rebases once tail >= 2^31) and which made it send line stubs (FAULTS 2.4, 2026-11-12).
+        target = 0xFFFFFFFF - 64
+        delta = ((target - head) // size) * size
         f = [magic, (head + delta) & 0xFFFFFFFF, (tail + delta) & 0xFFFFFFFF, dropped]
         f.append(_crc32(struct.pack("<4I", *f)))
         base.write(hdr, struct.pack("<5I", *f))

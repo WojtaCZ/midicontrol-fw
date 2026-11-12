@@ -533,10 +533,15 @@ extern "C" int main(void) {
 					{
 						linkstats::Stats &ls = Bluetooth::linkStats();
 						bool errConn = command->getType() == Bluetooth::Command::Type::ERR_CONN;
-						Debug::log(Debug::Level::INFO, "ble", "%s, last rssi %d dBm, conn %u/%u/%u", errConn ? "link lost (ERR_CONN)" : "disconnect",
-								   static_cast<int>(ls.rssiNow(stmcpp::systick::getTicks())), static_cast<unsigned>(ls.params.interval),
-								   static_cast<unsigned>(ls.params.latency), static_cast<unsigned>(ls.params.timeout));
-						ls.onLost(errConn, stmcpp::systick::getTicks());
+						int rssi = ls.rssiNow(stmcpp::systick::getTicks());
+						// FAULTS 2.2: right after a base boot the remote is still restarting its advertising after losing the old
+						// link, the first CE ends in %CONNECT% + %ERR_CONN% before STREAM_OPEN and the module connects again
+						// by itself. A link that never opened its stream is a failed setup, not a loss (not counted).
+						bool lost = ls.onLost(errConn, stmcpp::systick::getTicks());
+						const char *what = !lost ? "connect failed during setup" : errConn ? "link lost (ERR_CONN)" : "disconnect";
+						Debug::log(Debug::Level::INFO, "ble", "%s, last rssi %d dBm, conn %u/%u/%u", what, rssi,
+								   static_cast<unsigned>(ls.params.interval), static_cast<unsigned>(ls.params.latency),
+								   static_cast<unsigned>(ls.params.timeout));
 					}
 					_secureOnStreamOpen = false;
 					_peerAddrMatched = false;

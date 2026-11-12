@@ -53,12 +53,14 @@ namespace linkstats {
 		bool peerRssiEver = false;
 		uint32_t lossAt = 0;
 		bool lossPending = false;
+		bool established = false; // the current link reached STREAM_OPEN
 		uint32_t lastRebootAt = 0;
 		bool rebootEver = false;
 
 		// A new link: what was measured on the previous one no longer applies (counters stay)
 		void onConnect();
-		void onLost(bool errConn, uint32_t nowMs);
+		// A link that ends before STREAM_OPEN is a failed connection setup, not a loss: returns false and counts nothing
+		bool onLost(bool errConn, uint32_t nowMs);
 		// Returns ms since the previous unexpected reboot (0 = first one)
 		uint32_t onUnexpectedReboot(uint32_t nowMs);
 		void onStreamOpen(uint32_t nowMs);
