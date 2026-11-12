@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Read first: system spec and hardware
+
+`docs/SYSTEM.md` is the owner's specification of what the whole MIDIcontrol system (PC software, base, remote,
+bootloader, protocol) is expected to do, with requirement IDs, owner decisions and a gap list. Its main copy lives in
+`midicontrolpy-sw/docs/SYSTEM.md`; the copies in the other repos are kept identical by
+`midicontrolpy-sw/tools/sync-system-doc.sh` (`--check` reports drift). Edit only the main copy. When the code and the spec
+disagree, the spec says what is wanted: ask the owner instead of changing the spec to match the code.
+`docs/HARDWARE-base.md` / `docs/HARDWARE-remote.md` (or `docs/HARDWARE.md` in the matching firmware repo) describe the
+base (STM32G431) and remote (STM32G071) hardware. The firmware pin maps are authoritative; the KiCad repos are historical.
+
+This repo holds the MAIN copy of the base hardware description, `docs/HARDWARE.md` (copied elsewhere as `HARDWARE-base.md`).
+
 ## Project Overview
 
 STM32G431CBTx (Cortex-M4F, 144 MHz) firmware for the MIDIcontrol **base station**: USB-MIDI card for the PC player, packet router between the PC (USB-CDC) and the handheld remote (BLE, Microchip **RN4870**), SSR driver for organ power, church indicator (7-segment display) driver, OLED (SH1106 via I2C) with an encoder menu, and RGB status LEDs. Written in C++23 with no exceptions; no heap use in interrupt handlers (fixed-size lock-free ring buffers, `inc/ringbuffer.hpp`).
