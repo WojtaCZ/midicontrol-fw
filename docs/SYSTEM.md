@@ -133,9 +133,9 @@ power policy and serves a status web page.
 | SYS-PAIR-01 | Base pairing from base menu, Just Works, 15 s timeout, result on base OLED | implemented | base main.cpp |
 | SYS-PAIR-02 | Base connects only to name `MIDIControlRemote`, later only to the stored address | implemented | base |
 | SYS-PAIR-03 | Base upgraded from settings v1 must be re-paired once (no trust-on-first-use) | implemented | base settings |
-| SYS-PAIR-04 | Remote accepts a connection and frames (incl. OTA, SIGNAL_*) **only from its bonded base**; any other central is refused (D3) | NOT IMPLEMENTED (gap) | remote accepts any central (REVIEW I5/R35) |
+| SYS-PAIR-04 | Remote accepts a connection and frames (incl. OTA, SIGNAL_*) **only from its bonded base**; any other central is refused (D3) | implemented 2026-11-12 | `peerguard::Guard`: frames in and out only on a link whose %CONNECT% MAC is the bond and that is secured; other centrals get K,1 (every 3 s while they stay); module accept list (JC/JA) holds the bond. Residual: the MAC in %CONNECT% is what the module reports, a spoofed MAC still needs our bond key to secure |
 | SYS-PAIR-05 | New bond over Coded may go silent after ~4 s; base drops it once (K,1) and reconnects ~5 s later. Workaround accepted (proposed default, P2) | implemented | cause unknown |
-| SYS-PAIR-06 | Pairing the remote to a new base is an explicit action on the remote (menu item); without it the remote keeps its current bond (D3) | NOT IMPLEMENTED (gap) | remote has no pairing UI |
+| SYS-PAIR-06 | Pairing the remote to a new base is an explicit action on the remote (menu item); without it the remote keeps its current bond (D3) | implemented 2026-11-12 | Nastaveni -> "Sparovat zakl.": 60 s window, accept list cleared, the first central that connects and secures becomes the bond (settings v2 `baseMac`). No trust on first use: a remote upgraded from an older release has no bond and must be paired once from this menu (and from the base menu). Any base in range during the window can take it: switch an old base off first |
 | SYS-PAIR-07 | Base reconnect uses the module's last bond (bare `C`); acceptable because both ends whitelist the peer (proposed default, P12) | implemented | depends on SYS-PAIR-04 |
 
 ### 4.3 Normal use (playback)
@@ -172,7 +172,7 @@ power policy and serves a status web page.
 | SYS-LINK-02 | Remote shows "Odpojeno / Cekam na zakladnu" while the base is gone; commands not sent | implemented | remote |
 | SYS-LINK-03 | Playback continues on BLE link loss (PC owns playback) | implemented, not bench-verified | PC |
 | SYS-LINK-04 | Frames PC -> remote while the link is down -> NAK UNREACHABLE | implemented | base router.cpp |
-| SYS-LINK-05 | Remote ignores RN status text injected by a peer over the data stream (F2/F4); follows from D3 | NOT IMPLEMENTED (gap) | remote bluetooth.cpp |
+| SYS-LINK-05 | Remote ignores RN status text injected by a peer over the data stream (F2/F4); follows from D3 | implemented 2026-11-12 | a %CONNECT% while linked is ignored (F2), "CMD>" not answering our `$$$` is ignored (F4), a refused peer's text is believed only for REBOOT (and DISCONNECT/ERR_CONN after our K,1). Residual: the RN status channel shares the stream, so an accepted (bonded) base could still write status text |
 | SYS-LINK-06 | On reconnect, right after the link is secured, the remote asks the PC for now-playing state and updates its screen (D8) | NOT IMPLEMENTED (gap) | remote waits for the next SIGNAL_* |
 | SYS-LINK-07 | GET_STATUS reports BLE "connected" only once the link is secured (proposed default, P5) | implemented 2026-11-12 | `blestatus::linkUsable` (connected, stream open, peer accepted), base router.cpp; same rule as BUSY vs UNREACHABLE |
 
@@ -238,7 +238,7 @@ power policy and serves a status web page.
 | SYS-FW-04 | An image without a valid trailer must not boot (F5); fixed before deployment (proposed default, P6) | differs from code (gap) | boots unless BOOT_REQUIRE_TRAILER=1 |
 | SYS-FW-05 | Base bootloader entry: TAMP BKP0R magic or encoder held at power-on; progress on OLED | implemented | base bootloader |
 | SYS-FW-06 | Remote OTA via base: staged in W25Q32, CRC check, bootloader copies (3 tries per boot) | implemented | ~75 s 1M, 2 min 32 s Coded S8 (68.8 kB) |
-| SYS-FW-07 | Remote accepts OTA only from its bonded base (D3) | NOT IMPLEMENTED (gap) | same work as SYS-PAIR-04 |
+| SYS-FW-07 | Remote accepts OTA only from its bonded base (D3) | implemented 2026-11-12 | OTA frames pass the same guard as SYS-PAIR-04 |
 | SYS-FW-08 | PC refuses play/control commands during a firmware update, and detects a base left in its bootloader (offers re-flash) (proposed default, P7) | NOT IMPLEMENTED (gap) | PC |
 | SYS-FW-09 | Firmware upload from the web page (POST <= 512 KiB -> 202/409/422), no authentication; church LAN is trusted (assumption, D4) | implemented | PC web_server |
 
@@ -339,9 +339,9 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 3 | SYS-ORG-04, SYS-USE-10 | Organ stays on between songs; no off at song end/stop (D2, D5) | midicontrolpy-sw |
 | 4 | SYS-ORG-05 | Configurable idle-off timer on the PC (D5) | midicontrolpy-sw |
 | 5 | SYS-ORG-07 | Manual organ-on from base/remote overrides until the next idle timeout; PC learns manual state; remote control | midicontrolpy-sw, midicontroller-fw, midicontrol-protocol (if a new message), midicontrol-fw |
-| 6 | SYS-PAIR-04, SYS-FW-07 | Remote accepts connection/frames/OTA only from the bonded base (D3) | midicontroller-fw |
-| 7 | SYS-PAIR-06 | Explicit "pair new base" action on the remote (D3) | midicontroller-fw |
-| 8 | SYS-LINK-05 | Remote ignores RN status text injected by a peer (F2/F4) | midicontroller-fw |
+| 6 | SYS-PAIR-04, SYS-FW-07 | CLOSED 2026-11-12 (`peerguard::Guard`, `test_remote_guard.py`, `PeerGuard.*`): Remote accepts connection/frames/OTA only from the bonded base (D3) | midicontroller-fw |
+| 7 | SYS-PAIR-06 | CLOSED 2026-11-12 (menu "Sparovat zakl.", `test_pairing_window_*`): Explicit "pair new base" action on the remote (D3) | midicontroller-fw |
+| 8 | SYS-LINK-05 | CLOSED 2026-11-12 (`test_remote_guard.py`, `test_remote_status_rx.py`, `StatusFramer.*`): Remote ignores RN status text injected by a peer (F2/F4) | midicontroller-fw |
 | 9 | SYS-LINK-06 | Remote requests now-playing after the link is secured (D8) | midicontroller-fw, midicontrolpy-sw (answer), midicontrol-protocol (if a new message) |
 | 10 | SYS-LINK-07 | CLOSED 2026-11-12 (`test_cdc_local.py::test_status_ble_only_when_secured`, `BleLinkUsable.*`): GET_STATUS BLE "connected" only when secured (P5) | midicontrol-fw |
 | 11 | SYS-PWR-02 | CLOSED 2026-11-12: first BLE attempt after base boot fails; cause = remote advertising restart collides with the first connection setup, now a non-counted setup failure, link up on the first CE (P1) | midicontrol-fw |
