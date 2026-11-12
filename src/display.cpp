@@ -11,6 +11,8 @@
 
 #include "stmcpp/register.hpp"
 #include "stmcpp/gpio.hpp"
+#include "stmcpp/systick.hpp"
+#include "logic/indicator_bus.hpp"
 
 /* PROTOCOL NOTE
 Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most significant word) means the segment is turned off. Frame structure follows:
@@ -39,6 +41,13 @@ namespace display {
     volatile bool txBusy = false;        // TX DMA is currently transmitting a frame
     volatile bool rxFrameReady = false;  // ISR received a frame from the display → echo to USB
     static bool midiEchoPending = false;
+    // SYS-BUS-05 (D25): last time a byte or frame was heard on the bus (set by the RX ISRs, read by process())
+    volatile uint32_t rxActivityMs = 0;
+    volatile uint32_t rxActivityCount = 0;
+    // SYS-BUS-08 (D26): frames received / dropped (not 9 bytes starting with 0xB0); read by the hw tests
+    volatile uint32_t rxAccepted = 0;
+    volatile uint32_t rxRejected = 0;
+    static indicator::QuietBus quietBus;
 
     static constexpr uint8_t BLANK = 0xE0; // Blank digit (0xE in the upper nibble)
 
@@ -153,8 +162,21 @@ namespace display {
             midiEchoPending = true;
         }
 
-        if (connected && changed && !txBusy) {
-            startFrame();
+        if (!txBusy) {
+            // Bytes and frames the ISRs saw since the last pass
+            static uint32_t seenCount = 0;
+            uint32_t count = rxActivityCount;
+            if (count != seenCount) {
+                seenCount = count;
+                quietBus.onActivity(rxActivityMs);
+            }
+            // A frame is coming in: the receiver has a start bit (BUSY) or the RX DMA holds part of a frame
+            bool receiving = (stmcpp::reg::read(std::ref(USART1->ISR)) & USART_ISR_BUSY) ||
+                             stmcpp::reg::read(std::ref(DMA2_Channel3->CNDTR)) != sizeof(rxBuffer);
+            bool maySend = quietBus.poll(stmcpp::systick::getTicks(), receiving);
+            if (connected && changed && maySend) {
+                startFrame();
+            }
         }
 
         if (midiEchoPending) {
@@ -367,26 +389,64 @@ namespace display {
         NVIC_ClearPendingIRQ(EXTI15_10_IRQn);  
     }
 
+    // Restarts the RX DMA at byte 0 with an empty receiver: the echo of our own frame (the base hears its own TX on
+    // PA10) and a byte left by an overrun must not become the start of the next foreign frame (it would misalign it).
+    static void restartRx(){
+        stmcpp::reg::clear(std::ref(DMA2_Channel3->CCR), DMA_CCR_EN);
+        stmcpp::reg::write(std::ref(USART1->RQR), USART_RQR_RXFRQ);                    // drop RDR
+        stmcpp::reg::write(std::ref(USART1->ICR), USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF);
+        stmcpp::reg::write(std::ref(DMA2_Channel3->CNDTR), sizeof(display::rxBuffer));
+        stmcpp::reg::set(std::ref(DMA2_Channel3->CCR), DMA_CCR_EN);
+    }
+
+    // One complete 9-byte frame in rxBuffer. A separate function so the hw tests can call it on a prepared buffer
+    // (the bench has no second bus master).
+    __attribute__((noinline, used)) void onRxFrame(){
+        if (indicator::frameAccepted(display::rxBuffer, sizeof(display::rxBuffer))) {
+            memcpy(display::currentState, display::rxBuffer, sizeof(display::rxBuffer));
+            display::rxAccepted = display::rxAccepted + 1;
+            // The SysEx echo is sent by the main loop (TinyUSB is not ISR-safe)
+            display::rxFrameReady = true;
+        } else {
+            display::rxRejected = display::rxRejected + 1;  // SYS-BUS-08: dropped, the state is unchanged
+        }
+    }
+
+    static void noteRxActivity(){
+        display::rxActivityMs = stmcpp::systick::getTicks();
+        display::rxActivityCount = display::rxActivityCount + 1;
+    }
+
     extern "C" void USART1_IRQHandler(){
-        // If we get an incomplete frame, throw it away
-        if(stmcpp::reg::read(std::ref(DMA2_Channel3->CNDTR)) != 9){
-            stmcpp::reg::clear(std::ref(DMA2_Channel3->CCR), DMA_CCR_EN); 
-            stmcpp::reg::write(std::ref(DMA2_Channel3->CNDTR), sizeof(display::rxBuffer));
-            stmcpp::reg::set(std::ref(DMA2_Channel3->CCR), DMA_CCR_EN); 
+        uint32_t isr = stmcpp::reg::read(std::ref(USART1->ISR));
+
+        if (isr & USART_ISR_RTOF) {
+            // Receiver timeout (100 bits of idle line after a byte): an incomplete frame is thrown away
+            if(stmcpp::reg::read(std::ref(DMA2_Channel3->CNDTR)) != sizeof(display::rxBuffer)){
+                display::rxRejected = display::rxRejected + 1;
+                restartRx();
+            }
+            stmcpp::reg::write(std::ref(USART1->ICR), USART_ICR_RTOCF);
         }
 
-        // Clear the timeout flag
-        stmcpp::reg::set(std::ref(USART1->ICR), USART_ICR_RTOCF);
-        NVIC_ClearPendingIRQ(USART1_IRQn);    
+        // Transmission complete: the last stop bit of our frame has left the wire, so the echo is over. Only now
+        // listen again (the DMA TC comes ~2 byte times earlier, when the last byte enters TDR).
+        if ((isr & USART_ISR_TC) && (stmcpp::reg::read(std::ref(USART1->CR1)) & USART_CR1_TCIE)) {
+            stmcpp::reg::clear(std::ref(USART1->CR1), USART_CR1_TCIE);
+            stmcpp::reg::write(std::ref(USART1->ICR), USART_ICR_TCCF);
+            restartRx();
+            display::txBusy = false;
+        }
+
+        NVIC_ClearPendingIRQ(USART1_IRQn);
     }
 
     // Receive complete interrupt
     extern "C" void DMA2_Channel3_IRQHandler(){
         if(stmcpp::reg::read(std::ref(DMA2->ISR)) & DMA_ISR_TCIF3){
             stmcpp::reg::set(std::ref(DMA2->IFCR), DMA_IFCR_CTCIF3); 
-            memcpy(display::currentState, display::rxBuffer, sizeof(display::rxBuffer)); // Copy the received data to the current state
-            // The SysEx echo is sent by the main loop (TinyUSB is not ISR-safe)
-            display::rxFrameReady = true;
+            noteRxActivity();
+            display::onRxFrame();
         }
 
         NVIC_ClearPendingIRQ(DMA2_Channel3_IRQn);
@@ -399,9 +459,9 @@ namespace display {
             // Disable the DMA channel after transmission
             stmcpp::reg::clear(std::ref(DMA2_Channel4->CCR), DMA_CCR_EN); 
 
-            // Turn the RX DMA back on
-            stmcpp::reg::set(std::ref(DMA2_Channel3->CCR), DMA_CCR_EN); 
-            display::txBusy = false;
+            // RX comes back on at USART TC (USART1_IRQHandler), when the last byte has been shifted out
+            stmcpp::reg::write(std::ref(USART1->ICR), USART_ICR_TCCF);
+            stmcpp::reg::set(std::ref(USART1->CR1), USART_CR1_TCIE);
         }
 
         NVIC_ClearPendingIRQ(DMA2_Channel4_IRQn);

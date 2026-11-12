@@ -1,5 +1,6 @@
 """Logic analyzer (fx2lafw via sigrok-cli): capture of the base buses and UART decoding."""
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -17,6 +18,11 @@ CH = {
 	"rem_ble_tx": "D7",
 	"rem_ble_rx": "D6",
 }
+# A rewired bench overrides single entries without editing this file, e.g. BASETEST_LA_CH="disp_tx=D2,disp_rx=D3"
+for _kv in filter(None, os.environ.get("BASETEST_LA_CH", "").split(",")):
+	_name, _ch = _kv.split("=")
+	assert _name.strip() in CH, f"BASETEST_LA_CH: unknown signal {_name!r} (known: {sorted(CH)})"
+	CH[_name.strip()] = _ch.strip()
 
 _DIR = Path(tempfile.mkdtemp(prefix="basetest-la-"))
 

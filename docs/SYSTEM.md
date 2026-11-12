@@ -287,10 +287,10 @@ The base is one writer among several.
 | SYS-BUS-02 | A foreign song number on the bus (manual controller) is mirrored on the base OLED and on the remote; playback is NOT touched (D13) | NOT IMPLEMENTED (gap) | base fw (OLED + forward to remote), remote fw (display), protocol (message) |
 | SYS-BUS-03 | While recording, foreign frames are recorded into the MIDI file (D9, SYS-REC-03) | NOT IMPLEMENTED (gap) | see SYS-REC-03 |
 | SYS-BUS-04 | The base writes to the bus only on NOW_PLAYING_INFO from the PC; PC start/restart does not write to the bus (D14) | implemented | base display.cpp, PC |
-| SYS-BUS-05 | Before transmitting, the base waits until the bus has been quiet for a short time (a few byte times; suggested 25 ms = 3 bytes at 1200 Bd) and is not receiving a frame; then it sends (D25) | NOT IMPLEMENTED (gap) | base sends whenever it has a change |
+| SYS-BUS-05 | Before transmitting, the base waits until the bus has been quiet for a short time (a few byte times; suggested 25 ms = 3 bytes at 1200 Bd) and is not receiving a frame; then it sends (D25) | implemented 2026-11-12 | `indicator::QuietBus` (25 ms, base display.cpp); real-bus check pending |
 | SYS-BUS-06 | Base hot-plug sense of the bus (PC13); no frames sent while the bus is absent | implemented, not bench-verified | base display.cpp; bench has no indicator |
 | SYS-BUS-07 | On stop / song end the indicator is cleared only if it still shows the number we sent; if another master wrote since, leave it (D20) | differs from code (gap, verify) | clearing today is unconditional (SYS-USE-08/10) |
-| SYS-BUS-08 | A received frame is accepted only if it is 9 bytes and starts with the `0xB0` flag; anything else is dropped and does not change the base's state (D26) | partial (gap) | base display.cpp checks the length only, not the flag |
+| SYS-BUS-08 | A received frame is accepted only if it is 9 bytes and starts with the `0xB0` flag; anything else is dropped and does not change the base's state (D26) | implemented 2026-11-12 | `indicator::frameAccepted` (length + flag); rejected frames counted in `display::rxRejected` |
 
 ### 4.15 Documentation (new group)
 
@@ -357,12 +357,12 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 21 | SYS-FW-04 | Image without trailer must not boot (F5, P6) | midicontrol-bootloader, midicontrol-fw, midicontroller-fw (build flag) |
 | 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7) | midicontrolpy-sw |
 | 23 | SYS-DIAG-04 | PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
-| 24 | SYS-BUS-08 | Check the `0xB0` flag on received indicator frames | midicontrol-fw |
+| 24 | SYS-BUS-08 | CLOSED 2026-11-12 (`test_display.py::test_rx_frame_flag_check`, `IndicatorFrame.*`): check the `0xB0` flag on received indicator frames | midicontrol-fw |
 | 25 | SYS-DOC-02 | Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
 | 26 | SYS-DOC-03 | Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
 | 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20) | midicontrol-fw, midicontrolpy-sw |
 | 28 | SYS-NOTE-05 | Find and fix the DIN MIDI fault (cable / ATtiny port direction / MIDI_TX_VCC_ON / TX polarity); verify both directions before installation (D31) | midicontrol-fw, midicontrol-hw (ATtiny fw?) |
-| 29 | SYS-BUS-05 | Wait for a short quiet bus before transmitting (D25) | midicontrol-fw |
+| 29 | SYS-BUS-05 | CLOSED 2026-11-12 (`test_display.py::test_quiet_bus_holds_tx`, `QuietBus.*`): wait for a short quiet bus before transmitting (D25); real-bus check in midicontrol-fw/TODO.md | midicontrol-fw |
 | 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrolpy-sw |
 | 31 | SYS-USE-18 | CLOSED 2026-11-12 (songcheck_warns_*): songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
 

@@ -1,4 +1,14 @@
-"""Output to the church display: NOW_PLAYING_INFO over USB-CDC -> a 9-byte frame on the display UART (1200 Bd, D1 = MCU -> display)."""
+"""Output to the church display: NOW_PLAYING_INFO over USB-CDC -> a 9-byte frame on the display UART (1200 Bd, D1 = MCU -> display).
+
+Also the receive side and bus sharing (the bus is multi-master; there is no second master on the bench, so foreign
+traffic is simulated through the probe):
+- test_rx_frame_flag_check (SYS-BUS-08, D26, gap 24): a received frame that does not start with 0xB0 is dropped and
+  leaves the state alone; a valid one is mirrored.
+- test_rx_off_for_the_whole_frame (HARDWARE.md note 6): the RX DMA stays off until the last stop bit is on the wire
+  (USART TC), not just until the last byte enters TDR, so the echo of our own frame never reaches the RX buffer.
+- test_quiet_bus_holds_tx (SYS-BUS-05, D25, gap 29): while the bus shows activity the base does not transmit; it
+  sends once the bus has been quiet.
+"""
 
 import time
 
@@ -198,3 +208,79 @@ def test_display_burst_last_wins(quiet, base, display_on):
     seen = {f for _, f in frames}
     allowed = {BLANK_FRAME} | {expected_frame(*s) for s in states}
     assert seen <= allowed, [f.hex() for f in seen - allowed]
+
+
+# --- receive side and bus sharing -------------------------------------------------------------------------------
+
+DMA2_CH3_CCR, DMA2_CH3_CNDTR = 0x40020430, 0x40020434
+FRAME_S = 9 * 10 / BAUD  # 75 ms
+
+
+def test_rx_frame_flag_check(quiet, base, display_on):
+    settle(quiet, 0xF4, 0x06, 0xF1, 0x0A, 0x02)
+    shown = expected_frame(0xF4, 0x06, 0xF1, 0x0A, 0x02)
+    state, rxbuf = base.sym("display::currentState"), base.sym("display::rxBuffer")
+    acc0, rej0 = base.u("display::rxAccepted"), base.u("display::rxRejected")
+    assert base.read(state, 9) == shown
+
+    for bad in (bytes([0x01, BLANK, 0x02, 0x01, BLANK, BLANK, 0x0A, RED, 0xB0]),  # caught from the 2nd byte
+                bytes([0x00] * 9), bytes([0xB1, 1, 2, 3, 4, BLANK, BLANK, 0x0B, BLUE])):
+        base.write(rxbuf, bad)
+        base.call("display::onRxFrame()")
+        assert base.read(state, 9) == shown, f"frame {bad.hex()} changed the state"
+    assert base.u("display::rxRejected") - rej0 == 3
+    assert base.u("display::rxAccepted") == acc0
+
+    foreign = bytes([0xB0, 2, BLANK, 2, 1, BLANK, BLANK, 0x0B, YELLOW])  # another master: song 12, verse 2, B, yellow
+    base.write(rxbuf, foreign)
+    base.call("display::onRxFrame()")
+    assert base.read(state, 9) == foreign
+    assert base.u("display::rxAccepted") == acc0 + 1
+
+
+def test_rx_off_for_the_whole_frame(quiet, base, display_on):
+    """Polls the RX DMA enable bit through the probe (~1 ms per read) across a few 500 ms refresh frames."""
+    t0, prev, off_at, windows = time.monotonic(), None, None, []
+    while time.monotonic() - t0 < 2.5:
+        en = base.read_uint(DMA2_CH3_CCR) & 1
+        now = time.monotonic()
+        if prev == 1 and en == 0:
+            off_at = now
+        elif prev == 0 and en == 1 and off_at is not None:
+            windows.append(now - off_at)
+        prev = en
+    print(f"RX DMA off windows (ms): {[round(w * 1000) for w in windows]}")
+    assert len(windows) >= 3, windows
+    # the frame is 75 ms on the wire; before the fix RX came back after ~58 ms (DMA TC), in the middle of byte 8
+    assert min(windows) >= FRAME_S - 0.002, f"RX re-enabled before the frame left the wire: {windows}"
+    assert max(windows) < FRAME_S + 0.03, windows
+    assert base.read_uint(DMA2_CH3_CNDTR) == 9
+
+
+def test_quiet_bus_holds_tx(quiet, base, display_on):
+    """Keeps reporting bus activity (rxActivityMs/Count, as the RX ISRs do) for HOLD_S: no frame may start then, even
+    though the state changed and the 500 ms refresh is due; afterwards the new state goes out."""
+    HOLD_S = 1.2
+    ticks, act_ms, act_n = base.sym("stmcpp::systick::ticks_"), base.sym("display::rxActivityMs"), base.sym("display::rxActivityCount")
+    changed = {}
+
+    def action():
+        n = base.read_uint(act_n)
+        t0 = time.monotonic()
+        npi(quiet, 0x12, 0x34, 0xF5, 0x0C, 0x03)
+        while time.monotonic() - t0 < HOLD_S:
+            n += 1
+            base.write32(act_ms, base.read_uint(ticks))
+            base.write32(act_n, n & 0xFFFFFFFF)
+            if "mid" not in changed and time.monotonic() - t0 > HOLD_S / 2:
+                changed["mid"] = base.read_bool("display::changed")
+        time.sleep(0.8)
+
+    frames, warnings, _ = capture_while(quiet, base, display_on, action, seconds=5.0)
+    check_clean(frames, warnings)
+    starts = [t for t, _ in frames]
+    gaps = [b - a for a, b in zip(starts, starts[1:])]
+    print(f"frame starts {[round(t, 3) for t in starts]}, longest gap {max(gaps):.3f} s, changed mid-hold {changed}")
+    assert changed.get("mid") is True, "the new state should be pending (not sent) during the hold"
+    assert max(gaps) >= HOLD_S - 0.15, f"a frame went out while the bus was busy: gaps {gaps}"
+    assert frames[-1][1] == expected_frame(0x12, 0x34, 0xF5, 0x0C, 0x03)
