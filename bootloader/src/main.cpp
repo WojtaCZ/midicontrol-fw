@@ -21,6 +21,7 @@
 #include "boot/image.hpp"
 #include "boot/wdg.hpp"
 #include "boot/oled.hpp"
+#include "boot/ecc_guard.hpp"
 
 // Base USB bootloader. Stays resident when
 //   * the application set the backup-register magic before resetting (update
@@ -277,3 +278,7 @@ extern "C" int main(void) {
 extern "C" void USB_HP_IRQHandler(void) { tud_int_handler(0); }
 extern "C" void USB_LP_IRQHandler(void) { tud_int_handler(0); }
 extern "C" void USBWakeUp_IRQHandler(void) { tud_int_handler(0); }
+
+// A flash ECC double error (power cut mid-program, SYS-FW-03) raises an NMI on the boot
+// check's read: erase the damaged app page and reset instead of hanging in Default_Handler.
+extern "C" void NMI_Handler(void) { boot::ecc::handleNmi(); }

@@ -5,6 +5,7 @@
 #include "ringbuffer.hpp"
 #include "logic/ble_status.hpp"
 #include "logic/link_stats.hpp"
+#include "logic/status_framer.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -53,8 +54,9 @@ namespace Bluetooth{
 	static RingBuffer<StatusLine, 8> _statusQueue;
 	static RingBuffer<uint8_t, 512> _rxRing; // ~44 ms at 115200 Bd
 	static StatusLine _rxStatus = {};
-	static uint8_t _rxStatusIndex = 0;
-	static bool _receivingStatus = false;
+	// Status messages %...%; resynchronises after a lost or extra '%' (logic/status_framer). [[gnu::used]]: read by the tests
+	[[gnu::used]] static statusframe::Framer _statusFramer;
+	static_assert(statusframe::Framer::TEXT_LEN <= sizeof(StatusLine::text));
 	static volatile bool _rebootSeen = false;
 	// Module self-test (Bluetooth info page): bytes received since power-on, %REBOOT% after the last RST pulse
 	[[gnu::used]] static volatile uint32_t _rxBytes = 0;
@@ -277,6 +279,13 @@ namespace Bluetooth{
 					if (_dollarTimeouts < 255) _dollarTimeouts++;
 					if (_configJob) { _configJob = false; _configState = ConfigState::FAILED; }
 					_finishJob();
+					// The module can still enter command mode late; its "CMD> " would then leave us in COMMAND with no job
+					// and no "---", and canSendData() false for good. Leave explicitly: "\r" ends any partial line first.
+					// In data mode the bytes reach the remote as noise outside any frame.
+					_clearResponseFlags();
+					_sendString("\r---\r");
+					_engineTimestamp = now;
+					_engineState = EngineState::EXIT_CMD;
 				}
 				break;
 
@@ -667,6 +676,8 @@ namespace Bluetooth{
 		_bonded = false;
 		resetPeer();
 		_rebootExpected = true;
+		// The ISR may be inside a stale status; "%REBOOT%" must be seen as a status (it is also reset by a pause)
+		_statusFramer.reset();
 		GPIOA->BSRR = (1u << (1 + 16)); // RST low
 		_restartRstHigh = false;
 		_restartTimestamp = stmcpp::systick::getDuration();
@@ -794,26 +805,21 @@ namespace Bluetooth{
 		if(isr & USART_ISR_RXNE){
 			char c = static_cast<char>(USART2->RDR);
 			_rxBytes = _rxBytes + 1;
-			if (!_receivingStatus && c == STATUS_DELIMITER){
-				// Start of a status message
-				_receivingStatus = true;
-				_rxStatusIndex = 0;
-			}else if (_receivingStatus && c == STATUS_DELIMITER){
-				// End of a status message → queue (no heap)
-				_rxStatus.text[_rxStatusIndex] = '\0';
-				_receivingStatus = false;
-				if (blestatus::isWord(_rxStatus.text, "REBOOT")) _rebootSeen = true;
-				if (!_statusQueue.push(_rxStatus)) Debug::logFromIsr(Debug::ISR_BLE_STATUS_OVERFLOW);
-				_rxStatusIndex = 0;
-			}else if (_receivingStatus){
-				// Messages that are too long (e.g. scan results) are truncated
-				if (_rxStatusIndex < sizeof(_rxStatus.text) - 1) {
-					_rxStatus.text[_rxStatusIndex++] = c;
-				}
-			}else{
-				// Data (protocol frames and text responses) is processed by the main loop
-				_dataReceivedTimestamp = stmcpp::systick::getDuration();
-				if (!_rxRing.push(static_cast<uint8_t>(c))) Debug::logFromIsr(Debug::ISR_BLE_RX_OVERFLOW);
+			const uint32_t nowMs = static_cast<uint32_t>(stmcpp::systick::getDuration() / 1_ms);
+			switch (_statusFramer.feed(static_cast<uint8_t>(c), nowMs)) {
+				case statusframe::Result::COMPLETE:
+					// End of a status message → queue (no heap)
+					memcpy(_rxStatus.text, _statusFramer.text(), statusframe::Framer::TEXT_LEN);
+					if (blestatus::isWord(_rxStatus.text, "REBOOT")) _rebootSeen = true;
+					if (!_statusQueue.push(_rxStatus)) Debug::logFromIsr(Debug::ISR_BLE_STATUS_OVERFLOW);
+					break;
+				case statusframe::Result::CONSUMED:
+					break;
+				case statusframe::Result::NOT_STATUS:
+					// Data (protocol frames and text responses) is processed by the main loop
+					_dataReceivedTimestamp = stmcpp::systick::getDuration();
+					if (!_rxRing.push(static_cast<uint8_t>(c))) Debug::logFromIsr(Debug::ISR_BLE_RX_OVERFLOW);
+					break;
 			}
         }
 	}

@@ -6,6 +6,23 @@ Plan: `docs/superpowers/plans/2026-10-24-bootloader-robustness-tests.md`. Tests:
 `../midicontroller-fw/bootloader/src/main.cpp`, remote staging `../midicontroller-fw/src/fwupdate.cpp`.
 Builds: base `bl-robust` (= main 29ca88d code), remote main 1c042ae.
 
+## Status 2026-11-13
+
+- **F4 / F4b fixed** (`lib/bootloader` 21dca81, `boot::ecc::handleNmi()` wired as `NMI_Handler` in both bootloaders):
+  a flash ECC double error in the app region clears ECCD, erases the faulty page and the app's vector page, and
+  resets. Base: the USB bootloader comes up and the PC re-flashes. Remote: a pending image is re-applied, otherwise the
+  region stays refused. Re-run on the bench: `test_base_bp_commit_page0` (5), `test_base_glitch_program_vector`,
+  `test_base_glitch_erase_trailer_page` pass (7 passed, 11:18); the xfail marks are removed.
+- **F5 fixed:** `appBootable` accepts only `image::Check::Ok`; the trailer is now mandatory with no build flag. A plain
+  `.elf` flashed over SWD no longer boots; use `-full.hex` / `-update.hex`.
+- **F6: likely cause found** (from the code and the bench traces; not reproduced on demand): `%SECURED%` makes the
+  remote send `$$$`; when `CMD>` arrives after the 1 s timeout the driver stays in DATA, ignores the late prompt and
+  never sends `---`, so the RN4870 sits in command mode and swallows the link. The base now sends `---` after a
+  `$$$` timeout. On the remote the same change was tried and dropped: it broke the BLE regression every combined run
+  (the module ignores `$$$` right after `%SECURED%`), so the remote keeps relying on StuckCommandMode (`%DATA%` ->
+  K,1). The base-side wedge found while testing this was a status-parser bug, fixed separately. See
+  `midicontrolpy-sw/docs/FAULTS.md` (2.9).
+
 ## Verdict
 
 - **Remote:** the OTA design holds. An interrupted staging (host gone, no END, RN4870 held in reset, base reset,
@@ -97,7 +114,7 @@ lost that race.
 | `test_remote_glitch_erase_vector_page` | Real erase of the remote vector page cut at 0..110 % (no pending) | PASS 18/18: never ECC; bootloader idles with PA1 released |
 | `test_remote_glitch_program_vector` | Real program of doubleword 0 cut | **XFAIL F4b** (6/18: 25-50 %) |
 
-## Recommended fixes (not applied; product code was not changed by this work)
+## Recommended fixes (as of 2026-10-25; F4, F4b, F5 and F6 addressed 2026-11-13, see Status)
 
 1. **F4, both bootloaders:** an `NMI_Handler` that handles a flash ECC double error: if `FLASH->ECCR & ECCD` and the
    address lies in the app region, clear ECCD, erase the app's page0 (base: makes the region non-bootable -> USB

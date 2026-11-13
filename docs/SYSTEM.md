@@ -234,8 +234,8 @@ power policy and serves a status web page.
 |---|---|---|---|
 | SYS-FW-01 | Only `<name>-update.bin` with 24 B trailer; board ID checked in browser, PC and device | implemented | PC firmware_image, bootloader |
 | SYS-FW-02 | Base update over USB: ENTER_BOOTLOADER, bootloader CDC (ABCD:1235), first 2 KB written last; ~11 s | implemented | base bootloader |
-| SYS-FW-03 | A power cut during the vector-page commit must not hang the base bootloader (F4); fixed before deployment (proposed default, P6) | NOT IMPLEMENTED (gap) | SWD needed today |
-| SYS-FW-04 | An image without a valid trailer must not boot (F5); fixed before deployment (proposed default, P6) | differs from code (gap) | boots unless BOOT_REQUIRE_TRAILER=1 |
+| SYS-FW-03 | A power cut during the vector-page commit must not hang the base bootloader (F4); fixed before deployment (proposed default, P6) | implemented 2026-11-13 | `boot::ecc::handleNmi`: ECC double error in the app region -> erase that page + vector page, reset; base stays in its bootloader (USB), remote releases PA1 |
+| SYS-FW-04 | An image without a valid trailer must not boot (F5); fixed before deployment (proposed default, P6) | implemented 2026-11-13 | `boot::appBootable` accepts only `Check::Ok`; a plain ELF over SWD no longer starts (flash `-full.hex` / `-update.hex`) |
 | SYS-FW-05 | Base bootloader entry: TAMP BKP0R magic or encoder held at power-on; progress on OLED | implemented | base bootloader |
 | SYS-FW-06 | Remote OTA via base: staged in W25Q32, CRC check, bootloader copies (3 tries per boot) | implemented | ~75 s 1M, 2 min 32 s Coded S8 (68.8 kB) |
 | SYS-FW-07 | Remote accepts OTA only from its bonded base (D3) | implemented 2026-11-12 | OTA frames pass the same guard as SYS-PAIR-04 |
@@ -353,8 +353,6 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 17 | SYS-REC-03, SYS-REC-04, SYS-BUS-03 | Embed bus frames seen during recording as display SysEx; recorded file plays back with anchors (D9) | midicontrolpy-sw (+ midicontrol-fw if the echo is incomplete) |
 | 18 | SYS-BUS-01, SYS-BUS-02 | Observe the shared bus; mirror foreign song number on base OLED and remote, playback untouched (D13) | midicontrol-fw, midicontroller-fw, midicontrol-protocol |
 | 19 | SYS-IDLE-03 | Remote power easy wins (BLE module / peripheral sleep) (D17) | midicontroller-fw |
-| 20 | SYS-FW-03 | Bootloader must survive power cut during vector-page commit (F4, P6) | midicontrol-bootloader, midicontrol-fw (bootloader) |
-| 21 | SYS-FW-04 | Image without trailer must not boot (F5, P6) | midicontrol-bootloader, midicontrol-fw, midicontroller-fw (build flag) |
 | 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7) | midicontrolpy-sw |
 | 23 | SYS-DIAG-04 | PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
 | 24 | SYS-BUS-08 | CLOSED 2026-11-12 (`test_display.py::test_rx_frame_flag_check`, `IndicatorFrame.*`): check the `0xB0` flag on received indicator frames | midicontrol-fw |

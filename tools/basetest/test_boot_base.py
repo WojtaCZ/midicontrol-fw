@@ -356,12 +356,12 @@ def _send_all_but_end(L):
 # only after a few more instructions (DWT on the M4 is imprecise; k = 255 already lets the whole page0 finish) and the reset then hits
 # the programming of some double-word. Requirement: bootloader or new application, never hung (bench 2026-10-24: k = 0
 # -> ECC double error in page0 -> NMI in the bootloader -> Default_Handler, even after every further reset; finding F4).
+# Fixed 2026-11-13 (boot::ecc::handleNmi erases the damaged page; image trailer required); kept as the regression reason.
 F4 = "F4: interrupted page0 programming -> ECC double error -> bootloader NMI -> Default_Handler forever (no USB)"
 F5 = "F5: trailer page lost -> NoTrailer accepted (BOOT_REQUIRE_TRAILER=0) -> truncated app boots and faults"
 
 
-@pytest.mark.parametrize("k", [pytest.param(0, marks=pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4)),
-                               1, 2, 128, 255])
+@pytest.mark.parametrize("k", [0, 1, 2, 128, 255])
 def test_base_bp_commit_page0(board, recover, k):
     L = enter_bootloader()
     try:
@@ -465,7 +465,6 @@ def test_base_glitch_erase_vector_page(board, recover):
     assert not hangs, f"base hung after an interrupted erase: {hangs}"
 
 
-@pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4)
 def test_base_glitch_program_vector(board, recover):
     """Vector page erased and then an immediate reset during the programming of the 1st double-word (SP, reset vector), all from a single glitch
     routine in the application state (0..120 % of the programming time). Must never hang."""
@@ -485,7 +484,6 @@ def test_base_glitch_program_vector(board, recover):
         raise bootfi.ProductDefect(f"base hung after an interrupted program: {hangs}")
 
 
-@pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F5)
 def test_base_glitch_erase_trailer_page(board, recover):
     """Reset during the erase of the last used page (trailer) of a valid application: bootloader or application, never hung."""
     last = APP + (len(IMG) - 1) // 2048 * 2048

@@ -552,7 +552,6 @@ F4B = ("F4b: interrupted program of the app vector page (no pending image) -> EC
        "-> Default_Handler with PA1 still high (stays on, hung, battery drain)")
 
 
-@pytest.mark.xfail(strict=True, raises=bootfi.ProductDefect, reason=F4B)
 def test_remote_glitch_program_vector(rb, base, remote_ok):
     """Vector page erased and a reset during the programming of the 1st double-word, all from a single glitch routine from the application
     state (programming from a halted bootloader reports PGAERR|PGSERR, as on the base). Without a pending image: a bootloader
