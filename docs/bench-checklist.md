@@ -1,9 +1,9 @@
 # Bench checklist: tests that need a person
 
-State on 2026-10-24: base `1ff673b` (firmware `251285b`), remote `1c042ae`. Everything the bench can run on its own
+State on 2026-10-24 (not updated since): base `1ff673b` (firmware `251285b`), remote `1c042ae`. Everything the bench can run on its own
 passed (600 s soak twice; pairing, BLE security, relay, CDC, BLE-down, remote diagnostics). What is left needs someone
-at the bench, a change to the bench, or a setup that would break the base–remote bond. Results go into `../REVIEW.md`
-("Hardware test log"). Tick them off here as they pass.
+at the bench, a change to the bench, or a setup that would break the base–remote bond. Results go into `REVIEW.md` in the
+workspace root (outside every git repo; owner question Q-IN-1) ("Hardware test log"). Tick them off here as they pass.
 
 Commands run from `tools/basetest` in this repo unless stated otherwise. The remote-side tests need the remote's DWARF
 ELF: `export BASETEST_REMOTE_ELF=<-g build>/midicontroller-fw.elf` (recipe in `tools/basetest/README.md`, "Remote symbols").

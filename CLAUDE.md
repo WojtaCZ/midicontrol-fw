@@ -16,7 +16,9 @@ This repo holds the MAIN copy of the base hardware description, `docs/HARDWARE.m
 
 ## Project Overview
 
-STM32G431CBTx (Cortex-M4F, 144 MHz) firmware for the MIDIcontrol **base station**: USB-MIDI card for the PC player, packet router between the PC (USB-CDC) and the handheld remote (BLE, Microchip **RN4870**), SSR driver for organ power, church indicator (7-segment display) driver, OLED (SH1106 via I2C) with an encoder menu, and RGB status LEDs. Written in C++23 with no exceptions; no heap use in interrupt handlers (fixed-size lock-free ring buffers, `inc/ringbuffer.hpp`).
+STM32G431CBTx (Cortex-M4F, 144 MHz) firmware for the MIDIcontrol **base station**: USB-MIDI card for the PC player, packet router between the PC (USB-CDC) and the handheld remote (BLE, Microchip **RNBD350**, RN4870 command set; the log text and some comments still say RN4870), SSR driver for organ power, church indicator (7-segment display) driver, OLED (SH1106 via I2C) with an encoder menu, and RGB status LEDs. Written in C++23 with no exceptions; no heap use in interrupt handlers (fixed-size lock-free ring buffers, `inc/ringbuffer.hpp`).
+
+- **User-visible changes** (screen text, menus, keys, timeouts, web page, CLI output, config keys, install steps): in the same commit series update midicontrolpy-sw/docs/SYSTEM.md (status/glossary/timing; then run midicontrolpy-sw/tools/sync-system-doc.sh), this CLAUDE.md/README, midicontrolpy-sw/docs/status-web-and-service.md for the PC, the screen scenarios in tools/screens/main.cpp, and the Czech user manual.
 
 The packet protocol is defined in **`lib/protocol/PROTOCOL.md`** (shared `midicontrol-protocol` submodule) — that file is authoritative. `readme.md` documents the display SysEx format (`F0 4D 43 ...`), which is also the anchor format in the song files.
 
@@ -31,7 +33,7 @@ cmake --build build -j
 openocd -f openocd.cfg -c "program build/midicontrol-fw-full.hex verify reset exit"
 ```
 
-Or use the container task runner: `mcu build`, `mcu buildDebug`, `mcu flash` (merged hex), `mcu flashApp` (app only), `mcu flashBootloader`, `mcu size` (see `.mcu-profile.json`).
+Or use the container task runner: `mcu build`, `mcu buildDebug`, `mcu flash` (merged hex), `mcu flashApp` (app only), `mcu flashBootloader`, `mcu size` (see `.mcu-profile.json`; it counts data+bss, 27972 B of the 29184 B budget, while the linker's RAM region figure is higher, 29512 B of 30 KB: owner question whether the budget means the region; `mcu size` reads `build/midicontrol-fw.elf`, which exists only when the checkout directory is named `midicontrol-fw`).
 
 Build outputs in `build/`:
 - `midicontrol-fw.elf/.hex/.bin` — app as linked
@@ -40,7 +42,7 @@ Build outputs in `build/`:
 - `bootloader/base-bootloader.hex` — bootloader (`bootloader/`, its own CMake project; `-DBUILD_BOOTLOADER=OFF` skips it)
 - `midicontrol-fw-full.hex` — bootloader + `-update.hex` merged
 
-Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-generated on each build via `cmake/git.cmake`. There are no unit tests in this project; hardware tests (USB-CDC, both ST-Links, logic analyzer) live in `tools/basetest/` (README there).
+Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-generated on each build via `cmake/git.cmake`. Hardware-independent logic (`src/logic`, plus the protocol `crc8`) has host gtest tests (`test/host`, command under `bluetooth` below; 64 tests incl. the crc8 check value 0xA2); hardware tests (USB-CDC, both ST-Links, logic analyzer) live in `tools/basetest/` (README there).
 
 **Screen images**: `tools/screens/export.sh [outdir] [scale]` builds the real GUI code (`src/menu.cpp`, `lib/ui`, `lib/gfx`) for the host with stubbed hardware (`tools/screens/stubs/`, `host.cpp`) and saves every screen as PNG plus `sheet.png` (all screens in a grid) and `index.html` (default `build-screens/png/`). The scenarios are in `tools/screens/main.cpp`; add one when you add a screen. Use it to check UI changes and for the manual's pictures.
 
@@ -94,14 +96,14 @@ The bootloader shows the update on the OLED (title, hint and progress bar).
 
 - Both boards sit on ST-Links, selected by serial: base `004200443335510C35383531`, remote `37FF70064E59313840161343` (`-c "adapter serial <sn>"` before `-f openocd.cfg`). The ST-Links have no SRST wired, so a probe reset is PIN | SOFTWARE in `resetcause`. `st-info --probe` leaves the cores halted; send `monitor resume` before a gdb `detach`. openocd leaves `DHCSR.C_DEBUGEN` set, which turns a real fault into a `bkpt` halt: the harness writes `0xA05F0000` when it releases the probe.
 - Logic analyzer (sigrok `D0..D7` = CH1..CH8): CH1/CH2 base display UART (CH2 = MCU to display), CH3/CH4 base BLE UART (CH4 = MCU to RN4870), CH5/CH6 remote I2C (SCL, SDA), CH7/CH8 remote BLE UART (CH8 = MCU to RN4870). `tools/basetest/la.py` holds the map; a rewired bench overrides entries with `BASETEST_LA_CH="disp_tx=D2,disp_rx=D3"` (2026-11-12 the D0-D3 leads were found reversed: `disp_tx=D2,disp_rx=D3,base_ble_tx=D0,base_ble_rx=D1`).
-- The Otraki USB-MIDI interface stands in for the organ, but the DIN link was dead in both directions on 2026-10-19 (see `../REVIEW.md`), so DIN checks are open.
-- Suites, fixtures and how to run them: `tools/basetest/README.md`; findings and open items: `../REVIEW.md` "Hardware test log 2026-10-19/20".
+- The Otraki USB-MIDI interface stands in for the organ, but the DIN link was dead in both directions on 2026-10-19 (see `REVIEW.md` in the workspace root, which is not in git), so DIN checks are open.
+- Suites, fixtures and how to run them: `tools/basetest/README.md`; findings and open items: `REVIEW.md` in the workspace root (not in git), "Hardware test log 2026-10-19/20".
 
 ## Hardware Pin Map (key pins)
 
 - PB0/PB2 — Rotary encoder A/B, PB1 — encoder push
 - PA4 — SSR current source enable (organ mains)
-- PA0 — RN4870 MODE, PA1 — RN4870 RST (active low)
+- PA0 — formerly the RN4870 MODE pin: the RNBD350 adapter has no MODE pin, so PA0 is driven high and drives nothing (D22); PA1 — BLE module RST (active low)
 - PA2/PA3 — USART2 TX/RX to RN4870 (no RTS/CTS wired → module flow control off, `SR,0000`)
 - PA9/PA10 — USART1 church display (1200 Bd), PC13 — display sense (EXTI, needs SYSCFG clock)
 - PB10/PB11 — USART3 DIN MIDI (31250 Bd)

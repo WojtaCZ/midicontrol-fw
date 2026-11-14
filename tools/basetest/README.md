@@ -43,7 +43,7 @@ arm-none-eabi-gdb -batch -ex 'print sizeof(ui::MenuItem)' -ex 'print &((ui::Menu
 
 ```bash
 cd tools/basetest
-../../.venv/bin/python -m pytest -q test_proto_offline.py test_soak_offline.py test_usblink_offline.py test_dbg_offline.py  # no hardware
+../../.venv/bin/python -m pytest -q test_proto_offline.py test_soak_offline.py test_usblink_offline.py test_dbg_offline.py test_bootfi_offline.py  # no hardware (39 tests); plain `pytest` also collects test_boot_base.py / test_boot_remote.py, which read the base and remote update .bin at import and need both firmware builds
 ../../.venv/bin/python -m pytest -q -m hw                      # with the bench
 ```
 

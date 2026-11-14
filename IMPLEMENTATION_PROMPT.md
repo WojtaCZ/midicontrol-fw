@@ -1,3 +1,5 @@
+> **OBSOLETE (2026-11-14, SYS-DOC-02 / SYSTEM.md gap 25, P11).** This prompt describes the original protocol integration task and no longer matches the code: `src/comm.cpp` and `inc/comm.hpp` do not exist any more, the message set differs from `lib/protocol/PROTOCOL.md` (authoritative), and the PC side is `midicontrolpy-sw` (C++). Do not use it as a specification. See `docs/SYSTEM.md` and `CLAUDE.md`. Kept as history.
+
 # Protocol Module Integration Prompt
 
 ## Task Overview

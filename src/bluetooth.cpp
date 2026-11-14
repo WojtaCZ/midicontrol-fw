@@ -21,7 +21,7 @@
 USART 2 - RN4870
 PA2 - TX
 PA3 - RX
-PA0 - MODE
+PA0 - MODE on the RN4870 footprint; the RNBD350 has no MODE pin (D22), PA0 is driven high and drives nothing
 PA1 - RST
 RTS/CTS are not wired → hardware flow control must be disabled in the module (SR without bit 0x8000).
 */
@@ -460,11 +460,11 @@ namespace Bluetooth{
 		stmcpp::gpio::pin<stmcpp::gpio::port::porta, 2> usart_tx (stmcpp::gpio::mode::af7, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
 		stmcpp::gpio::pin<stmcpp::gpio::port::porta, 3> usart_rx (stmcpp::gpio::mode::af7);
 
-		// RN 487x control pins
+		// BLE module control pins (RN4870 footprint, RNBD350 fitted)
         stmcpp::gpio::pin<stmcpp::gpio::port::porta, 0> mode (stmcpp::gpio::mode::output, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
 		stmcpp::gpio::pin<stmcpp::gpio::port::porta, 1> rst_n (stmcpp::gpio::mode::output, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::low, stmcpp::gpio::pull::noPull);
 		
-		// Go into application mode
+		// PA0 = MODE on the RN4870 footprint; the RNBD350 has no MODE pin (D22). Driven high, drives nothing.
 		mode.set();
 
 		// Reset the RN487x
