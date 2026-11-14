@@ -2,7 +2,7 @@
 
 Plan: `docs/superpowers/plans/2026-10-24-bootloader-robustness-tests.md`. Tests: `tools/basetest/test_boot_base.py`,
 `tools/basetest/test_boot_remote.py` (helpers `bootfi.py`, `fwclient.py`, `glitch/glitch.c`). Code under test:
-`lib/bootloader` f266dad (both boards), base bootloader `bootloader/src/main.cpp`, remote bootloader
+`lib/bootloader` f266dad at test time (both boards; fixes since are in 21dca81, the current pin), base bootloader `bootloader/src/main.cpp`, remote bootloader
 `../midicontroller-fw/bootloader/src/main.cpp`, remote staging `../midicontroller-fw/src/fwupdate.cpp`.
 Builds: base `bl-robust` (= main 29ca88d code), remote main 1c042ae.
 
@@ -123,7 +123,7 @@ lost that race.
    drop PA1 first so a battery unit switches off instead of draining).
    Regression tests are already in place: the F4 xfails turn into XPASS -> remove the marks.
    F4b is fixed by the same handler (remote: release PA1 before the reset).
-2. **F5:** build both bootloaders with `BOOT_REQUIRE_TRAILER=1` once every image in the field carries a trailer (the
+2. **F5 (done 2026-11-13: the trailer is mandatory, the flag `BOOT_REQUIRE_TRAILER` no longer exists):** build both bootloaders with `BOOT_REQUIRE_TRAILER=1` once every image in the field carries a trailer (the
    SWD `-update.hex` does); document that a plain `.elf` flash needs the trailer. `test_base_glitch_erase_trailer_page`
    then passes.
 3. **F1:** set WRP on the bootloader pages (base pages 0-15, remote 0-7) in production; enable BOR on the remote.
@@ -132,7 +132,7 @@ lost that race.
 5. **F6:** remote: if the RN4870 reports a connection (or the base keeps sending) but no keepalive arrives for ~10 s,
    re-initialise the module (`R,1`); base: if the peer is accepted but no remote packet arrives for ~15 s, `K,1` and
    reconnect. Capture the remote BLE UART (D6/D7) during a reboot to confirm the `%CONNECT%`-during-init theory first.
-6. **F3:** `cmake/git.cmake`: generate `constexpr std::string_view` (or `const char*`).
+6. **F3 (done 2026-11-14, audit BD-1):** `cmake/git.cmake` now generates `inline constexpr char name[]`; long branch names build.
 
 ## Not covered / needs a person
 

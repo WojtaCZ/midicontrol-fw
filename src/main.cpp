@@ -99,8 +99,6 @@ static void pairingTimeout() {
 extern stmcpp::scheduler::Scheduler oledSleepScheduler;
 extern stmcpp::scheduler::Scheduler keypressScheduler;
 extern stmcpp::scheduler::Scheduler guiRenderScheduler;
-extern stmcpp::scheduler::Scheduler commTimeoutScheduler;
-extern stmcpp::scheduler::Scheduler dispChangeScheduler;
 extern stmcpp::scheduler::Scheduler songListTimeoutScheduler;
 extern stmcpp::scheduler::Scheduler songListDelayScheduler;
 [[noreturn]] void signalError(uint16_t code);
@@ -609,7 +607,7 @@ static void bleFailed(uint16_t code, const char *what) {
 
 // Start at boot (before USB): blocking init, then the configuration goes into the state machine
 // No %REBOOT% after the RST pulse: configure anyway. A module whose RST line is broken (bad joint) still works over UART,
-// and the Bluetooth info page tells the two faults apart ("Modul: OK, bez RST" vs "neodpovida" / "nic neposila").
+// and the Bluetooth info page tells the two faults apart ("Modul: OK, bez RST" vs "neodpovida" / "mlci").
 static void bleBootStart() {
 	if (Bluetooth::init()) Debug::log(Debug::Level::WARNING, "ble", "no %%REBOOT%% after reset, configuring anyway");
 	if (Bluetooth::configure()) {
