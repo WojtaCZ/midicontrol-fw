@@ -15,30 +15,30 @@ Citation prefixes:
 
 Read these before touching the base firmware.
 
-1. **Probe selection.** The base uses the STLINK-V3, serial `004200443335510C35383531`. The remote uses the ST-LINK/V2, serial `37FF70064E59313840161343`. `openocd.cfg` selects no probe, so always pass `-c "adapter serial <sn>"` before `-f openocd.cfg`. The old base serial 39FF71... is obsolete. Do not run `st-info --probe`: it leaves the cores halted. (fw:CLAUDE.md:83; fw:.trail/learnings/2026-11-07-rnbd350-reports-a-vanished-peer-as-dev.md; fw:.trail/learnings/2026-10-25-remote-ble-name-is-matched-exactly-dev-2.md)
-2. **No SRST.** The probe reset line is not wired (`reset_config none separate`), so a probe reset shows as PIN | SOFTWARE in `resetcause`. openocd leaves `DHCSR.C_DEBUGEN` set, which turns a real fault into a `bkpt` halt. The IWDG stops while the core is halted. (fw:openocd.cfg:24; fw:CLAUDE.md:61,83)
-3. **BOOT0 / JP1.** PB8-BOOT0 is sampled from the pin (option bytes `0xFFEFF8AA`, nSWBOOT0=1). In the wrong JP1 position the ST ROM bootloader starts and talks on USART2 to the BLE module. That looks like a dead BLE init ("$$$ timeout"). Fix the jumper. Do not change option bytes. (fw:.trail/learnings/2026-11-07-rnbd350-reports-a-vanished-peer-as-dev.md; boot:src/main.cpp:34)
-4. **Which hex to flash.** Flash `midicontrol-fw-update.hex` or the merged `-full.hex`, never the plain `.hex`: a stale trailer left in flash makes the bootloader refuse the app. Holding the encoder button (PB1) at reset forces the USB bootloader (PID 0x1235). (fw:CLAUDE.md:27,43)
-5. **PA4 (organ power) has no pull-down.** The pin floats from reset until the static GPIO init drives it low. Analysis says the PC817 stays off while the pin floats; this has not been measured. Never leave PA4 as an input or analog pin. After any IWDG or fault reset the firmware sends CC 120 + CC 123 on all 16 channels. (fw:src/base.cpp:19; fw:CLAUDE.md:61)
+1. **Probe selection.** The base uses the STLINK-V3, serial `004200443335510C35383531`. The remote uses the ST-LINK/V2, serial `37FF70064E59313840161343`. `openocd.cfg` selects no probe, so always pass `-c "adapter serial <sn>"` before `-f openocd.cfg`. The old base serial 39FF71... is obsolete. Do not run `st-info --probe`: it leaves the cores halted. (fw:CLAUDE.md "Bench"; fw:.trail/learnings/2026-11-07-rnbd350-reports-a-vanished-peer-as-dev.md; fw:.trail/learnings/2026-10-25-remote-ble-name-is-matched-exactly-dev-2.md)
+2. **No SRST.** The probe reset line is not wired (`reset_config none separate`), so a probe reset shows as PIN | SOFTWARE in `resetcause`. openocd leaves `DHCSR.C_DEBUGEN` set, which turns a real fault into a `bkpt` halt. The IWDG stops while the core is halted. (fw:openocd.cfg:24; fw:CLAUDE.md "Key modules" (fault, wdg); fw:CLAUDE.md "Bench")
+3. **BOOT0 / JP1.** PB8-BOOT0 is sampled from the pin (option bytes `0xFFEFF8AA`, nSWBOOT0=1). In the wrong JP1 position the ST ROM bootloader starts and talks on USART2 to the BLE module. That looks like a dead BLE init ("$$$ timeout"). Fix the jumper. Do not change option bytes. (fw:.trail/learnings/2026-11-07-rnbd350-reports-a-vanished-peer-as-dev.md; boot:src/main.cpp:35)
+4. **Which hex to flash.** Flash `midicontrol-fw-update.hex` or the merged `-full.hex`, never the plain `.hex`: a stale trailer left in flash makes the bootloader refuse the app. Holding the encoder button (PB1) at reset forces the USB bootloader (PID 0x1235). (fw:CLAUDE.md "Build Commands"; fw:CLAUDE.md "Flash layout")
+5. **PA4 (organ power) has no pull-down.** The pin floats from reset until the static GPIO init drives it low. Analysis says the PC817 stays off while the pin floats; this has not been measured. Never leave PA4 as an input or analog pin. After any IWDG or fault reset the firmware sends CC 120 + CC 123 on all 16 channels. (fw:src/base.cpp:19; fw:CLAUDE.md "Key modules" (fault, wdg))
 6. **Display wire is inverted, and the base hears its own TX.** The opto stage inverts the wire (PA9 low drives the line high), so the USART runs with no TXINV/RXINV. The MCU's own TX comes back on PA10. The firmware keeps the RX DMA off for the whole frame: off at the start, back on only at USART TC (the last stop bit has left the wire), after an RDR flush (RQR RXFRQ) and clearing ORE/FE/NE. Until 2026-11-12 RX came back at DMA TC, about 2 bytes before the end of the frame, so the echo tail could land in the RX buffer. Bench: RX off 73-105 ms per frame (`test_display.py::test_rx_off_for_the_whole_frame`); the echo itself is not checked on a real display yet. Received frames are accepted only with 9 bytes and the `0xB0` flag (SYS-BUS-08), and the base sends only after 25 ms of quiet bus (SYS-BUS-05); both in `src/logic/indicator_bus.*`. (fw:src/display.cpp; hw U3/U4)
 7. **The display bus is shared (multi-master).** Manual controllers in the church also write song numbers to it. The base must observe the bus, not assume it is the only writer. It mirrors a foreign number and leaves playback alone (D9, D13). There is no display on the bench: PC13 stays high (not connected). (fw:.trail/learnings/2026-10-25-bench-has-no-church-display-and-dev.md)
 8. **The I2C1 bus is shared.** The OLED (0x3C) shares it with the ATtiny U14 (PB0/PB1) and with BLE module pads P1_2/P1_3, which reach the bus through the adapter footprint. Both are schematic facts. Do not add an I2C device or change the address without considering both. (hw U14, U17.11/12)
-9. **Leave PA5/PA6/PA7 unconfigured.** They go to the ATtiny (MIDI port controller, its own fixed firmware). The G431 does not drive them. (fw:CLAUDE.md:100)
-10. **USB D+ pull-up.** The firmware keeps the internal DPPU on. The base does not enumerate without it, because R33 1k5 is not effective on the boards in use. (fw:CLAUDE.md:98)
-11. **The BLE module is an RNBD350, not an RN4870** (D10). Status events carry a connection handle. A vanished peer is reported as `%ERR_CONN%`, never `%DISCONNECT%`. The module runs command set v1.0. (fw:CLAUDE.md:53-55)
-12. **The DIN MIDI link has never worked on the bench.** The USB-MIDI stand-in is an Otraki. (REVIEW.md:446; fw:CLAUDE.md:85)
+9. **Leave PA5/PA6/PA7 unconfigured.** They go to the ATtiny (MIDI port controller, its own fixed firmware). The G431 does not drive them. (fw:CLAUDE.md "Hardware Pin Map")
+10. **USB D+ pull-up.** The firmware keeps the internal DPPU on. The base does not enumerate without it, because R33 1k5 is not effective on the boards in use. (fw:CLAUDE.md "Hardware Pin Map")
+11. **The BLE module is an RNBD350, not an RN4870** (D10). Status events carry a connection handle. A vanished peer is reported as `%ERR_CONN%`, never `%DISCONNECT%`. The module runs command set v1.0. (fw:CLAUDE.md "Key modules" (bluetooth))
+12. **The DIN MIDI link has never worked on the bench.** The USB-MIDI stand-in is an Otraki. (REVIEW.md:446; fw:CLAUDE.md "Bench")
 
 ## 1. Overview (firmware + bench)
 
 | Block | Fact | Source |
 |---|---|---|
 | MCU | STM32G431CBT6 (Cortex-M4F, 128 KB flash, 32 KB SRAM), LQFP48, SYSCLK 144 MHz | fw:src/base.cpp:37-67; fw:STM32G431CBTx_FLASH.ld |
-| BLE | **RNBD350 on an adapter board with the RN4870 footprint**, in all units (D10). UART and RST as on the RN4870. The RNBD350 has no MODE pin, so MODE is not wired (D22). USART2 | D10, D22; fw:src/bluetooth.cpp:449-500 |
-| MIDI DIN | USART3, 31250 Bd, one TX + one RX. Port switching (MIDI A / B) is done by the ATtiny U14 | fw:src/midi.cpp:31-35; fw:CLAUDE.md:100 |
+| BLE | **RNBD350 on an adapter board with the RN4870 footprint**, in all units (D10). UART and RST as on the RN4870. The RNBD350 has no MODE pin, so MODE is not wired (D22). USART2 | D10, D22; fw:src/bluetooth.cpp:458-540 |
+| MIDI DIN | USART3, 31250 Bd, one TX + one RX. Port switching (MIDI A / B) is done by the ATtiny U14 | fw:src/midi.cpp:31-35; fw:CLAUDE.md "Hardware Pin Map" |
 | Church display | USART1, 1200 Bd, 9-byte frames, presence sense on PC13 | fw:src/display.cpp |
 | Organ power | PA4 → SSR current source. SSR type unknown (D12) | fw:src/base.cpp:19 |
 | UI | SH1106 OLED on I2C1, rotary encoder with button, 4 front + 6 rear WS2812B | fw:src/oled.cpp; fw:src/led.cpp |
-| USB | Full-speed device, composite CDC (protocol) + MIDI + CDC (log). VID 0xABCD (placeholder), PID 0x1234 app / 0x1235 bootloader | fw:src/usb_descriptors.c:30-31; fw:CLAUDE.md:99 |
+| USB | Full-speed device, composite CDC (protocol) + MIDI + CDC (log). VID 0xABCD (placeholder), PID 0x1234 app / 0x1235 bootloader | fw:src/usb_descriptors.c:30-31; fw:CLAUDE.md "Hardware Pin Map" |
 
 ## 2. MCU, clocks, memory, programming
 
@@ -51,23 +51,23 @@ Read these before touching the base firmware.
 | USB clock trim | CRS synced to SOF. HSI48 is started as the backup | fw:src/main.cpp; fw:src/base.cpp |
 | LSE | Never started (no LSEON) | fw:src/base.cpp |
 | Bootloader clocks | Core on HSI16. USB on HSI48 + CRS. Sets PWR_CR2.USV | boot:src/main.cpp |
-| IWDG | LSI/32, RLR 2000 (~2 s), started on every boot. Loop watchdog 1000 ms | fw:CLAUDE.md:61 |
+| IWDG | LSI/32, RLR 2000 (~2 s), started on every boot. Loop watchdog 1000 ms | fw:CLAUDE.md "Key modules" (fault, wdg) |
 | Clocked, no visible use | TIM1, TIM2, TIM4, TIM7, RTCAPB | fw:src/base.cpp initClock |
 
 | Region | Address | Size | Source |
 |---|---|---|---|
-| Custom USB bootloader | 0x08000000 | 32 KB | boot:STM32G431CBTx_BOOT.ld; fw:CLAUDE.md:39 |
+| Custom USB bootloader | 0x08000000 | 32 KB | boot:STM32G431CBTx_BOOT.ld; fw:CLAUDE.md "Flash layout" |
 | Application (+24-byte trailer, magic 0x4D43544C, boardId 0x02) | 0x08008000 | 94 KB | fw:STM32G431CBTx_FLASH.ld:65-71 |
-| Settings | 0x0801F800 (last page) | 2 KB | fw:CLAUDE.md:41 |
+| Settings | 0x0801F800 (last page) | 2 KB | fw:CLAUDE.md "Flash layout" |
 | RAM | 0x20000000 | 30 KB | fw:STM32G431CBTx_FLASH.ld |
-| NOINIT (fault record, then log header + ring at 0x20007860) | 0x20007800 | 2 KB | fw:STM32G431CBTx_FLASH.ld; fw:CLAUDE.md:62 |
+| NOINIT (fault record, then log header + ring at 0x20007860) | 0x20007800 | 2 KB | fw:STM32G431CBTx_FLASH.ld; fw:CLAUDE.md "Key modules" (debug) |
 | ST ROM bootloader | 0x1FFF0000 | — | fw:src/base.cpp:110-128 |
 
 | Programming path | How | Source |
 |---|---|---|
-| SWD | J6 + STLINK-V3 (serial above). No SRST | fw:CLAUDE.md:83 |
-| Custom USB bootloader | `ENTER_BOOTLOADER` (TAMP->BKP0R magic), or PB1 held low at reset. PID 0x1235 | boot:src/main.cpp; fw:CLAUDE.md:43 |
-| ST ROM DFU | BOOT0 high via JP1 | boot:src/main.cpp:34 |
+| SWD | J6 + STLINK-V3 (serial above). No SRST | fw:CLAUDE.md "Bench" |
+| Custom USB bootloader | `ENTER_BOOTLOADER` (TAMP->BKP0R magic), or PB1 held low at reset. PID 0x1235 | boot:src/main.cpp; fw:CLAUDE.md "Flash layout" |
+| ST ROM DFU | BOOT0 high via JP1 | boot:src/main.cpp:35 |
 
 ## 3. Pin map (firmware, authoritative)
 
@@ -75,12 +75,12 @@ Only pins the firmware configures. The external net is listed where the schemati
 
 | Pin | MCU pin | fw name | Peripheral / AF | Electrical | Connects to | Source |
 |---|---|---|---|---|---|---|
-| 2 | PC13 | `disp_sense` | GPIO in, EXTI both edges | Low = display powered (`connected = !read`) | Display sense opto U18 | fw:src/display.cpp:45,53 |
+| 2 | PC13 | `disp_sense` | GPIO in, EXTI both edges | Low = display powered (`connected = !read`) | Display sense opto U18 | fw:src/display.cpp:54,66 |
 | 5/6 | PF0/PF1 | — | HSE | 48 MHz | Y1 | fw:src/base.cpp |
-| 8 | PA0 | `mode` | GPIO out PP | Driven high, drives nothing | Not connected on the RNBD350 adapter (D22) | fw:src/bluetooth.cpp:455 |
-| 9 | PA1 | `rst_n` | GPIO out PP | Active low, 100 ms pulse | BLE RST | fw:src/bluetooth.cpp:456,644,670 |
-| 10 | PA2 | `usart_tx` | USART2_TX AF7 | 115200 8N1 | BLE UART RX | fw:src/bluetooth.cpp:451,479 |
-| 11 | PA3 | `usart_rx` | USART2_RX AF7 | In | BLE UART TX | fw:src/bluetooth.cpp:452 |
+| 8 | PA0 | `mode` | GPIO out PP | Driven high, drives nothing | Not connected on the RNBD350 adapter (D22) | fw:src/bluetooth.cpp:464,468 |
+| 9 | PA1 | `rst_n` | GPIO out PP | Active low, 100 ms pulse | BLE RST | fw:src/bluetooth.cpp:465,471,508 |
+| 10 | PA2 | `usart_tx` | USART2_TX AF7 | 115200 8N1 | BLE UART RX | fw:src/bluetooth.cpp:460,487 |
+| 11 | PA3 | `usart_rx` | USART2_RX AF7 | In | BLE UART TX | fw:src/bluetooth.cpp:461 |
 | 12 | PA4 | `current_enable` | GPIO out | High = organ current on. No pull-down | SSR current source | fw:src/base.cpp:19,141-157 |
 | 16 | PB0 | `encoder_a` | GPIO in, pull-up | | Encoder A | fw:src/base.cpp:20 |
 | 17 | PB1 | `encoder_btn` | GPIO in, pull-up | Low = pressed. Held at reset = bootloader | Encoder switch | fw:src/base.cpp:22 |
@@ -88,10 +88,10 @@ Only pins the firmware configures. The external net is listed where the schemati
 | 22 | PB10 | `usart_tx` | USART3_TX AF7 | 31250 Bd | MIDI TX buffer U7 | fw:src/midi.cpp:31,35 |
 | 25 | PB11 | `usart_rx` | USART3_RX AF7 | In | MIDI RX opto U13 | fw:src/midi.cpp:32 |
 | 28 | PB14 | `ledStripFront` | TIM15_CH1 AF1 | 800 kHz WS2812 | Front LEDs (via BSS138 Q5) | fw:src/led.cpp:54 |
-| 31 | PA9 | `usart_tx` | USART1_TX AF7, PP | 1200 Bd, no TXINV | Display TX opto U3 | fw:src/display.cpp:51,93 |
-| 32 | PA10 | `usart_rx` | USART1_RX AF7 | No RXINV. Hears own TX | Display RX opto U4 | fw:src/display.cpp:52 |
+| 31 | PA9 | `usart_tx` | USART1_TX AF7, PP | 1200 Bd, no TXINV | Display TX opto U3 | fw:src/display.cpp:60 |
+| 32 | PA10 | `usart_rx` | USART1_RX AF7 | No RXINV. Hears own TX | Display RX opto U4 | fw:src/display.cpp:61 |
 | 33 | PA11 | `usb_dm` | USB DM | | USB-C via rear board | fw:src/usb.cpp:13 |
-| 34 | PA12 | `usb_dp` | USB DP | Internal DPPU kept on | USB-C via rear board | fw:src/usb.cpp:14,24; fw:CLAUDE.md:98 |
+| 34 | PA12 | `usb_dp` | USB DP | Internal DPPU kept on | USB-C via rear board | fw:src/usb.cpp:14,24; fw:CLAUDE.md "Hardware Pin Map" |
 | 37/38 | PA13/PA14 | — | SWDIO/SWCLK | | J6 | hw J6 |
 | 39 | PA15 | `oledScl` | I2C1_SCL AF4, OD, pull-up | 400 kHz | OLED, ATtiny, BLE pad P1_2 | fw:src/oled.cpp:120,155 |
 | 42 | PB5 | `ledStripRear` | TIM17_CH1 AF10 | 800 kHz WS2812 | Rear LEDs (via BSS138 Q4) | fw:src/led.cpp:52 |
@@ -106,36 +106,36 @@ The firmware does not touch: PA5, PA6, PA7 (ATtiny lines), PB4/PB6 (UCPD CC, res
 | Item | Value | Source |
 |---|---|---|
 | Module | RNBD350 on an adapter with the RN4870 footprint (D10). The schematic still shows the RN4870U-V/RM118, which predates the adapter | D10; hw U17 |
-| UART | 115200 Bd, no RTS/CTS, module set to `SR,0000` | fw:src/bluetooth.cpp:20-25,479 |
-| DMA | TX: DMA1_Channel2 ← DMAMUX1_Channel1 req 27. RX: RXNE interrupt into a ring | fw:src/bluetooth.cpp:465-476 |
-| Control | PA0 MODE is driven high but not wired (D22). PA1 RST, 100 ms low pulse, then up to 3 s wait for `%REBOOT%`. The module configures even without `%REBOOT%` | fw:src/bluetooth.cpp:449-500; fw:CLAUDE.md:53 |
-| Config | `SN,MIDIControlBase`, `SA,2`, `SR,0000`, `SS,C0`, `SGA/SGC,0F`, `ST,0010,0010,0000,00FA`. Coded PHY (`CSPHY`) and `T` sent per connection | fw:CLAUDE.md:53-55 |
-| Failure handling | A failed init is not fatal: one ERROR record, retried every 60 s | fw:CLAUDE.md:61 |
+| UART | 115200 Bd, no RTS/CTS, module set to `SR,0000` | fw:src/bluetooth.cpp:20-26,533 |
+| DMA | TX: DMA1_Channel2 ← DMAMUX1_Channel1 req 27. RX: RXNE interrupt into a ring | fw:src/bluetooth.cpp:473-485 |
+| Control | PA0 MODE is driven high but not wired (D22). PA1 RST, 100 ms low pulse, then up to 3 s wait for `%REBOOT%`. The module configures even without `%REBOOT%` | fw:src/bluetooth.cpp:458-540; fw:CLAUDE.md "Key modules" (bluetooth) |
+| Config | `SN,MIDIControlBase`, `SA,2`, `SR,0000`, `SS,C0`, `SGA/SGC,0F`, `ST,0010,0010,0000,00FA`. Coded PHY (`CSPHY`) and `T` sent per connection | fw:CLAUDE.md "Key modules" (bluetooth) |
+| Failure handling | A failed init is not fatal: one ERROR record, retried every 60 s | fw:CLAUDE.md "Key modules" (fault, wdg) |
 
 ### 4.2 MIDI DIN (USART3)
 
 | Item | Value | Source |
 |---|---|---|
 | UART | 31250 Bd, PB10 TX / PB11 RX, AF7. RX by RXNE interrupt; DMAR is set | fw:src/midi.cpp:31-35 |
-| Port direction | Decided by the ATtiny U14 (fixed firmware). The G431 does not take part | fw:CLAUDE.md:100 |
-| Reset safety | After an IWDG/fault reset: CC 120 + CC 123 on all 16 channels | fw:CLAUDE.md:61 |
+| Port direction | Decided by the ATtiny U14 (fixed firmware). The G431 does not take part | fw:CLAUDE.md "Hardware Pin Map" |
+| Reset safety | After an IWDG/fault reset: CC 120 + CC 123 on all 16 channels | fw:CLAUDE.md "Key modules" (fault, wdg) |
 | Bench | Dead in both directions (2026-10-19). Never verified | REVIEW.md:446 |
 
 ### 4.3 Church display (USART1)
 
 | Item | Value | Source |
 |---|---|---|
-| UART | 1200 Bd from HSI16, separate TX/RX pins (no HDSEL), RTOR 100 bits. 9-byte frames, default `{0xB0, 0xE0×8}`. One frame in flight at a time (~75 ms) | fw:src/display.cpp:51-130 |
+| UART | 1200 Bd from HSI16, separate TX/RX pins (no HDSEL), RTOR 100 bits. 9-byte frames, default `{0xB0, 0xE0×8}`. One frame in flight at a time (~75 ms) | fw:src/display.cpp:60-130 |
 | DMA | RX: DMA2_Channel3, circular, DMAMUX1_Channel8 req 24. TX: DMA2_Channel4, DMAMUX1_Channel9 req 25 | fw:src/display.cpp:60-85 |
 | Echo handling | RX DMA off for the duration of a TX frame, back on at TX complete. An incomplete RX frame is discarded on the receiver timeout | fw:src/display.cpp:123,370-405 |
 | Bus model | Shared with the church's manual controllers (multi-master, D9/D13) | DECISIONS.md |
-| Sense | PC13 low = display powered | fw:src/display.cpp:45,53 |
+| Sense | PC13 low = display powered | fw:src/display.cpp:54,66 |
 
 ### 4.4 Organ power (PA4)
 
 | Item | Value | Source |
 |---|---|---|
-| Drive | PA4 high → current source on. Low from the static GPIO init after every reset | fw:src/base.cpp:19; fw:CLAUDE.md:61 |
+| Drive | PA4 high → current source on. Low from the static GPIO init after every reset | fw:src/base.cpp:19; fw:CLAUDE.md "Key modules" (fault, wdg) |
 | SSR | Type unknown (D12). The current source suits only a bare-LED-input SSR (see section 6.4) | D12; REVIEW.md:301 |
 | Bench | Drives an LED, not a relay | fw:.trail/learnings/2026-10-25-bench-has-no-church-display-and-dev.md |
 
@@ -159,17 +159,17 @@ The firmware does not touch: PA5, PA6, PA7 (ATtiny lines), PB4/PB6 (UCPD CC, res
 
 | Item | Value | Source |
 |---|---|---|
-| Device | Composite CDC0 protocol + USB-MIDI + CDC1 log. App `ABCD:1234`, bootloader `ABCD:1235` | fw:src/usb_descriptors.c:30-31; fw:CLAUDE.md:99 |
-| D+ pull-up | Internal DPPU, enabled by `tusb_init()`, kept on | fw:src/usb.cpp:24; fw:CLAUDE.md:98 |
+| Device | Composite CDC0 protocol + USB-MIDI + CDC1 log. App `ABCD:1234`, bootloader `ABCD:1235` | fw:src/usb_descriptors.c:30-31; fw:CLAUDE.md "Hardware Pin Map" |
+| D+ pull-up | Internal DPPU, enabled by `tusb_init()`, kept on | fw:src/usb.cpp:24; fw:CLAUDE.md "Hardware Pin Map" |
 | Type-C CC | No UCPD use. Resistor Rd only (section 6) | hw R37/R38 |
 
 ## 5. Bench facts
 
 | Item | Value | Source |
 |---|---|---|
-| Probes | Base STLINK-V3 `004200443335510C35383531`. Remote ST-LINK/V2 `37FF70064E59313840161343`. No SRST | fw:CLAUDE.md:83 |
+| Probes | Base STLINK-V3 `004200443335510C35383531`. Remote ST-LINK/V2 `37FF70064E59313840161343`. No SRST | fw:CLAUDE.md "Bench" |
 | Logic analyzer | fx2lafw/sigrok. D0 display→MCU, D1 MCU→display, D2 BLE→MCU, D3 MCU→BLE, D4/D5 remote SCL/SDA, D6/D7 remote BLE UART | fw:tools/basetest/la.py:7-18 |
-| Organ stand-in | Otraki USB-MIDI. DIN link dead | fw:CLAUDE.md:85; REVIEW.md:446 |
+| Organ stand-in | Otraki USB-MIDI. DIN link dead | fw:CLAUDE.md "Bench"; REVIEW.md:446 |
 | Display / SSR | No church display. SSR output drives an LED | fw:.trail/learnings/2026-10-25-bench-has-no-church-display-and-dev.md |
 | BLE | RNBD350 since 2026-11-04. Open solder joints after the swap once made it silent on UART while it still advertised | fw:.trail/learnings/2026-11-04-rnbd350-silent-on-uart-but-advertising-dev.md |
 
@@ -205,7 +205,7 @@ Source: `midicontrol-hw` (D11: historical reference). Use it for parts the firmw
 | PB14 / PB5 | FRONT/BACK_LED_DIN_3V3 → BSS138 Q5 / Q4 → 5 V (R36 10k) → J7.8 / J8.8 | hw |
 | PA9 | DISP_TX → R1 330R → U3 PC817 (anode on +3V3) | hw |
 | PA10 | DISP_RX ← U4 collector, R5 10k pull-up | hw |
-| PA11 / PA12 | R34 / R35 22R → J8.2 / J8.1. C20/C22 47 pF. R33 1k5 PA12 → +3V3 (not effective on the boards in use) | hw; fw:CLAUDE.md:98 |
+| PA11 / PA12 | R34 / R35 22R → J8.2 / J8.1. C20/C22 47 pF. R33 1k5 PA12 → +3V3 (not effective on the boards in use) | hw; fw:CLAUDE.md "Hardware Pin Map" |
 | PA15 / PB7 | SCL / SDA: R44 / R45 10k pull-ups; J7.4 / J7.3; U14.16 / U14.15 (ATtiny PB0 / PB1); U17.11 / U17.12 (P1_2 / P1_3) | hw |
 | PB8-BOOT0 | R18 10k → JP1.2. JP1.1 = +3V3, JP1.3 = GND | hw JP1/R18 |
 | NRST | J6.5, R19 10k pull-up | hw; REVIEW.md:44 |
@@ -261,7 +261,7 @@ Answer each one when known. Decisions D10 (BLE fit) and D11 (which source is aut
 7. **ATtiny.** Does its firmware drive PA5/PA6/PA7 or the I2C lines, or answer on I2C (collision with 0x3C)? Is its source available?
 8. **MIDI A / B.** Which port does the ATtiny make OUT and which IN? What are R21/R22 to ATtiny PB2/PB3 for?
 9. **DIN link dead (must be fixed before installation, D31 / SYS-NOTE-05).** Cause not traced (cable, ATtiny direction, MIDI_TX_VCC_ON). TX polarity to the DIN pins not verified.
-10. **Display echo and polarity.** Confirm on a real display: the line idles undriven, and the firmware's RX-DMA gating (off until USART TC, RDR flush) is enough to reject its own echo, and a foreign frame after ours is mirrored correctly. "Half-duplex" in fw:CLAUDE.md:56 describes the single wire, not the USART mode.
+10. **Display echo and polarity.** Confirm on a real display: the line idles undriven, and the firmware's RX-DMA gating (off until USART TC, RDR flush) is enough to reject its own echo, and a foreign frame after ours is mirrored correctly. "Half-duplex" in fw:CLAUDE.md "Key modules" (display) describes the single wire, not the USART mode.
 11. **USB-C CC.** Are R37/R38 fitted? Are D10/D11 (DNP) needed? Is UCPD ever to be used?
 12. **Rear fuse F1.** The value is "xxA". What is fitted?
 13. **Y2 + supercap C3.** Is Y2 fitted? What is +5VL / C3 for (holding the ATtiny and switch state through USB drop-outs)?
