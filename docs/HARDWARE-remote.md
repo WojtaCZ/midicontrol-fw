@@ -22,7 +22,7 @@ Read these before touching the remote firmware.
 3. **BOOT0 / JP1.** PA14 is both SWCLK and BOOT0. The strap is R13 10k → JP1 (3-pad solder jumper, +3V3 / GND). Whether the pin is sampled at all depends on the G0 option bytes (nBOOT_SEL), which have not been read. Do not change option bytes. (sch R13, JP1)
 4. **The I2C1 bus is shared.** OLED SH1106 (0x3C) and charger BQ24195 (0x6B) share PB6/PB7. Schematic-only: the RN4870-footprint pads P1_2/P1_3 (U4.13/14), now under the RNBD350 adapter, are on the bus too. A hung charger transaction blocks the display. The driver does a 9-clock bus recovery. (`src/i2cbus.cpp:10-11`; `src/bq24195.cpp:10`; sch U4)
 5. **No USB data.** PA11/PA12 are not connected. USB-C only charges the battery (BQ24195), and UCPD1 reads CC for the input limit. Firmware updates go over BLE through the base into the W25Q32 (OTA staging), or over SWD. (sch J2; CL:57; `src/usbc.cpp`)
-6. **The BLE module is an RNBD350 on an RN4870-footprint adapter** (D10). Status events carry a connection handle. The module has no MODE pin, so MODE is not wired (D22): PB9 is driven high and drives nothing. The remote advertises extended on Coded PHY, so phones cannot see it. (`src/bluetooth.cpp:24-26`; CL:47,49)
+6. **The BLE module is an RNBD350 on an RN4870-footprint adapter** (D10). Status events carry a connection handle. The module has no MODE pin, so MODE is not wired (D22): PB9 is driven high and drives nothing. The remote advertises extended on Coded PHY, so phones cannot see it. (`src/bluetooth.cpp`, pin comment at the top and `Bluetooth::init()`; CL:47,49)
 7. **Power hold and button.** PB13 is ON/OFF, active high since the 2026-10-19 hardware change. Holding it 5 s shuts down. The shutdown path writes the diag slot with interrupts off before it releases PA1. Auto-off after 20 min idle never fires on VBUS, so it does not fire on the bench. (CL:59,61,92)
 8. **Unfiltered ADC.** The PA0/PA5 dividers are 4.7M/8.2M with no capacitor and pick up hum when the remote is held. The cut-off uses the unsmoothed 1 s mean. (CL:53; `src/battery.cpp:12`)
 9. **USB D+/D- are crossed into the BQ24195, and R18 is removed on the bench board.** The BQ's own source detection can report "unknown" (100 mA). The firmware overrides IINLIM from the Type-C CC advertisement. (CL:99)
@@ -33,7 +33,7 @@ Read these before touching the remote firmware.
 |---|---|---|
 | Function | Handheld BLE remote for the base; BLE peripheral, Transparent UART | CL:7 |
 | MCU | STM32G071CBT6 (Cortex-M0+, 128 KB flash, 36 KB SRAM, no FPU), LQFP48 | CL:7; linker |
-| BLE | **RNBD350 on an adapter board with the RN4870 footprint**, in all units (D10). UART and RST as on the RN4870. The RNBD350 has no MODE pin, so MODE is not wired (D22). USART2 | D10, D22; `src/bluetooth.cpp:22-26` |
+| BLE | **RNBD350 on an adapter board with the RN4870 footprint**, in all units (D10). UART and RST as on the RN4870. The RNBD350 has no MODE pin, so MODE is not wired (D22). USART2 | D10, D22; `src/bluetooth.cpp` (pin comment, `init()`) |
 | Display | SH1106 128×64 OLED, I2C 0x3C | `inc/oled.hpp:16-21` |
 | Keys | 5×3 matrix + OK + ON/OFF | `src/base.cpp` |
 | Storage | W25Q32 SPI NOR (4 MB) on SPI1: OTA staging + diag slots | `lib/bootloader/src/w25q.cpp`; CL:57,61 |
@@ -71,8 +71,8 @@ Only pins the firmware configures. Section 6 has the external circuits.
 |---|---|---|---|---|---|---|
 | 11 | PA0 | battery voltage | ADC_IN0 | Ratio 0.636 | Battery divider | `src/battery.cpp:12` |
 | 12 | PA1 | `power_hold` | GPIO out PP | High = stay on. Set first in SystemInit | 3V3 latch (MCU_PWR_ON) | `src/base.cpp:25,44` |
-| 13 | PA2 | BLE TX | USART2_TX AF1 | 115200 8N1 | BLE UART RX | `src/bluetooth.cpp:22` |
-| 14 | PA3 | BLE RX | USART2_RX AF1, pull-up | | BLE UART TX | `src/bluetooth.cpp:23` |
+| 13 | PA2 | BLE TX | USART2_TX AF1 | 115200 8N1 | BLE UART RX | `src/bluetooth.cpp` (`init()`) |
+| 14 | PA3 | BLE RX | USART2_RX AF1, pull-up | | BLE UART TX | `src/bluetooth.cpp` (`init()`) |
 | 15 | PA4 | `spi_cs` | GPIO out | Active low | W25Q32 CS | `lib/bootloader/src/w25q.cpp:21` |
 | 16 | PA5 | USB 5 V sense | ADC_IN5 | Ratio 0.636. VBUS present at ≥ 4000 mV | VBUS divider | `src/battery.cpp:12,26-32` |
 | 17 | PA6 | SPI1 MISO | AF0 | | W25Q32 | `lib/bootloader/src/w25q.cpp` |
@@ -90,8 +90,8 @@ Only pins the firmware configures. Section 6 has the external circuits.
 | 44 | PB5 | BQ_CHRG_OTG | GPIO out | Driven high | BQ24195 OTG | `src/bq24195.cpp:63` |
 | 45 | PB6 | I2C1 SCL | AF6, OD, pull-up | ~120 kHz | OLED, BQ24195 (+ BLE pad P1_2, sch) | `src/i2cbus.cpp:10-11` |
 | 46 | PB7 | I2C1 SDA | AF6, OD | | OLED, BQ24195 (+ BLE pad P1_3, sch) | `src/i2cbus.cpp:10` |
-| 47 | PB8 | BLE reset | GPIO out | Active low, 100 ms, then up to 3 s for `%REBOOT%` | BLE RST (RNBD350 NMCLR) | `src/bluetooth.cpp:24` |
-| 48 | PB9 | BLE mode | GPIO out | Driven high, drives nothing | Not connected on the RNBD350 adapter (D22) | `src/bluetooth.cpp:25-26` |
+| 47 | PB8 | BLE reset | GPIO out | Active low, 100 ms, then up to 3 s for `%REBOOT%` | BLE RST (RNBD350 NMCLR) | `src/bluetooth.cpp` (`init()`, `rst_n`) |
+| 48 | PB9 | BLE mode | GPIO out | Driven high, drives nothing | Not connected on the RNBD350 adapter (D22) | `src/bluetooth.cpp` (`init()`, `mode`) |
 
 The firmware does not touch: PC13-PC15, PF0/PF1, PB0, PC6/PC7, PA11/PA12, PA15, PD3 (all unconnected per sch).
 
@@ -116,7 +116,7 @@ Keymap (`src/base.cpp`, checked switch by switch against the netlist):
 | Item | Value | Source |
 |---|---|---|
 | Module | RNBD350 on an RN4870-footprint adapter (D10). The schematic still shows the RN4870-V_RM118 (U4), which predates the adapter | D10; sch U4 |
-| UART | 115200 8N1, no RTS/CTS. TX via DMA1 ch2. RX IRQ at priority 0 | `src/bluetooth.cpp:364` |
+| UART | 115200 8N1, no RTS/CTS. TX via DMA1 ch2. RX IRQ at priority 0 | `src/bluetooth.cpp` (`USART2_IRQHandler`) |
 | Config | `SN,MIDIControlRemote`, `SS,C0`, `SR,0000`, `SA,2`, `SGA,0F`, `SGC,0F`, `ST,0010,0010,0000,00FA`. Extended advertising on Coded PHY. `CSPHY` (Coded S8) after every `%SECURED%` | CL:47,49 |
 | Module replacement | A new module has a new MAC: pair it once from the base menu | CL:95 |
 
