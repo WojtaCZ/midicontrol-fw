@@ -42,7 +42,7 @@ def lsusb_ids() -> set:
 
 def git_revision() -> str:
     with open(os.path.join(FW, "inc", "git.hpp")) as f:
-        return re.search(r'revision = "([0-9a-f]+)"', f.read()).group(1)
+        return re.search(r'revision(?:\[\])? = "([0-9a-f]+)"', f.read()).group(1)
 
 
 class Updater:
