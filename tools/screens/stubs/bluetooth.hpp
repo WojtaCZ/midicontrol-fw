@@ -11,4 +11,10 @@ namespace Bluetooth {
 	bool isPeerAccepted();
 	const char *name();
 	stmcpp::units::duration getDataReceivedTimestamp();
+	enum class RestartState : uint8_t { IDLE, RUNNING, SUCCEEDED, FAILED };
+	RestartState restartState();
+	enum class ConfigState : uint8_t { NONE, PENDING, DONE, FAILED };
+	ConfigState configState();
+	bool resetConfirmed();
+	uint32_t rxByteCount();
 }

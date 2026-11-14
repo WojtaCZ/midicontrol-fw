@@ -31,6 +31,10 @@ namespace Bluetooth {
 	bool isPeerAccepted() { return host::state.connected; }
 	const char *name() { return "MIDIControlBase"; }
 	stmcpp::units::duration getDataReceivedTimestamp() { return stmcpp::units::duration::fromSeconds(0); }
+	RestartState restartState() { return RestartState::IDLE; }
+	ConfigState configState() { return ConfigState::DONE; }
+	bool resetConfirmed() { return true; }
+	uint32_t rxByteCount() { return 1234; }
 }
 
 namespace display {
