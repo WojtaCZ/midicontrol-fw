@@ -466,10 +466,10 @@ static void powerCallback(ui::MenuItem* item, void* userData) {
 
 static void firmwareCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
-    std::snprintf(fwLine0, sizeof(fwLine0), "Revize: %s", git::revision.c_str());
-    std::snprintf(fwLine1, sizeof(fwLine1), "Vetev: %s",  git::branch.c_str());
-    std::snprintf(fwLine2, sizeof(fwLine2), "Datum: %s",  git::build_date.c_str());
-    std::snprintf(fwLine3, sizeof(fwLine3), "Cas: %s",    git::build_time.c_str());
+    std::snprintf(fwLine0, sizeof(fwLine0), "Revize: %s", git::revision);
+    std::snprintf(fwLine1, sizeof(fwLine1), "Vetev: %s",  git::branch);
+    std::snprintf(fwLine2, sizeof(fwLine2), "Datum: %s",  git::build_date);
+    std::snprintf(fwLine3, sizeof(fwLine3), "Cas: %s",    git::build_time);
     nav.push(&firmwareScreen);
 }
 
@@ -548,10 +548,10 @@ void init() {
     splashScreen = ui::SplashScreen(
         base::DEVICE_NAME.c_str(),
         base::DEVICE_TYPE.c_str(),
-        git::revision.c_str(),
+        git::revision,
         onSplashDismiss
     );
-    splashScreen.setComment2(git::branch.c_str());
+    splashScreen.setComment2(git::branch);
 
     firmwareScreen.setTitle("Verze FW");
     displayScreen.setTitle("Displej");

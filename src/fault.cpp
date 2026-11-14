@@ -100,7 +100,7 @@ namespace fault {
 		r.bfar	   = SCB->BFAR;
 		r.afsr	   = SCB->AFSR;
 		r.uptimeMs = stmcpp::systick::getTicks();
-		strncpy(r.rev, git::revision.c_str(), sizeof(r.rev) - 1);
+		strncpy(r.rev, git::revision, sizeof(r.rev) - 1);
 		r.crc	= recordCrc(r);
 		_record = r;
 

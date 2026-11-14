@@ -314,9 +314,9 @@ namespace router {
 		using namespace protocol::info;
 		Writer w(buf, cap);
 		char built[24];
-		snprintf(built, sizeof(built), "%s %s UTC", git::build_date.c_str(), git::build_time.c_str());
-		w.str(Tag::REVISION, git::revision.c_str(), 12);
-		w.str(Tag::BRANCH, git::branch.c_str(), 24);
+		snprintf(built, sizeof(built), "%s %s UTC", git::build_date, git::build_time);
+		w.str(Tag::REVISION, git::revision, 12);
+		w.str(Tag::BRANCH, git::branch, 24);
 		w.str(Tag::BUILT, built);
 		w.u8(Tag::DIRTY, git::dirty ? 1 : 0);
 		w.u32(Tag::UPTIME_MS, stmcpp::systick::getTicks());

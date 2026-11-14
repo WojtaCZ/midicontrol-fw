@@ -205,8 +205,8 @@ namespace Debug {
 	}
 
 	void banner() {
-		logForce(Level::INFO, "sys", "MIDIControl base fw %s rev %s (%s %s)", git::branch.c_str(), git::revision.c_str(), git::commit_date.c_str(),
-				 git::commit_time.c_str());
+		logForce(Level::INFO, "sys", "MIDIControl base fw %s rev %s (%s %s)", git::branch, git::revision, git::commit_date,
+				 git::commit_time);
 		uint32_t csr = resetcause::readAndClear();
 		logForce(Level::INFO, "sys", "reset: %s (csr 0x%08lx)", resetcause::describe(csr), static_cast<unsigned long>(csr));
 		// Saved fault record: a new one in full at level E (the PC counts it once), an already announced one only with a pointer to "dump"
