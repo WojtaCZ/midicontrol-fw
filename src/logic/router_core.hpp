@@ -91,4 +91,30 @@ namespace routercore {
 		Entry _entries[SIZE] = {};
 	};
 
+	// Q1-1 c: base backstop for organ power. SSR on and no valid PC packet for 2 h (PC lost, absent or
+	// never seen) -> the router switches the SSR off and sends All Notes Off. A PC packet restarts the
+	// 2 h, so does the SSR going off -> on. Times are router-clock ms, compared modulo 2^32.
+	class SsrBackstop {
+	public:
+		static constexpr uint32_t TIMEOUT_MS = 2u * 60u * 60u * 1000u;
+		void onPcPacket(uint32_t now) { _since = now; }
+		// Call every pass with the current SSR state; true once when the 2 h ran out.
+		bool poll(uint32_t now, bool ssrOn) {
+			if (!ssrOn) {
+				_wasOn = false;
+				return false;
+			}
+			if (!_wasOn) { // off -> on (menu, PC SET_CURRENT): a new 2 h
+				_wasOn = true;
+				_since = now;
+				return false;
+			}
+			if (now - _since < TIMEOUT_MS) return false;
+			_wasOn = false; // the caller switches the SSR off; the next on starts a new 2 h
+			return true;
+		}
+	private:
+		uint32_t _since = 0;
+		bool	 _wasOn = false;
+	};
 } // namespace routercore

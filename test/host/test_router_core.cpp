@@ -3,6 +3,8 @@
 // Ported from the step-2 verifier red tests (BF-1, PM-13, PM-6) onto the real code. DISABLED_ = known red, enabled by its fix.
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "protocol/constants.hpp"
 #include "protocol/types.hpp"
 #include "recovery.hpp"
@@ -225,4 +227,95 @@ TEST(PM6, RetransmitsWithoutReplyThenGivesUp) {
 		   [&](const Packet &) { gaveUp++; });
 	EXPECT_EQ(resends, protocol::MAX_RETRIES);
 	EXPECT_EQ(gaveUp, 1);
+}
+
+// Q1-1 c: 2 h backstop. Literal reading (coordinator): SSR on and no valid PC packet for 2 h -> SSR off +
+// All Notes Off; a PC packet restarts the 2 h. Our choice (owner question): the SSR going off -> on also restarts it.
+namespace {
+	constexpr uint32_t TWO_H = 2u * 60u * 60u * 1000u;
+
+	// Polls every second from start to start + span (router.cpp polls every pass); returns the fire times.
+	std::vector<uint32_t> pollEverySecond(routercore::SsrBackstop &b, uint32_t start, uint32_t span, bool &ssr) {
+		std::vector<uint32_t> fired;
+		for (uint32_t t = 0; t <= span; t += 1000) {
+			uint32_t now = start + t;
+			if (b.poll(now, ssr)) {
+				fired.push_back(t);
+				ssr = false; // router: base::current::disable()
+			}
+		}
+		return fired;
+	}
+} // namespace
+
+TEST(Backstop, SsrOnWithoutPcGoesOffAfterTwoHours) {
+	routercore::SsrBackstop b;
+	bool ssr = true; // manual on, no PC ever seen
+	auto fired = pollEverySecond(b, 1000, TWO_H + 60000, ssr);
+	ASSERT_EQ(fired.size(), 1u) << "manual on without a PC must be cut once after 2 h";
+	EXPECT_EQ(fired[0], TWO_H);
+	EXPECT_FALSE(ssr);
+}
+
+TEST(Backstop, NotBeforeTwoHours) {
+	routercore::SsrBackstop b;
+	bool ssr = true;
+	EXPECT_TRUE(pollEverySecond(b, 5000, TWO_H - 1000, ssr).empty());
+	EXPECT_TRUE(ssr);
+}
+
+TEST(Backstop, PcPacketRestartsTheTwoHours) {
+	routercore::SsrBackstop b;
+	bool ssr = true;
+	const uint32_t start = 1000;
+	EXPECT_TRUE(pollEverySecond(b, start, TWO_H - 1000, ssr).empty());
+	b.onPcPacket(start + TWO_H - 1000); // one packet just before the limit
+	EXPECT_TRUE(pollEverySecond(b, start + TWO_H, TWO_H - 2000, ssr).empty()) << "PC packet must restart the 2 h";
+	auto fired = pollEverySecond(b, start + 2 * TWO_H - 1000, 2000, ssr);
+	ASSERT_EQ(fired.size(), 1u);
+	EXPECT_EQ(fired[0], 0u); // exactly 2 h after the packet
+}
+
+TEST(Backstop, SsrOffNeverFires) {
+	routercore::SsrBackstop b;
+	bool ssr = false;
+	EXPECT_TRUE(pollEverySecond(b, 0, 3 * TWO_H, ssr).empty());
+}
+
+TEST(Backstop, SwitchingOnRestartsTheTwoHours) {
+	routercore::SsrBackstop b;
+	bool ssr = false;
+	EXPECT_TRUE(pollEverySecond(b, 0, 3 * TWO_H, ssr).empty()); // long off, no PC
+	ssr = true; // switched on by hand at 3 h
+	EXPECT_TRUE(pollEverySecond(b, 3 * TWO_H + 1000, TWO_H - 1000, ssr).empty()) << "off->on must restart the 2 h";
+	auto fired = pollEverySecond(b, 4 * TWO_H + 1000, 1000, ssr);
+	ASSERT_EQ(fired.size(), 1u);
+}
+
+TEST(Backstop, OnAgainAfterTheCutGetsAnotherTwoHours) {
+	routercore::SsrBackstop b;
+	bool ssr = true;
+	ASSERT_EQ(pollEverySecond(b, 0, TWO_H, ssr).size(), 1u);
+	ssr = true; // organist switches it on again from the base menu
+	EXPECT_TRUE(pollEverySecond(b, TWO_H + 1000, TWO_H - 1000, ssr).empty());
+	EXPECT_EQ(pollEverySecond(b, 2 * TWO_H + 1000, 1000, ssr).size(), 1u);
+}
+
+TEST(Backstop, AcrossMsClockWrap) {
+	routercore::SsrBackstop b;
+	bool ssr = true;
+	const uint32_t start = msAt(0xFFFFFFFFu - TWO_H / 2); // ms clock wraps at 1 h
+	auto fired = pollEverySecond(b, start, TWO_H + 60000, ssr);
+	ASSERT_EQ(fired.size(), 1u) << "must fire exactly once across the wrap";
+	EXPECT_EQ(fired[0], TWO_H);
+}
+
+TEST(Backstop, PcPacketAcrossMsClockWrap) {
+	routercore::SsrBackstop b;
+	bool ssr = true;
+	const uint32_t start = 0xFFFFFFFFu - 10 * 60000u; // 10 min before the wrap
+	EXPECT_TRUE(pollEverySecond(b, start, 60 * 60000u, ssr).empty());
+	b.onPcPacket(start + 60 * 60000u); // after the wrap
+	EXPECT_TRUE(pollEverySecond(b, start + 60 * 60000u, TWO_H - 1000, ssr).empty());
+	EXPECT_EQ(pollEverySecond(b, start + 60 * 60000u + TWO_H, 1000, ssr).size(), 1u);
 }

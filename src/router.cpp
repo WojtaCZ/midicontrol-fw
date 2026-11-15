@@ -90,6 +90,7 @@ namespace router {
 
 	// Deduplication: the last PacketId processed locally from each node
 	static routercore::RxDedup _dedup;
+	static routercore::SsrBackstop _backstop; // Q1-1 c: SSR on, 2 h without a PC packet -> off
 
 	// Restart into the bootloader (ENTER_BOOTLOADER)
 	static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the bootloader
@@ -454,6 +455,7 @@ namespace router {
 				   pkt.packetId, static_cast<unsigned>(pkt.msgType), pkt.payloadLen);
 		if (via == Transport::USB_CDC) {
 			_pc.onRx(nowMs());
+			_backstop.onPcPacket(nowMs());
 		} else {
 			_lastRemoteRx = now;
 			_remoteEverSeen = true;
@@ -500,6 +502,13 @@ namespace router {
 			// Q1-8 b: a restarted PC process numbers its packets from 1 again; do not ACK-and-drop its first ones
 			_dedup.forget(protocol::ADDR_PC);
 			Debug::log(Debug::Level::WARNING, "router", "PC lost: all notes off, organ power off");
+		}
+		// Q1-1 c: backstop for a manual on without a PC (D19 keeps it on otherwise): All Notes Off, SSR off
+		if (_backstop.poll(nowMs(), base::current::isEnabled())) {
+			midi::sendStuckNoteCleanup();
+			base::current::disable();
+			GUI::syncPowerCheckbox();
+			Debug::log(Debug::Level::WARNING, "router", "no PC packet for 2 h: all notes off, organ power off");
 		}
 		bool pc = isPcAlive();
 		if (pc != _pcAliveLogged) {
