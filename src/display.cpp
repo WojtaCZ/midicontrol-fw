@@ -51,6 +51,24 @@ namespace display {
 
     static constexpr uint8_t BLANK = 0xE0; // Blank digit (0xE in the upper nibble)
 
+    // The one colour table (P1-20): SysEx/NPI colour code <-> bus value; any other code is "off" (0x0F on SysEx)
+    struct LedEntry { uint8_t code; uint8_t bus; };
+    static constexpr LedEntry ledTable[] = {
+        {0x01, RED}, {0x02, GREEN}, {0x03, BLUE}, {0x04, YELLOW},
+    };
+    static constexpr uint8_t ledFromCode(uint8_t code) {
+        for (const LedEntry& e : ledTable) if (e.code == code) return e.bus;
+        return OFF;
+    }
+    static constexpr uint8_t ledToCode(uint8_t bus) {
+        for (const LedEntry& e : ledTable) if (e.bus == bus) return e.code;
+        return 0x0F;
+    }
+    static_assert(ledFromCode(0x01) == RED && ledFromCode(0x02) == GREEN && ledFromCode(0x03) == BLUE && ledFromCode(0x04) == YELLOW);
+    static_assert(ledFromCode(0x00) == OFF && ledFromCode(0x0F) == OFF && ledFromCode(0x05) == OFF);
+    static_assert(ledToCode(RED) == 0x01 && ledToCode(GREEN) == 0x02 && ledToCode(BLUE) == 0x03 && ledToCode(YELLOW) == 0x04);
+    static_assert(ledToCode(OFF) == 0x0F);
+
     static stmcpp::gpio::pin<stmcpp::gpio::port::portc, 13> disp_sense (stmcpp::gpio::mode::input);
 
 
@@ -229,13 +247,7 @@ namespace display {
 
         // LED: 1 red, 2 green, 3 blue, 4 yellow, 0x00/0x0F off
         if (led != protocol::NPI_NO_CHANGE) {
-            switch (led) {
-                case 0x01: currentState[8] = RED; break;
-                case 0x02: currentState[8] = GREEN; break;
-                case 0x03: currentState[8] = BLUE; break;
-                case 0x04: currentState[8] = YELLOW; break;
-                default:   currentState[8] = OFF; break;
-            }
+            currentState[8] = ledFromCode(led);
         }
 
         // One frame for the whole message
@@ -334,13 +346,7 @@ namespace display {
 
     // Converts the internal LED state to a SysEx byte
     static uint8_t stateToSysexLed(uint8_t state) {
-        switch(state) {
-            case RED:    return 0x01;
-            case YELLOW: return 0x04;
-            case GREEN:  return 0x02;
-            case BLUE:   return 0x03;
-            default:     return 0x0F; // OFF
-        }
+        return ledToCode(state);
     }
 
     // Converts the internal letter state to a SysEx byte
