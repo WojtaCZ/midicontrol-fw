@@ -92,7 +92,7 @@ set(SOURCES
 	${CMAKE_SOURCE_DIR}/lib/ui/src/progress.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/navigator.cpp
 
-	${CMAKE_SOURCE_DIR}/${FW_LIB_DIR}/protocol/src/crc8.cpp
+	${CMAKE_SOURCE_DIR}/lib/protocol/src/crc8.cpp
 	${CMAKE_SOURCE_DIR}/lib/protocol/src/codec.cpp
 	${CMAKE_SOURCE_DIR}/lib/protocol/src/parser.cpp
 
