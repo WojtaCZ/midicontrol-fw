@@ -24,7 +24,8 @@ Display expects 9byte frames over inverted USART. In each byte, 0xe in MSW (most
 5: Song     - hundrets
 6: Song     - thousands
 7: Letter   - A to D represented in HEX 
-8: LED      - 0 to 3 representing R, Y, G, B
+8: LED      - bus values 0x20 R, 0x21 Y, 0x22 G, 0x23 B, 0xE0 off (enum display::ledColor).
+            The SysEx/NPI colour codes differ (1 R, 2 G, 3 B, 4 Y, else off); see ledTable below.
 */
 
 
