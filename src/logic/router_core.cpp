@@ -30,6 +30,10 @@ namespace routercore {
 		return false;
 	}
 
+	void RxDedup::forget(uint8_t source) {
+		if (source < NODES) _last[source].valid = false;
+	}
+
 	bool RetryQueue::full() const {
 		for (const auto &e : _entries) {
 			if (!e.used) return false;

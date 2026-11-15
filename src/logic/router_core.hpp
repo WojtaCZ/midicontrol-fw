@@ -43,6 +43,8 @@ namespace routercore {
 		// true: a retransmission of the last packet from this source (ACK again, do not execute).
 		// false: a new packet, now remembered.
 		bool isRepeat(uint8_t source, uint8_t packetId);
+		// Start afresh for one node (Q1-8 b: the PC was declared lost, its next process restarts the PacketIds)
+		void forget(uint8_t source);
 
 	private:
 		struct LastRx {

@@ -133,6 +133,7 @@ TEST(BF1, DeadlineAcrossClockWrap) {
 }
 
 // PM-13 (base side): organOn pid 5, ACK lost; organOff pid 6; the PC retries pid 5.
+// RESIDUAL, stays red on the base (no monotonic pid check by decision): covered on the PC side.
 TEST(PM13, DISABLED_StaleRetryOfOnAfterOffMustNotPowerTheOrgan) {
 	Base b;
 	b.handle(setCurrent(5, true));
@@ -143,11 +144,35 @@ TEST(PM13, DISABLED_StaleRetryOfOnAfterOffMustNotPowerTheOrgan) {
 }
 
 // Learning 2026-11-07: a new PC process restarts its PacketId counter.
+// RESIDUAL when the base never declared the PC lost in between (restart faster than KEEPALIVE_LOSS):
+// covered on the PC side. With a loss in between see NewPcSessionAfterPcLossIsExecuted.
 TEST(PM13, DISABLED_NewPcSessionCommandIsNotSwallowedAsDuplicate) {
 	Base b;
 	b.handle(setCurrent(1, true)); // old process, last frame
 	b.handle(setCurrent(1, false)); // new process, first reliable frame, pid 1 again
 	EXPECT_FALSE(b.ssrOn) << "SET_CURRENT(off) of a new PC session ACKed but not executed";
+}
+
+// Q1-8 b: a PC restart that the base noticed (PC declared lost in between, router.cpp logChanges()) starts
+// a fresh duplicate filter for the PC, so the new process's first pid is executed even if it repeats the old one.
+TEST(PM13, NewPcSessionAfterPcLossIsExecuted) {
+	Base b;
+	b.handle(setCurrent(1, true)); // old process, last frame
+	b.dedup.forget(protocol::ADDR_PC); // PC declared lost
+	b.handle(setCurrent(1, false)); // new process, first reliable frame, pid 1 again
+	EXPECT_FALSE(b.ssrOn) << "SET_CURRENT(off) of a new PC session ACKed but not executed";
+}
+
+// Forgetting the PC leaves the other nodes' filters alone.
+TEST(PM13, ForgetPcKeepsRemoteFilter) {
+	routercore::RxDedup d;
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_REMOTE, 9));
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, 9));
+	d.forget(protocol::ADDR_PC);
+	EXPECT_TRUE(d.isRepeat(protocol::ADDR_REMOTE, 9));
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, 9));
+	EXPECT_TRUE(d.isRepeat(protocol::ADDR_PC, 9));
+	d.forget(200); // out of range: ignored
 }
 
 // Control: an immediate retransmission is ACKed and not executed twice.

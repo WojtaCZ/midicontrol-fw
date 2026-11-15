@@ -495,6 +495,8 @@ namespace router {
 			midi::sendStuckNoteCleanup();
 			base::current::disable();
 			GUI::syncPowerCheckbox();
+			// Q1-8 b: a restarted PC process numbers its packets from 1 again; do not ACK-and-drop its first ones
+			_dedup.forget(protocol::ADDR_PC);
 			Debug::log(Debug::Level::WARNING, "router", "PC lost: all notes off, organ power off");
 		}
 		bool pc = isPcAlive();
