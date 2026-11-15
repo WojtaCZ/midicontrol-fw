@@ -64,6 +64,7 @@ namespace routercore {
 			uint32_t		 sentAt;
 			uint8_t			 retries;
 			bool			 used;
+			bool			 busy; // PM-6: the last answer was NAK BUSY (fits in the padding, no RAM)
 		};
 
 		bool full() const;
@@ -75,17 +76,18 @@ namespace routercore {
 			bool				nak;
 			protocol::NakReason reason;
 		};
-		// ACK/NAK from rx.source for the PacketId in payload[0] closes the matching entry;
-		// true when one was closed, then *out (if given) says which and how
+		// ACK/NAK from rx.source for the PacketId in payload[0] closes the matching entry, except NAK BUSY
+		// (kept for a retry, PM-6); true when one was closed, then *out (if given) says which and how
 		bool resolve(const protocol::Packet &rx, Closed *out = nullptr);
-		// Entries without an answer for `timeout`: resend(pkt) with the same PacketId, after maxRetries giveUp(pkt)
+		// Entries without an answer for `timeout` (or answered NAK BUSY): resend(pkt) with the same PacketId,
+		// after maxRetries giveUp(pkt, busy), busy = the last answer was NAK BUSY
 		template<typename Resend, typename GiveUp>
 		void poll(uint32_t now, uint32_t timeout, uint8_t maxRetries, Resend &&resend, GiveUp &&giveUp) {
 			for (auto &e : _entries) {
 				if (!e.used || (now - e.sentAt) < timeout) continue;
 				if (e.retries >= maxRetries) {
 					e.used = false;
-					giveUp(static_cast<const protocol::Packet &>(e.pkt));
+					giveUp(static_cast<const protocol::Packet &>(e.pkt), e.busy);
 					continue;
 				}
 				resend(static_cast<const protocol::Packet &>(e.pkt));

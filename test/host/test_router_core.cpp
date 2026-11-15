@@ -189,7 +189,7 @@ TEST(PM13, ImmediateDuplicateSuppressed) {
 }
 
 // PM-6: PROTOCOL.md says the sender retries on NAK BUSY.
-TEST(PM6, DISABLED_BaseRetriesAfterNakBusy) {
+TEST(PM6, BaseRetriesAfterNakBusy) {
 	routercore::RetryQueue q;
 	Packet				   stop{};
 	stop.source	  = protocol::ADDR_BASE;
@@ -198,10 +198,51 @@ TEST(PM6, DISABLED_BaseRetriesAfterNakBusy) {
 	stop.packetId = 7;
 	int transmits = 1;
 	ASSERT_TRUE(q.add(stop, msAt(0)));
-	q.resolve(reply(MsgType::NAK, 7, NakReason::BUSY));
+	EXPECT_FALSE(q.resolve(reply(MsgType::NAK, 7, NakReason::BUSY))) << "BUSY = not now: the entry stays";
 	q.poll(msAt(protocol::RETRY_TIMEOUT_MS), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES, [&](const Packet &) { transmits++; },
-		   [](const Packet &) {});
+		   [](const Packet &, bool) {});
 	EXPECT_EQ(transmits, 2) << "NAK BUSY treated as final: STOP_SONG never retried";
+}
+
+// PM-6: BUSY on every try: bounded by MAX_RETRIES like silence, and the give-up says BUSY (PC zaneprazdneno).
+TEST(PM6, BusyEveryTimeGivesUpAsBusy) {
+	routercore::RetryQueue q;
+	Packet				   play{};
+	play.dest	  = protocol::ADDR_PC;
+	play.msgType  = MsgType::PLAY_SONG;
+	play.packetId = 11;
+	ASSERT_TRUE(q.add(play, msAt(0)));
+	int		 resends = 0, gaveUp = 0;
+	bool	 lastBusy = false;
+	uint32_t t		  = 0;
+	for (int i = 0; i <= protocol::MAX_RETRIES; i++) {
+		q.resolve(reply(MsgType::NAK, 11, NakReason::BUSY));
+		t += protocol::RETRY_TIMEOUT_MS;
+		q.poll(msAt(t), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES, [&](const Packet &) { resends++; },
+			   [&](const Packet &, bool busy) { gaveUp++; lastBusy = busy; });
+	}
+	EXPECT_EQ(resends, protocol::MAX_RETRIES);
+	ASSERT_EQ(gaveUp, 1);
+	EXPECT_TRUE(lastBusy);
+	EXPECT_FALSE(q.full());
+}
+
+// PM-6: BUSY then ACK closes normally; other NAK reasons stay final (PM-1).
+TEST(PM6, BusyThenAckAndOtherNaksFinal) {
+	routercore::RetryQueue q;
+	Packet				   p{};
+	p.dest	   = protocol::ADDR_PC;
+	p.msgType  = MsgType::PLAY_SONG;
+	p.packetId = 12;
+	ASSERT_TRUE(q.add(p, msAt(0)));
+	EXPECT_FALSE(q.resolve(reply(MsgType::NAK, 12, NakReason::BUSY)));
+	routercore::RetryQueue::Closed c{};
+	EXPECT_TRUE(q.resolve(reply(MsgType::ACK, 12), &c));
+	EXPECT_FALSE(c.nak);
+	p.packetId = 13;
+	ASSERT_TRUE(q.add(p, msAt(0)));
+	EXPECT_TRUE(q.resolve(reply(MsgType::NAK, 13, NakReason::NOT_FOUND), &c));
+	EXPECT_EQ(c.reason, NakReason::NOT_FOUND);
 }
 
 // Control: no reply -> one retransmission per RETRY_TIMEOUT, then give up after MAX_RETRIES; an ACK closes the entry.
@@ -217,7 +258,7 @@ TEST(PM6, RetransmitsWithoutReplyThenGivesUp) {
 	for (int i = 0; i <= protocol::MAX_RETRIES; i++) {
 		t += protocol::RETRY_TIMEOUT_MS;
 		q.poll(msAt(t), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES, [&](const Packet &p) { resends++; EXPECT_EQ(p.packetId, 3); },
-			   [&](const Packet &) { gaveUp++; });
+			   [&](const Packet &, bool busy) { gaveUp++; EXPECT_FALSE(busy); });
 	}
 	EXPECT_EQ(resends, protocol::MAX_RETRIES);
 	EXPECT_EQ(gaveUp, 1);
@@ -225,7 +266,7 @@ TEST(PM6, RetransmitsWithoutReplyThenGivesUp) {
 	ASSERT_TRUE(q.add(stop, msAt(t)));
 	q.resolve(reply(MsgType::ACK, 3));
 	q.poll(msAt(t + protocol::RETRY_TIMEOUT_MS), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES, [&](const Packet &) { resends++; },
-		   [&](const Packet &) { gaveUp++; });
+		   [&](const Packet &, bool) { gaveUp++; });
 	EXPECT_EQ(resends, protocol::MAX_RETRIES);
 	EXPECT_EQ(gaveUp, 1);
 }

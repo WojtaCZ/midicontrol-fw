@@ -236,10 +236,12 @@ namespace router {
 			nowMs(), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES,
 			// Same PacketId — the receiver acknowledges the duplicate but does not execute it twice
 			[](const Packet &p) { transmit(p, transportFor(p.dest)); },
-			[](const Packet &p) {
+			[](const Packet &p, bool busy) {
 				Debug::log(Debug::Level::WARNING, "router", "retries exhausted: type 0x%02x to 0x%02x pid %u", static_cast<unsigned>(p.msgType), p.dest,
 						   p.packetId);
-				reportFailure(p.msgType, routercore::Failure::NoAnswer); // PM-1: giving up is visible
+				// PM-1: giving up is visible; PM-6: still BUSY after MAX_RETRIES -> "PC zaneprazdneno"
+				if (busy) reportFailure(p.msgType, routercore::Failure::Nak, NakReason::BUSY);
+				else reportFailure(p.msgType, routercore::Failure::NoAnswer);
 			});
 	}
 

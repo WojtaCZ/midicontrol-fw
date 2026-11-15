@@ -44,7 +44,7 @@ namespace routercore {
 	bool RetryQueue::add(const protocol::Packet &pkt, uint32_t now) {
 		for (auto &e : _entries) {
 			if (e.used) continue;
-			e = {pkt, now, 0, true};
+			e = {pkt, now, 0, true, false};
 			return true;
 		}
 		return false;
@@ -55,6 +55,11 @@ namespace routercore {
 		uint8_t ackedId = rx.payload[0];
 		for (auto &e : _entries) {
 			if (!e.used || e.pkt.dest != rx.source || e.pkt.packetId != ackedId) continue;
+			// PM-6: NAK BUSY = "not now" (PROTOCOL.md): keep the entry, poll() resends it within MAX_RETRIES
+			if (rx.msgType == protocol::MsgType::NAK && rx.payloadLen >= 2 && rx.payload[1] == static_cast<uint8_t>(protocol::NakReason::BUSY)) {
+				e.busy = true;
+				return false;
+			}
 			e.used = false;
 			if (out) {
 				out->type	= e.pkt.msgType;
