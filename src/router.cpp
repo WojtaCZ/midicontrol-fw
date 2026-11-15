@@ -136,6 +136,8 @@ namespace router {
 		return _remoteEverSeen;
 	}
 
+	bool remoteFwBusy() { return _remoteFw.state() != boot::FwProgress::State::Idle; }
+
 	static bool pcReachable() {
 		return tud_mounted() && (isPcAlive() || tud_cdc_connected());
 	}

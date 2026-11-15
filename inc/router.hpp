@@ -27,6 +27,8 @@ namespace router {
 	// remoteRx returns false when no BLE frame was ever received since boot.
 	uint32_t clockMs();
 	bool remoteRx(uint32_t &atMs);
+	// True while a remote firmware update is shown (transfer, install/result screen); the remote may be silent then.
+	bool remoteFwBusy();
 
 } // namespace router
 

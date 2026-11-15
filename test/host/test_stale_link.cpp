@@ -90,3 +90,25 @@ TEST(StaleLink, WrapSafe) {
 	ASSERT_EQ(k.a, Action::KICK);
 	EXPECT_EQ(k.at, start + Guard::STALE_MS);
 }
+
+// A last frame more than 2^31 ms (24.8 days) older than the accept time must not look like a fresh frame
+// (the signed difference flips sign); the link gets the full STALE_MS from the accept time.
+TEST(StaleLink, AncientLastFrameDoesNotKickEarly) {
+	Guard g;
+	const uint32_t accept = 0xA0000000u;
+	g.update(true, true, 0x100, accept);
+	Hit k = run(g, true, true, 0x100, accept + 10, accept + 60000);
+	ASSERT_EQ(k.a, Action::KICK);
+	EXPECT_EQ(k.at, accept + Guard::STALE_MS);
+}
+
+// A frame that arrives after the kick keeps the link (no RESTART), also when its timestamp is far from the kick time.
+TEST(StaleLink, NewFrameIsSeenByChangeNotBySign) {
+	Guard g;
+	const uint32_t accept = 0xA0000000u;
+	g.update(true, true, 0x100, accept);
+	Hit k = run(g, true, true, 0x100, accept + 10, accept + 60000);
+	ASSERT_EQ(k.a, Action::KICK);
+	EXPECT_EQ(g.update(true, true, k.at + 50, k.at + 60), Action::NONE);
+	EXPECT_EQ(run(g, true, true, k.at + 50, k.at + 70, k.at + 50 + Guard::STALE_MS).a, Action::NONE);
+}

@@ -167,20 +167,29 @@ static void secureWatchdog() {
 // BE-1 / SYS-LINK-01: an accepted link with no frame from the remote for 10 s (it answers every KEEPALIVE, 2 s) is a zombie:
 // K,1 (auto-reconnect follows in 5 s); still connected 5 s later → module restart via RST (the module may be wedged).
 // Before this the base only marked the remote "not alive" and the link stayed up for good (audit step 3, be1.md).
+// Off while a remote firmware update runs (transfer, then the install shown for 10 s): the remote copies its image for
+// ~13 s in its bootloader and may send nothing; the guard restarts its 10 s count when the update screen closes.
+// Kick and restart counts are kept in RAM for the bench (read by probe like the test key mailbox, no wire change).
 static stalelink::Guard _staleLink;
+extern "C" {
+	[[gnu::used]] volatile uint32_t mcStaleKicks = 0;
+	[[gnu::used]] volatile uint32_t mcStaleRestarts = 0;
+}
 
 static void staleLinkWatchdog() {
-	const bool active = _bleState == BleState::READY && !Bluetooth::isPairing() && Bluetooth::isConnected() && Bluetooth::isPeerAccepted();
+	const bool active = _bleState == BleState::READY && !Bluetooth::isPairing() && Bluetooth::isConnected() && Bluetooth::isPeerAccepted()
+						&& !router::remoteFwBusy();
 	uint32_t lastRx = 0;
 	const bool rxSeen = router::remoteRx(lastRx);
 	switch (_staleLink.update(active, rxSeen, lastRx, router::clockMs())) {
 		case stalelink::Action::NONE: break;
 		case stalelink::Action::KICK:
-			Bluetooth::linkStats().onSecureRetry();
+			mcStaleKicks = mcStaleKicks + 1;
 			Debug::log(Debug::Level::WARNING, "ble", "no frame from remote for 10 s, K,1");
 			if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 			break;
 		case stalelink::Action::RESTART:
+			mcStaleRestarts = mcStaleRestarts + 1;
 			Debug::log(Debug::Level::WARNING, "ble", "link still up 5 s after K,1, module restart");
 			Bluetooth::setUp(false);
 			Bluetooth::setConnected(false);
