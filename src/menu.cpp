@@ -8,6 +8,7 @@
 #include "bluetooth.hpp"
 #include "logic/ble_status.hpp"
 #include "logic/now_playing.hpp"
+#include "logic/splash_guard.hpp"
 #include "settings.hpp"
 #include "router.hpp"
 
@@ -635,7 +636,20 @@ void render() {
     }
 }
 
+static splashguard::Guard splashGuard;
+
+static void handleKey(ui::InputEvent event);
+
 void keypress(ui::InputEvent event) {
+    splashGuard.realKey();   // P1-8: a real key cancels the splash's 3 s auto-dismiss
+    handleKey(event);
+}
+
+void splashAutoDismiss() {
+    if (splashGuard.allowAutoDismiss()) handleKey(ui::InputEvent::Enter);
+}
+
+static void handleKey(ui::InputEvent event) {
     if (Oled::isSleeping()) {
         Oled::wakeupCallback();
         nav.forceRender();

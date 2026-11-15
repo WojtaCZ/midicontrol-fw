@@ -6,7 +6,7 @@ if(HOST_TESTS)
 	project(midicontrol-fw-host-tests LANGUAGES CXX)
 	include(/opt/embedded/cmake/host-test.cmake)
 	add_host_test_suite(logic_tests
-		SOURCES    test/host/test_ble_status.cpp test/host/test_recovery.cpp test/host/test_link_stats.cpp test/host/test_indicator_bus.cpp test/host/test_status_framer.cpp test/host/test_crc8.cpp test/host/test_ram_guard.cpp test/host/test_router_core.cpp test/host/test_now_playing.cpp
+		SOURCES    test/host/test_ble_status.cpp test/host/test_recovery.cpp test/host/test_link_stats.cpp test/host/test_indicator_bus.cpp test/host/test_status_framer.cpp test/host/test_crc8.cpp test/host/test_ram_guard.cpp test/host/test_router_core.cpp test/host/test_now_playing.cpp test/host/test_splash_guard.cpp
 		UNDER_TEST src/logic/ble_status.cpp src/logic/recovery.cpp src/logic/link_stats.cpp src/logic/indicator_bus.cpp src/logic/status_framer.cpp src/logic/ram_guard.cpp src/logic/router_core.cpp src/logic/now_playing.cpp lib/protocol/src/crc8.cpp
 		INCLUDES   src/logic lib/protocol/inc)
 	return()

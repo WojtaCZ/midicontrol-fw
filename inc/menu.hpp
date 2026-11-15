@@ -21,6 +21,9 @@ namespace GUI {
     // Input routing
     void keypress(ui::InputEvent event);
 
+    // The splash timer's Enter: ignored once a real key has been pressed (P1-8)
+    void splashAutoDismiss();
+
     // Force re-render
     void renderForce();
 

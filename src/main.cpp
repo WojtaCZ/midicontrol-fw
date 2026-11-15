@@ -214,9 +214,9 @@ static void onUserStopPlayback() {
 	router::sendReliable(stopPkt);
 }
 
-// One-shot scheduler: auto-dismiss the splash screen after 3 seconds
+// One-shot scheduler: auto-dismiss the splash screen after 3 seconds (not if the user pressed a key meanwhile, P1-8)
 stmcpp::scheduler::Scheduler splashDismissScheduler(3000_ms, [](){
-	GUI::keypress(ui::InputEvent::Enter);
+	GUI::splashAutoDismiss();
 }, false, false);
 
 extern "C" void SystemInit(void) {
