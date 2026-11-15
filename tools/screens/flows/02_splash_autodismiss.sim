@@ -1,0 +1,6 @@
+# B1: without a real key the 3 s timer closes the splash
+expect screen splash
+tick 2900
+expect screen splash
+tick 200
+expect screen main

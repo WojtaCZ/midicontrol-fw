@@ -1,0 +1,13 @@
+# Priority: FW update overlay stays over the no-PC overlay; after fw_end the no-PC overlay shows
+tick 3000
+event fw transfer 10
+expect screen fwupdate
+state pc=0
+tick 100
+expect screen fwupdate
+key enter
+expect screen fwupdate
+event fw_end
+expect screen nopc
+state pc=1
+expect screen main

@@ -5,12 +5,25 @@ if(HOST_TESTS)
 	cmake_minimum_required(VERSION 3.20)
 	project(midicontrol-fw-host-tests LANGUAGES CXX)
 	include(/opt/embedded/cmake/host-test.cmake)
+	# lib/ submodules may be empty in a fresh worktree: FW_LIB_DIR (cmake var or env) names a lib/ that has them.
+	if(NOT FW_LIB_DIR)
+		if(DEFINED ENV{FW_LIB_DIR})
+			set(FW_LIB_DIR $ENV{FW_LIB_DIR})
+		else()
+			set(FW_LIB_DIR ${CMAKE_SOURCE_DIR}/lib)
+		endif()
+	endif()
 	add_host_test_suite(logic_tests
 		SOURCES    test/host/test_ble_status.cpp test/host/test_recovery.cpp test/host/test_link_stats.cpp test/host/test_indicator_bus.cpp test/host/test_status_framer.cpp test/host/test_crc8.cpp test/host/test_ram_guard.cpp test/host/test_router_core.cpp test/host/test_now_playing.cpp test/host/test_splash_guard.cpp
-		UNDER_TEST src/logic/ble_status.cpp src/logic/recovery.cpp src/logic/link_stats.cpp src/logic/indicator_bus.cpp src/logic/status_framer.cpp src/logic/ram_guard.cpp src/logic/router_core.cpp src/logic/now_playing.cpp lib/protocol/src/crc8.cpp
-		INCLUDES   src/logic lib/protocol/inc)
+		UNDER_TEST src/logic/ble_status.cpp src/logic/recovery.cpp src/logic/link_stats.cpp src/logic/indicator_bus.cpp src/logic/status_framer.cpp src/logic/ram_guard.cpp src/logic/router_core.cpp src/logic/now_playing.cpp ${FW_LIB_DIR}/protocol/src/crc8.cpp
+		INCLUDES   src/logic ${FW_LIB_DIR}/protocol/inc)
 	# Smoke test (P1-23): the screen exporter must still build and run against the current GUI code.
 	add_test(NAME screens_export COMMAND ${CMAKE_SOURCE_DIR}/tools/screens/export.sh ${CMAKE_BINARY_DIR}/screens-png 1)
+	# UI simulator flows (tools/screens/flows); needs the real lib/ui, so FW_LIB_DIR may point at another checkout.
+	add_subdirectory(tools/screens screens-sim EXCLUDE_FROM_ALL)
+	add_test(NAME sim_build COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target sim)
+	add_test(NAME sim_flows COMMAND ${CMAKE_SOURCE_DIR}/tools/screens/run-sim.sh ${CMAKE_BINARY_DIR}/screens-sim/sim ${CMAKE_BINARY_DIR}/sim-out)
+	set_tests_properties(sim_flows PROPERTIES DEPENDS sim_build)
 	return()
 endif()
 
@@ -79,7 +92,7 @@ set(SOURCES
 	${CMAKE_SOURCE_DIR}/lib/ui/src/progress.cpp
 	${CMAKE_SOURCE_DIR}/lib/ui/src/navigator.cpp
 
-	${CMAKE_SOURCE_DIR}/lib/protocol/src/crc8.cpp
+	${CMAKE_SOURCE_DIR}/${FW_LIB_DIR}/protocol/src/crc8.cpp
 	${CMAKE_SOURCE_DIR}/lib/protocol/src/codec.cpp
 	${CMAKE_SOURCE_DIR}/lib/protocol/src/parser.cpp
 

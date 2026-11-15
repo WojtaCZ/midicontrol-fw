@@ -6,6 +6,7 @@
 #include "display.hpp"
 #include "router.hpp"
 #include "settings.hpp"
+#include <stmcpp/systick.hpp>
 
 #include <cstdio>
 
@@ -13,8 +14,11 @@ Oled::OledBuffer frameBuffer;
 
 namespace Oled {
 	void update() {}
-	bool isSleeping() { return false; }
-	void wakeupCallback() {}
+	bool isSleeping() { return host::state.sleeping; }
+	void wakeupCallback() {
+		host::state.sleeping = false;
+		host::state.lastWake = stmcpp::systick::ticks_;
+	}
 	void flush(uint32_t) {}
 }
 

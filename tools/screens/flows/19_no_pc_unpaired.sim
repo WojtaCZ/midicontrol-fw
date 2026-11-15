@@ -1,0 +1,7 @@
+# B12: no PC and no remote stored: the overlay carries the pairing hint
+tick 3000
+state remote=-
+state pc=0
+tick 30
+expect screen nopc
+expect text Sparuj ovladac

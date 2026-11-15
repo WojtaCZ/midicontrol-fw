@@ -44,7 +44,7 @@ Build outputs in `build/`:
 
 Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`, `inline constexpr char[]` strings, `git::dirty`) is generated on each build by `cmake/git.cmake`; it is untracked and in `.gitignore` (Q1-22 a): never commit it. Hardware-independent logic (`src/logic`, plus the protocol `crc8`) has host gtest tests (`test/host`, command under `bluetooth` below; 64 tests incl. the crc8 check value 0xA2); hardware tests (USB-CDC, both ST-Links, logic analyzer) live in `tools/basetest/` (README there).
 
-**Screen images**: `tools/screens/export.sh [outdir] [scale]` builds the real GUI code (`src/menu.cpp`, `lib/ui`, `lib/gfx`) for the host with stubbed hardware (`tools/screens/stubs/`, `host.cpp`) and saves every screen as PNG plus `sheet.png` (all screens in a grid) and `index.html` (default `build-screens/png/`). The scenarios are in `tools/screens/main.cpp`; add one when you add a screen. Use it to check UI changes and for the manual's pictures.
+**Screen images**: `tools/screens/export.sh [outdir] [scale]` builds the real GUI code (`src/menu.cpp`, `lib/ui`, `lib/gfx`) for the host with stubbed hardware (`tools/screens/stubs/`, `host.cpp`) and saves every screen as PNG plus `sheet.png` (all screens in a grid) and `index.html` (default `build-screens/png/`). The scenarios are in `tools/screens/main.cpp`; add one when you add a screen. Use it to check UI changes and for the manual's pictures. Scripted driver: `tools/screens/sim <script> [out.jsonl]` runs `tools/screens/flows/*.sim` (commands key/tick/state/event/expect, see `sim.cpp` header); `ctest` target `sim_flows` in the HOST_TESTS build runs them all (set `FW_LIB_DIR` when `lib/` submodules are empty).
 
 ## Flash layout
 

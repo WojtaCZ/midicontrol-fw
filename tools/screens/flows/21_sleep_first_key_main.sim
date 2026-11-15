@@ -1,0 +1,8 @@
+# Sleep: the waking key must not open Prehraj
+tick 3000
+tick 31000
+key enter
+expect screen main
+expect var requests=0
+key enter
+expect var requests=1

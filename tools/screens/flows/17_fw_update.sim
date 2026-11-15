@@ -1,0 +1,20 @@
+# B11: remote OTA relay replaces everything, input ignored, Now Playing not pushed, ends on main
+tick 3000
+key down
+key down
+key enter
+event fw transfer 42
+expect screen fwupdate
+expect text Aktualizace
+expect text Prenos do ovladace
+key enter
+key down
+expect screen fwupdate
+event playing 406A
+expect screen fwupdate
+event fw install 100
+expect text Instalace ovladace
+event fw error 100
+expect text Chyba aktualizace
+event fw_end
+expect screen main

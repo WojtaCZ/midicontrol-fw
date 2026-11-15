@@ -1,0 +1,13 @@
+# UI2-1: a failed PLAY_SONG shows the reason (ui-map says: no feedback)
+tick 3000
+key enter
+tick 600
+event songs 401;403
+key enter
+expect screen main
+event fail PLAY_SONG PC nedostupne
+expect screen songs_loading
+expect text PC nedostup
+expect scrolled PC nedostupne
+key enter
+expect screen main
