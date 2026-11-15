@@ -28,6 +28,7 @@
 
 #include "protocol/types.hpp"
 #include "protocol/constants.hpp"
+#include "ram.hpp"
 
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
@@ -254,6 +255,8 @@ extern "C" [[gnu::naked]] void SysTick_Handler(void) {
 
 
 extern "C" int main(void) {
+	// Stack high-water mark (TL-1): paint the free RAM first, while the stack is shallow
+	ram::paintStack();
 	stmcpp::systick::enable(144_MHz, 1_ms);
 
 	// Log in no-init RAM: verify the header (valid → keep the log from before the reset). Default level I.

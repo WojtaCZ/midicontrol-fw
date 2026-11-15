@@ -3,6 +3,7 @@
 #include "git.hpp"
 #include "fault.hpp"
 #include "crc32.hpp"
+#include "ram.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -275,7 +276,14 @@ namespace Debug {
 			_dumpIdx = 0;
 			return nextDumpLine();
 		}
-		if (strcmp(cmd, "help") == 0) return reply("commands: level e|w|i|d, dump, help");
+		if (strcmp(cmd, "stack") == 0) {
+			// RAM guards (TL-1): free gap heap..deepest stack since boot, heap in use / limit, refused _sbrk calls
+			char text[sizeof(_reply) - 2];
+			snprintf(text, sizeof(text), "stack free min %u B, heap %u/%u B, sbrk fail %lu", static_cast<unsigned>(ram::stackUntouched()),
+				static_cast<unsigned>(ram::heapUsed()), static_cast<unsigned>(ram::heapLimit()), static_cast<unsigned long>(ram::sbrkFailures()));
+			return reply(text);
+		}
+		if (strcmp(cmd, "help") == 0) return reply("commands: level e|w|i|d, dump, stack, help");
 		reply("?");
 	}
 
