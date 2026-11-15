@@ -29,6 +29,7 @@
 #include "protocol/types.hpp"
 #include "protocol/constants.hpp"
 #include "ram.hpp"
+#include "logic/stale_link.hpp"
 
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
@@ -161,6 +162,57 @@ static void secureWatchdog() {
 	}
 	// On failure (or when %DISCONNECT% does not arrive) K,1 is tried again after the next timeout
 	if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
+}
+
+// BE-1 / SYS-LINK-01: an accepted link with no frame from the remote for 10 s (it answers every KEEPALIVE, 2 s) is a zombie:
+// K,1 (auto-reconnect follows in 5 s); still connected 5 s later → module restart via RST (the module may be wedged).
+// Before this the base only marked the remote "not alive" and the link stayed up for good (audit step 3, be1.md).
+static stalelink::Guard _staleLink;
+
+static void staleLinkWatchdog() {
+	const bool active = _bleState == BleState::READY && !Bluetooth::isPairing() && Bluetooth::isConnected() && Bluetooth::isPeerAccepted();
+	uint32_t lastRx = 0;
+	const bool rxSeen = router::remoteRx(lastRx);
+	switch (_staleLink.update(active, rxSeen, lastRx, router::clockMs())) {
+		case stalelink::Action::NONE: break;
+		case stalelink::Action::KICK:
+			Bluetooth::linkStats().onSecureRetry();
+			Debug::log(Debug::Level::WARNING, "ble", "no frame from remote for 10 s, K,1");
+			if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
+			break;
+		case stalelink::Action::RESTART:
+			Debug::log(Debug::Level::WARNING, "ble", "link still up 5 s after K,1, module restart");
+			Bluetooth::setUp(false);
+			Bluetooth::setConnected(false);
+			Bluetooth::setBonded(false);
+			_secureOnStreamOpen = false;
+			_peerAddrMatched = false;
+			_reconnectNeeded = true;
+			Bluetooth::restart();
+			_bleState = BleState::RESTARTING;
+			break;
+	}
+}
+
+// Test key mailbox (audit step 3, harness input layer; shipped in the release image). A probe writes one word
+// 0xA5 << 24 | seq << 8 | event (event = ui::InputEvent: 0 Up, 1 Down, 4 Enter, the encoder's three inputs) with a
+// non-halting memory write; the loop clears it, presses the key like the encoder does, and echoes the word to the ack word.
+// The harness waits for the ack before the next key. Anything else is cleared and acked with the top byte 0xEE (rejected).
+// .bss, not no-init: a reset clears both words, so a stale command never fires after a reboot.
+extern "C" {
+	[[gnu::used]] volatile uint32_t mcTestKey = 0;
+	[[gnu::used]] volatile uint32_t mcTestKeyAck = 0;
+}
+
+static void testKeyPoll() {
+	const uint32_t word = mcTestKey;
+	if (word == 0) return;
+	mcTestKey = 0;
+	const uint8_t ev = static_cast<uint8_t>(word);
+	const bool ok = (word >> 24) == 0xA5u && (ev == static_cast<uint8_t>(ui::InputEvent::Up) || ev == static_cast<uint8_t>(ui::InputEvent::Down)
+												|| ev == static_cast<uint8_t>(ui::InputEvent::Enter));
+	if (ok) GUI::keypress(static_cast<ui::InputEvent>(ev));
+	mcTestKeyAck = ok ? word : ((word & 0x00FFFFFFu) | 0xEE000000u);
 }
 
 extern Oled::OledBuffer frameBuffer;
@@ -333,6 +385,9 @@ extern "C" int main(void) {
 			else if (inject == 3) fault::testSpinNoIrq();                               // IWDG
 		}
 
+		// Test key mailbox: one read and compare per pass
+		testKeyPoll();
+
 		tud_task();
 
 		// USB → DIN (organ)
@@ -372,6 +427,9 @@ extern "C" int main(void) {
 
 		// A link without an accepted peer outside pairing: B once more, then K,1
 		secureWatchdog();
+
+		// An accepted link that carries nothing (BE-1): K,1, then module restart
+		staleLinkWatchdog();
 
 		// Auto-reconnect to the bonded Remote device (non-blocking); not during pairing and not without a stored remote
 		if (_bleState == BleState::READY && _reconnectNeeded && remoteKnown() && !Bluetooth::isPairing() && !Bluetooth::isConnected() && Bluetooth::isIdle()

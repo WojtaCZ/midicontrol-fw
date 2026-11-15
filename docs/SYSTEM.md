@@ -180,7 +180,7 @@ power policy and serves a status web page.
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-LINK-01 | Base detects link loss within ~2.5 s (supervision) or 6 s (keepalive); reconnects every 5 s | implemented | base |
+| SYS-LINK-01 | Base detects link loss within ~2.5 s (supervision) or 6 s (keepalive); reconnects every 5 s. A link that stays "connected" and accepted but carries no frame from the remote for 10 s is dropped (`K,1`); if it is still up 5 s later the base restarts its module (once per episode) and auto-reconnect follows (BE-1) | implemented; stale-link recovery not bench-verified | base; stale-link recovery `stalelink::Guard` (`src/logic/stale_link.hpp`, host tests StaleLink.*), `staleLinkWatchdog()` in main.cpp (audit step 3). The kick is counted in the `secure retries` link counter (no new INFO tag) |
 | SYS-LINK-02 | Remote shows "Odpojeno / Cekam na zakladnu" while the base is gone; commands not sent | implemented | remote |
 | SYS-LINK-03 | Playback continues on BLE link loss (PC owns playback) | implemented, not bench-verified | PC. Pending (step 2, 83fb028): the remote keeps its player state over a BLE drop and resets it only when the base reports the PC gone (KEEPALIVE `pcAlive` 0) (Q-D-15) |
 | SYS-LINK-04 | Frames PC -> remote while the link is down -> NAK UNREACHABLE | implemented | base router.cpp |
@@ -265,6 +265,7 @@ power policy and serves a status web page.
 | SYS-DIAG-04 | PROTOCOL.md lists all diag codes (incl. 17 BLE_MODULE_REBOOT, 18 BLE_ERR_CONN), KEEPALIVE byte 1 (base RSSI) and the correct CRC name (non-reflected, poly 0x31) (proposed default, P8) | implemented | midicontrol-protocol PROTOCOL.md:32 (CRC), :179 (KEEPALIVE byte 1), :263-264 (diag 17/18), protocol 6ce5716 |
 | SYS-DIAG-05 | Link metrics: RSSI both ends, link losses, conn params in INFO TLVs 0x14/0x15/0x17 | implemented | router.cpp, remote |
 | SYS-DIAG-06 | User-visible texts are Czech without diacritics | implemented | both fw |
+| SYS-DIAG-07 | Test key mailbox (shipped in the release image, both fw): a probe writes `0xA5<<24 \| seq<<8 \| key` to RAM word `mcTestKey` with a non-halting memory write; the main loop clears it, presses the key exactly like a real one and echoes the word to `mcTestKeyAck`; an invalid word is acked with top byte `0xEE`. Keys: base Up 0, Down 1, Enter 4 (`GUI::Key`); remote `Keyboard::Key` index 0..15 (digits 1-9 = 0..8, MULTI 9, ZERO 10, UP 11, DOWN 12, LEFT 13, RIGHT 14, OK 15; `Power::touch()` included). Both words are in .bss: a reset clears them. Take the addresses from the flashed ELF (`nm`), never from an older build | implemented, not bench-verified | base main.cpp `testKeyPoll()`, remote base.cpp `Keyboard::testKeyPoll()` (audit step 3) |
 
 ### 4.12 Status web page
 

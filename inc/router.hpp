@@ -23,6 +23,11 @@ namespace router {
 	bool isPcAlive();
 	bool isRemoteAlive();
 
+	// Stale-link guard (BE-1): router clock (ms, wrapping uint32) and the time of the last frame received over BLE.
+	// remoteRx returns false when no BLE frame was ever received since boot.
+	uint32_t clockMs();
+	bool remoteRx(uint32_t &atMs);
+
 } // namespace router
 
 #endif

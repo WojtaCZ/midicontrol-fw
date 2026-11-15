@@ -75,6 +75,7 @@ namespace router {
 	// used: tests (tools/basetest, conftest.remote_alive) compute isRemoteAlive() from them through the probe
 	[[gnu::used]] static duration _lastRemoteRx = 0_ms;
 	[[gnu::used]] static bool _remoteEverSeen = false;
+	static uint32_t _lastRemoteRxMs = 0; // nowMs() of _lastRemoteRx (stale-link guard)
 	static duration _lastKeepalive = 0_ms;
 
 	// Diagnostics (log): last reported state of the peers, dropped frames and a full CDC buffer
@@ -126,6 +127,13 @@ namespace router {
 	bool isRemoteAlive() {
 		return Bluetooth::isConnected() && _remoteEverSeen
 			   && (stmcpp::systick::getDuration() - _lastRemoteRx) < KEEPALIVE_LOSS;
+	}
+
+	uint32_t clockMs() { return nowMs(); }
+
+	bool remoteRx(uint32_t &atMs) {
+		atMs = _lastRemoteRxMs;
+		return _remoteEverSeen;
 	}
 
 	static bool pcReachable() {
@@ -472,6 +480,7 @@ namespace router {
 			_backstop.onPcPacket(nowMs());
 		} else {
 			_lastRemoteRx = now;
+			_lastRemoteRxMs = nowMs();
 			_remoteEverSeen = true;
 		}
 
