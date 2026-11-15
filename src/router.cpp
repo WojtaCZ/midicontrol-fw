@@ -495,6 +495,8 @@ namespace router {
 			midi::sendStuckNoteCleanup();
 			base::current::disable();
 			GUI::syncPowerCheckbox();
+			// SM-1: nothing plays any more; "Zastaveno", then the "Cekam na PC" overlay over the main menu
+			GUI::dismissNowPlaying();
 			// Q1-8 b: a restarted PC process numbers its packets from 1 again; do not ACK-and-drop its first ones
 			_dedup.forget(protocol::ADDR_PC);
 			Debug::log(Debug::Level::WARNING, "router", "PC lost: all notes off, organ power off");

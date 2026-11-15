@@ -7,6 +7,7 @@
 #include "display.hpp"
 #include "bluetooth.hpp"
 #include "logic/ble_status.hpp"
+#include "logic/now_playing.hpp"
 #include "settings.hpp"
 #include "router.hpp"
 
@@ -271,16 +272,15 @@ static void formatSection(const char* label, char* out, size_t size) {
 // the only input here (OK). After SIGNAL_STOPPED it shows "Zastaveno" for a moment.
 class NowPlayingScreen : public ui::Screen {
 public:
-    enum class State : uint8_t { Playing, Stopping, Stopped };
+    using State = nowplaying::State; // transitions and timeouts: src/logic/now_playing.*
 
-    static constexpr uint32_t STOPPED_SHOW_MS = 1500;
     static constexpr int INFO_CHARS = 18; // one 7x10 line
 
     void start(const char* code) {
         std::strncpy(code_, code, sizeof(code_) - 1);
         code_[sizeof(code_) - 1] = '\0';
         info_[0] = '\0';
-        state_ = State::Playing;
+        machine_.start();
         markDirty();
     }
 
@@ -292,24 +292,20 @@ public:
     }
 
     void stopped() {
-        state_ = State::Stopped;
-        stoppedAt_ = stmcpp::systick::getTicks();
+        machine_.stopped(stmcpp::systick::getTicks());
         markDirty();
     }
 
-    State state() const { return state_; }
-    bool stoppedExpired() const {
-        return state_ == State::Stopped && stmcpp::systick::getTicks() - stoppedAt_ >= STOPPED_SHOW_MS;
-    }
+    State state() const { return machine_.state(); }
+    // "Zastaveno" shown long enough, or "Zastavuji" without an answer (SM-1)
+    bool expired() const { return machine_.expired(stmcpp::systick::getTicks()); }
 
     bool handleInput(ui::InputEvent event) override {
         if (event != ui::InputEvent::Enter) return true; // the encoder turns nothing here
-        if (state_ == State::Stopped) {
+        if (machine_.press(stmcpp::systick::getTicks()) == nowplaying::Action::Leave) {
             leave();
             return true;
         }
-        // Stop (again while stopping: the PC may have missed it)
-        state_ = State::Stopping;
         markDirty();
         if (_stopCallback) _stopCallback();
         return true;
@@ -323,6 +319,7 @@ public:
     void render(gfx::IFrameBuffer<uint8_t>& fb, const ui::Theme& theme) override {
         gfx::fill(fb, (uint8_t)0);
 
+        const State state_ = machine_.state();
         const char* title = "Prehravam";
         if (state_ == State::Stopping) title = "Zastavuji";
         if (state_ == State::Stopped) title = "Zastaveno";
@@ -373,8 +370,7 @@ public:
     void leave();
 
 private:
-    State    state_     = State::Stopped;
-    uint32_t stoppedAt_ = 0;
+    nowplaying::Machine machine_{};
     char     code_[12]  = {};
     char     info_[32]  = {};
     ui::TextScroll infoScroll_;
@@ -569,7 +565,7 @@ void render() {
     nav.tickScroll(30);
     syncNoPcScreen();
 
-    if (_nowPlayingActive && nowPlayingScreen.stoppedExpired()) nowPlayingScreen.leave();
+    if (_nowPlayingActive && nowPlayingScreen.expired()) nowPlayingScreen.leave();
 
     // Bluetooth info: value refresh; the display does not sleep while the screen is open (changes are visible)
     if (nav.current() == &bluetoothScreen) {
