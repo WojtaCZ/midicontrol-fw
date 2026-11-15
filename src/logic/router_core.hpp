@@ -12,25 +12,27 @@ namespace routercore {
 	// Milliseconds since boot from the SysTick counter (tick period in µs)
 	uint32_t msFromTicks(uint32_t ticks, uint32_t tickUs);
 
-	// Has the deadline been reached? (both on the same free-running clock)
+	// Has the deadline been reached? (both on the same free-running clock; wrap-safe while less than 2^31 apart)
 	bool deadlineReached(uint32_t now, uint32_t deadline);
 
-	// Presence of a peer (the PC on USB-CDC): alive while packets keep arriving, lost after `loss` without one.
+	// Presence of a peer (the PC on USB-CDC): alive from a received packet, lost after `loss` without one.
+	// Lost is a latch (BF-1): only a received packet makes the peer alive again, never the clock wrapping.
 	class PeerPresence {
 	public:
 		explicit constexpr PeerPresence(uint32_t loss) : _loss(loss) {}
 
 		void onRx(uint32_t now);	 // a valid packet from the peer was received
 		void update(uint32_t now);	 // called on every main-loop pass
-		bool alive() const;
+		bool alive() const { return _alive; }
 		bool everSeen() const { return _everSeen; }
 		uint32_t lastRx() const { return _lastRx; }
 
 	private:
+		// Layout read by tools/basetest (test_lifecycle.py pc_alive()): _alive at offset 9
 		uint32_t _loss;
-		uint32_t _lastRx = 0;
-		uint32_t _now	 = 0;
+		uint32_t _lastRx   = 0;
 		bool	 _everSeen = false;
+		bool	 _alive	   = false;
 	};
 
 	// Duplicate detection: the last PacketId processed locally from each node (index = address)

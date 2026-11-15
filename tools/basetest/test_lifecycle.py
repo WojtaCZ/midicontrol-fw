@@ -13,16 +13,12 @@ from test_fault import boot, reboot
 from test_log import keepalive_rtt, log  # noqa: F401 - fixture log
 from test_relay import ADDR_BASE, ADDR_PC, ADDR_REMOTE, pc_signal, reply_to, to_remote
 
-KEEPALIVE_LOSS_MS = 6000  # lib/protocol constants.hpp
 
 
 def pc_alive(base) -> bool:
     """router::isPcAlive() (LTO drops it): router::_pc is a routercore::PeerPresence (router_core.hpp)
-    {u32 _loss, u32 _lastRx, u32 _now, bool _everSeen}, times in µs = ticks * 1000."""
-    pc = base.sym("router::_pc")
-    now = (1000 * base.u("stmcpp::systick::ticks_")) & 0xFFFFFFFF
-    age_ms = ((now - base.read_uint(pc + 4)) & 0xFFFFFFFF) / 1000
-    return bool(base.read_uint(pc + 12, 1)) and age_ms < KEEPALIVE_LOSS_MS
+    {u32 _loss, u32 _lastRx, bool _everSeen, bool _alive}; _alive is the PC-loss latch (BF-1)."""
+    return bool(base.read_uint(base.sym("router::_pc") + 9, 1))
 
 
 def link_ready(base) -> bool:

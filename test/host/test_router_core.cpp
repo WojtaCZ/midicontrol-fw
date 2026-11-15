@@ -1,5 +1,5 @@
 // Router logic (src/logic/router_core.*) as src/router.cpp drives it: time is the router clock,
-// nowUs() = getTicks() * TICK_US (TICK_US = 1000, SysTick 1 ms), uint32 µs that wraps every 71.58 min.
+// nowMs() = msFromTicks(getTicks(), TICK_US) (TICK_US = 1000, SysTick 1 ms), uint32 ms that wraps every 49.7 days.
 // Ported from the step-2 verifier red tests (BF-1, PM-13, PM-6) onto the real code. DISABLED_ = known red, enabled by its fix.
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@ using protocol::Packet;
 
 namespace {
 	constexpr uint32_t TICK_US = 1000;
-	constexpr uint32_t usAt(uint32_t ticks) { return ticks * TICK_US; } // router.cpp nowUs()
+	uint32_t		   msAt(uint32_t ticks) { return routercore::msFromTicks(ticks, TICK_US); } // router.cpp nowMs()
 
 	Packet setCurrent(uint8_t pid, bool on) {
 		Packet p{};
@@ -56,16 +56,18 @@ namespace {
 
 // BF-1: the PC talks for 10 s, then goes silent while USB stays mounted; the organist plays by hand for 3 h.
 // The loss must fire once and the PC must never look alive again until it sends a packet.
-TEST(BF1, DISABLED_PcSilenceIsNeverSeenAsAliveAgain) {
-	routercore::PeerPresence pc(protocol::KEEPALIVE_LOSS_MS * 1000u);
+// `start` = SysTick count at t = 0; the ticks (and the ms clock) may wrap during the run.
+static void pcSilentFor3Hours(uint32_t start) {
+	routercore::PeerPresence pc(protocol::KEEPALIVE_LOSS_MS);
 	recovery::PcLossGuard	 guard;
 	int						 lossEvents		 = 0;
 	uint32_t				 falseAliveMs	 = 0;
 	uint32_t				 firstFalseAlive = 0;
 	for (uint32_t t = 10; t <= 3u * 3600u * 1000u; t += 10) {
-		if (t <= 10000 && t % 2000 == 0) pc.onRx(usAt(t)); // KEEPALIVE every 2 s
-		pc.update(usAt(t));
+		if (t <= 10000 && t % 2000 == 0) pc.onRx(msAt(start + t)); // KEEPALIVE every 2 s
+		pc.update(msAt(start + t));
 		bool alive = pc.alive();
+		if (t <= 10000) EXPECT_TRUE(t < 2000 || alive) << "t=" << t;
 		if (guard.update(alive)) lossEvents++; // router.cpp logChanges() -> SSR off + All Notes Off
 		if (t > 10000 + protocol::KEEPALIVE_LOSS_MS && alive) {
 			if (!firstFalseAlive) firstFalseAlive = t;
@@ -76,32 +78,53 @@ TEST(BF1, DISABLED_PcSilenceIsNeverSeenAsAliveAgain) {
 	EXPECT_EQ(falseAliveMs, 0u) << "silent PC reported alive again, first at t=" << firstFalseAlive << " ms";
 }
 
+TEST(BF1, PcSilenceIsNeverSeenAsAliveAgain) {
+	pcSilentFor3Hours(0);
+}
+
+// The same with the uint32 ms clock wrapping (49.7 days of uptime) 5 s into the silence and right at the loss.
+TEST(BF1, PcSilenceAcrossMsClockWrap) {
+	pcSilentFor3Hours(0xFFFFFFFFu - 15000u);
+	pcSilentFor3Hours(0xFFFFFFFFu - 16000u - protocol::KEEPALIVE_LOSS_MS);
+}
+
+// A talking PC stays alive across the ms clock wrap.
+TEST(BF1, PcAliveAcrossMsClockWrap) {
+	routercore::PeerPresence pc(protocol::KEEPALIVE_LOSS_MS);
+	uint32_t				 start = 0xFFFFFFFFu - 30000u;
+	for (uint32_t t = 0; t <= 60000; t += 10) {
+		if (t % 2000 == 0) pc.onRx(msAt(start + t));
+		pc.update(msAt(start + t));
+		ASSERT_TRUE(pc.alive()) << "t=" << t;
+	}
+}
+
 // Control: a PC that keeps talking stays alive, and a packet after a loss makes it alive again.
 TEST(BF1, PcAliveWhileTalkingAndAgainAfterAPacket) {
-	routercore::PeerPresence pc(protocol::KEEPALIVE_LOSS_MS * 1000u);
-	pc.update(usAt(100));
+	routercore::PeerPresence pc(protocol::KEEPALIVE_LOSS_MS);
+	pc.update(msAt(100));
 	EXPECT_FALSE(pc.alive()) << "never seen";
 	for (uint32_t t = 1000; t <= 20000; t += 1000) {
-		pc.onRx(usAt(t));
-		pc.update(usAt(t + 500));
+		pc.onRx(msAt(t));
+		pc.update(msAt(t + 500));
 		EXPECT_TRUE(pc.alive()) << "t=" << t;
 	}
-	pc.update(usAt(20000 + protocol::KEEPALIVE_LOSS_MS));
+	pc.update(msAt(20000 + protocol::KEEPALIVE_LOSS_MS));
 	EXPECT_FALSE(pc.alive());
-	pc.onRx(usAt(40000));
-	pc.update(usAt(40010));
+	pc.onRx(msAt(40000));
+	pc.update(msAt(40010));
 	EXPECT_TRUE(pc.alive());
 }
 
 // nowMs() feeds boot::FwProgress, which handles uint32 ms wraparound; it must not wrap at 2^32 µs.
-TEST(BF1, DISABLED_NowMsIsMonotonicPast71Minutes) {
+TEST(BF1, NowMsIsMonotonicPast71Minutes) {
 	uint32_t before = routercore::msFromTicks(4294967u, TICK_US);
 	uint32_t after	= routercore::msFromTicks(4294968u, TICK_US);
 	EXPECT_GT(after, before) << "nowMs() jumped from " << before << " to " << after;
 }
 
 // The bootloader-entry deadline must be reached even when it lies past the clock wrap.
-TEST(BF1, DISABLED_DeadlineAcrossClockWrap) {
+TEST(BF1, DeadlineAcrossClockWrap) {
 	uint32_t now	  = 0xFFFFFF00u;
 	uint32_t deadline = now + 0x200u; // wraps
 	EXPECT_FALSE(routercore::deadlineReached(now, deadline));
@@ -146,9 +169,9 @@ TEST(PM6, DISABLED_BaseRetriesAfterNakBusy) {
 	stop.msgType  = MsgType::STOP_SONG;
 	stop.packetId = 7;
 	int transmits = 1;
-	ASSERT_TRUE(q.add(stop, usAt(0)));
+	ASSERT_TRUE(q.add(stop, msAt(0)));
 	q.resolve(reply(MsgType::NAK, 7, NakReason::BUSY));
-	q.poll(usAt(protocol::RETRY_TIMEOUT_MS), protocol::RETRY_TIMEOUT_MS * 1000u, protocol::MAX_RETRIES, [&](const Packet &) { transmits++; },
+	q.poll(msAt(protocol::RETRY_TIMEOUT_MS), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES, [&](const Packet &) { transmits++; },
 		   [](const Packet &) {});
 	EXPECT_EQ(transmits, 2) << "NAK BUSY treated as final: STOP_SONG never retried";
 }
@@ -160,20 +183,20 @@ TEST(PM6, RetransmitsWithoutReplyThenGivesUp) {
 	stop.dest	  = protocol::ADDR_PC;
 	stop.msgType  = MsgType::STOP_SONG;
 	stop.packetId = 3;
-	ASSERT_TRUE(q.add(stop, usAt(0)));
+	ASSERT_TRUE(q.add(stop, msAt(0)));
 	int		 resends = 0, gaveUp = 0;
 	uint32_t t		 = 0;
 	for (int i = 0; i <= protocol::MAX_RETRIES; i++) {
 		t += protocol::RETRY_TIMEOUT_MS;
-		q.poll(usAt(t), protocol::RETRY_TIMEOUT_MS * 1000u, protocol::MAX_RETRIES, [&](const Packet &p) { resends++; EXPECT_EQ(p.packetId, 3); },
+		q.poll(msAt(t), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES, [&](const Packet &p) { resends++; EXPECT_EQ(p.packetId, 3); },
 			   [&](const Packet &) { gaveUp++; });
 	}
 	EXPECT_EQ(resends, protocol::MAX_RETRIES);
 	EXPECT_EQ(gaveUp, 1);
 
-	ASSERT_TRUE(q.add(stop, usAt(t)));
+	ASSERT_TRUE(q.add(stop, msAt(t)));
 	q.resolve(reply(MsgType::ACK, 3));
-	q.poll(usAt(t + protocol::RETRY_TIMEOUT_MS), protocol::RETRY_TIMEOUT_MS * 1000u, protocol::MAX_RETRIES, [&](const Packet &) { resends++; },
+	q.poll(msAt(t + protocol::RETRY_TIMEOUT_MS), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES, [&](const Packet &) { resends++; },
 		   [&](const Packet &) { gaveUp++; });
 	EXPECT_EQ(resends, protocol::MAX_RETRIES);
 	EXPECT_EQ(gaveUp, 1);

@@ -3,26 +3,22 @@
 namespace routercore {
 
 	uint32_t msFromTicks(uint32_t ticks, uint32_t tickUs) {
-		// As stmcpp::systick::getDuration() / 1_ms: the product is a uint32 count of µs
-		return (ticks * tickUs) / 1000u;
+		// 64-bit product: getDuration() / 1_ms wrapped at 2^32 µs (71.58 min); this wraps at 2^32 ms (BF-1)
+		return static_cast<uint32_t>((static_cast<uint64_t>(ticks) * tickUs) / 1000u);
 	}
 
 	bool deadlineReached(uint32_t now, uint32_t deadline) {
-		return now >= deadline;
+		return static_cast<int32_t>(now - deadline) >= 0;
 	}
 
 	void PeerPresence::onRx(uint32_t now) {
 		_lastRx	  = now;
-		_now	  = now;
 		_everSeen = true;
+		_alive	  = true;
 	}
 
 	void PeerPresence::update(uint32_t now) {
-		_now = now;
-	}
-
-	bool PeerPresence::alive() const {
-		return _everSeen && (_now - _lastRx) < _loss;
+		if (_alive && (now - _lastRx) >= _loss) _alive = false;
 	}
 
 	bool RxDedup::isRepeat(uint8_t source, uint8_t packetId) {

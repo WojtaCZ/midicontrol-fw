@@ -502,7 +502,9 @@ namespace Bluetooth{
 		stmcpp::reg::set(std::ref(USART2->CR1), USART_CR1_UE);
 
 		wdg::kick();
-		stmcpp::systick::waitBlocking(100_ms);
+		// Not systick::waitBlocking(): its absolute compare spins ~71 min when the µs duration wraps meanwhile (BF-1)
+		const uint32_t resetStart = stmcpp::systick::getTicks();
+		while ((stmcpp::systick::getTicks() - resetStart) < 100u) {} // SysTick 1 ms
 
 		// Bring RN487x out of reset
 		rst_n.set();
@@ -511,7 +513,7 @@ namespace Bluetooth{
 		duration timestamp = stmcpp::systick::getDuration();
 		// Up to ~1.1 s together with the 100 ms above: kick, otherwise the loop watchdog (1000 ms) would record LOOP_STALL
 		// REBOOT_TIMEOUT, not DEFAULT_TIMEOUT: the RNBD350 boot time is not specified
-		while(!isCommandAvailable() && stmcpp::systick::getDuration() < (timestamp + REBOOT_TIMEOUT)){ wdg::kick(); }
+		while(!isCommandAvailable() && (stmcpp::systick::getDuration() - timestamp) < REBOOT_TIMEOUT){ wdg::kick(); }
 
 		std::unique_ptr<Bluetooth::Command> command = Bluetooth::getCommand();
 		_resetOk = command && command->getType() == Bluetooth::Command::Type::REBOOT;
@@ -805,7 +807,8 @@ namespace Bluetooth{
 		if(isr & USART_ISR_RXNE){
 			char c = static_cast<char>(USART2->RDR);
 			_rxBytes = _rxBytes + 1;
-			const uint32_t nowMs = static_cast<uint32_t>(stmcpp::systick::getDuration() / 1_ms);
+			// SysTick ticks are ms (1 ms period); getDuration() / 1_ms wrapped at 2^32 µs (BF-1)
+			const uint32_t nowMs = stmcpp::systick::getTicks();
 			switch (_statusFramer.feed(static_cast<uint8_t>(c), nowMs)) {
 				case statusframe::Result::COMPLETE:
 					// End of a status message → queue (no heap)

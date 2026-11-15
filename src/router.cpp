@@ -42,13 +42,8 @@ namespace router {
 	using protocol::Packet;
 
 	// Timing according to lib/protocol (constants.hpp)
-	// Router clock: µs since boot as a uint32 (= stmcpp::systick::getDuration(), SysTick period TICK_US)
+	// SysTick period (main.cpp systick::enable(144_MHz, 1_ms))
 	static constexpr uint32_t TICK_US = 1000;
-	static uint32_t nowUs() {
-		return stmcpp::systick::getTicks() * TICK_US;
-	}
-	static constexpr uint32_t RETRY_TIMEOUT_US = protocol::RETRY_TIMEOUT_MS * 1000u;
-	static constexpr uint32_t KEEPALIVE_LOSS_US = protocol::KEEPALIVE_LOSS_MS * 1000u;
 	static constexpr duration KEEPALIVE_PERIOD = duration::fromMilliSeconds(protocol::KEEPALIVE_PERIOD_MS);
 	static constexpr duration KEEPALIVE_LOSS = duration::fromMilliSeconds(protocol::KEEPALIVE_LOSS_MS);
 
@@ -69,13 +64,14 @@ namespace router {
 		return blestatus::linkUsable(Bluetooth::isConnected(), Bluetooth::isStreamOpen(), Bluetooth::isPeerAccepted());
 	}
 
+	// Router clock: ms since boot as a uint32, wraps after 49.7 days; compare only by modular differences (BF-1)
 	static uint32_t nowMs() {
 		return routercore::msFromTicks(stmcpp::systick::getTicks(), TICK_US);
 	}
 
 	// Availability of the peers
 	// [[gnu::used]]: tools/basetest reads it (test_lifecycle.py pc_alive())
-	[[gnu::used]] static routercore::PeerPresence _pc(KEEPALIVE_LOSS_US);
+	[[gnu::used]] static routercore::PeerPresence _pc(protocol::KEEPALIVE_LOSS_MS);
 	// used: tests (tools/basetest, conftest.remote_alive) compute isRemoteAlive() from them through the probe
 	[[gnu::used]] static duration _lastRemoteRx = 0_ms;
 	[[gnu::used]] static bool _remoteEverSeen = false;
@@ -98,7 +94,7 @@ namespace router {
 	// Restart into the bootloader (ENTER_BOOTLOADER)
 	static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the bootloader
 	static bool _enterBootloader = false;
-	static uint32_t _enterBootloaderAt = 0; // nowUs()
+	static uint32_t _enterBootloaderAt = 0; // nowMs()
 
 	// ── Helper functions ──────────────────────────────────────────────────
 
@@ -122,7 +118,7 @@ namespace router {
 	}
 
 	bool isPcAlive() {
-		_pc.update(nowUs());
+		_pc.update(nowMs());
 		return _pc.alive();
 	}
 
@@ -214,7 +210,7 @@ namespace router {
 		Transport via = transportFor(pkt.dest);
 		if (!transmit(pkt, via)) return false;
 
-		return _pending.add(pkt, nowUs());
+		return _pending.add(pkt, nowMs());
 	}
 
 	// An ACK/NAK from the destination node closes the corresponding unacknowledged packet
@@ -224,7 +220,7 @@ namespace router {
 
 	static void retryPending() {
 		_pending.poll(
-			nowUs(), RETRY_TIMEOUT_US, protocol::MAX_RETRIES,
+			nowMs(), protocol::RETRY_TIMEOUT_MS, protocol::MAX_RETRIES,
 			// Same PacketId — the receiver acknowledges the duplicate but does not execute it twice
 			[](const Packet &p) { transmit(p, transportFor(p.dest)); },
 			[](const Packet &p) {
@@ -421,7 +417,7 @@ namespace router {
 				Debug::log(Debug::Level::INFO, "ota", "ENTER_BOOTLOADER from 0x%02x, reset in 250 ms", pkt.source);
 				requestBootloader();
 				_enterBootloader = true;
-				_enterBootloaderAt = nowUs() + 250u * 1000u;
+				_enterBootloaderAt = nowMs() + 250u;
 				break;
 
 			default:
@@ -457,7 +453,7 @@ namespace router {
 		Debug::log(Debug::Level::DEBUG, "router", "rx %s 0x%02x->0x%02x pid %u type 0x%02x len %u", via == Transport::USB_CDC ? "cdc" : "ble", pkt.source, pkt.dest,
 				   pkt.packetId, static_cast<unsigned>(pkt.msgType), pkt.payloadLen);
 		if (via == Transport::USB_CDC) {
-			_pc.onRx(nowUs());
+			_pc.onRx(nowMs());
 		} else {
 			_lastRemoteRx = now;
 			_remoteEverSeen = true;
@@ -535,6 +531,7 @@ namespace router {
 	}
 
 	void process() {
+		_pc.update(nowMs()); // every pass, so the PC-loss latch sees each age before the ms clock wraps
 		// Receive from USB-CDC
 		if (tud_cdc_available()) {
 			uint8_t buf[64];
@@ -563,7 +560,7 @@ namespace router {
 		updateFwScreen();
 
 		// Pending reboot into the USB bootloader (after the ACK has been flushed).
-		if (_enterBootloader && routercore::deadlineReached(nowUs(), _enterBootloaderAt)) {
+		if (_enterBootloader && routercore::deadlineReached(nowMs(), _enterBootloaderAt)) {
 			tud_cdc_write_flush();
 			NVIC_SystemReset();
 		}
