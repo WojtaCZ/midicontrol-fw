@@ -1,0 +1,9 @@
+# Input model: the encoder has no digits/back; the menu ignores them
+tick 3000
+key 5
+key back
+key left
+key right
+expect screen main
+key up
+expect screen main

@@ -1,0 +1,29 @@
+# B8/B9: Prehraj requests the list (offset 0), loading splash after 500 ms, list, pick plays
+tick 3000
+key enter
+expect var requests=1
+expect var lastOffset=0
+tick 400
+expect screen main
+tick 200
+expect screen songs_loading
+expect text Nacitani...
+expect text Cekam na PC
+event songs 401;403;406A
+expect screen songs
+expect text 401
+expect text 403
+key down
+key enter
+expect var played=403
+# picking pops the list: back on the main menu until SIGNAL_PLAYING arrives
+expect screen main
+key enter
+tick 600
+event songs 401;403;406A
+key down
+key down
+key down
+expect text Zpet
+key enter
+expect screen main

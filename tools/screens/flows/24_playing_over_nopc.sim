@@ -1,0 +1,11 @@
+# Playing screen survives PC loss; leaves to the no-PC overlay only after "Zastaveno" timeout
+tick 3000
+event playing 401
+expect screen nowplaying
+state pc=0
+tick 30
+expect screen nowplaying
+event stopped
+expect text Zastaveno
+tick 2000
+expect screen nopc

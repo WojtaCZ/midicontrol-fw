@@ -1,0 +1,11 @@
+# B8: with the PC absent the overlay covers the menu; Prehraj is not reachable, no request made
+tick 3000
+state pc=0
+tick 30
+expect screen nopc
+expect text Odpojeno
+expect text Cekam na PC
+expect text Stisk: Nastaveni
+expect var requests=0
+key enter
+expect screen settings

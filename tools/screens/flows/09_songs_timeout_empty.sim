@@ -1,0 +1,13 @@
+# B8: PC does not answer: "PC neodpovida" after 3 s, push dismisses; empty folder
+tick 3000
+key enter
+tick 3100
+expect screen songs_loading
+expect text PC neodpovi
+expect scrolled PC neodpovida
+key enter
+expect screen main
+key enter
+tick 600
+event songs -
+expect text Zadne pisne

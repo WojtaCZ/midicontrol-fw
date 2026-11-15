@@ -1,0 +1,19 @@
+# B3: "Zpet" is the last row (7 Down from LED) and returns to the main menu; no wrap
+tick 3000
+key down
+key down
+key enter
+key up
+expect text LED
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expect text Zpet
+key enter
+expect screen main

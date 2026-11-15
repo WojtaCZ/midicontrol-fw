@@ -1,0 +1,18 @@
+# B10: SIGNAL_PLAYING pushes the screen, anchor line, push = STOP, "Zastaveno" for 1.5 s then back
+tick 3000
+event playing 406A
+expect screen nowplaying
+expect text Prehravam
+event anchor Sloka 2 +1
+expect text Sloka: 2 (x1)
+key down
+expect screen nowplaying
+key enter
+expect var stops=1
+expect text Zastavuji
+event stopped
+expect text Zastaveno
+tick 1400
+expect screen nowplaying
+tick 200
+expect screen main

@@ -1,0 +1,20 @@
+# B12: PC absent overlay, push opens Nastaveni, Zpet returns to the overlay, PC back pops it
+tick 3000
+state pc=0
+tick 30
+expect screen nopc
+expect text Odpojeno
+key enter
+expect screen settings
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key enter
+expect screen nopc
+state pc=1
+tick 30
+expect screen main

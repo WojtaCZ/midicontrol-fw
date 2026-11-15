@@ -1,0 +1,29 @@
+# B4/B5/B6: info pages open on push and close on push; Bluetooth page keeps the OLED awake
+tick 3000
+key down
+key down
+key enter
+key down
+key down
+key down
+key enter
+expect screen firmware
+expect text Revize: a1b2c3d
+key enter
+expect screen settings
+key down
+key enter
+expect screen display
+expect text Pripojen: Ano
+key enter
+expect screen settings
+key down
+key enter
+expect screen bluetooth
+expect text Spojeni: Ano
+expect text Sparovano: Ano
+expect text Ovladac: Ano
+tick 40000
+expect var sleeping=0
+key enter
+expect screen settings

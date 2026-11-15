@@ -1,0 +1,14 @@
+# B1/B2: splash, auto-dismiss, real key cancels it (P1-8), main menu
+expect screen splash
+expect text MIDIControl
+expect text BASE
+key up
+key down
+expect screen splash
+tick 3000
+expect screen splash
+key enter
+expect screen main
+expect text Hlavni menu
+expect text Prehraj
+expect text Nahraj

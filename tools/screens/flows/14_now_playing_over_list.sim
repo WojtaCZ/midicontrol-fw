@@ -1,0 +1,10 @@
+# B10: SIGNAL_PLAYING pushes over a list screen; leaving returns to the list
+tick 3000
+key enter
+tick 600
+event songs 401;403
+event playing 401
+expect screen nowplaying
+event stopped
+tick 1600
+expect screen songs

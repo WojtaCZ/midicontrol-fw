@@ -1,0 +1,12 @@
+# Sleep: after 30 s idle the first key only wakes (not executed)
+tick 3000
+tick 30000
+expect var sleeping=1
+key down
+expect var sleeping=0
+key enter
+expect screen main
+key down
+key down
+key enter
+expect screen settings

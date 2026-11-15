@@ -1,0 +1,6 @@
+# B10: a failed STOP_SONG is reported on the playing screen
+tick 3000
+event playing 406A
+key enter
+event fail STOP_SONG Bez odpovedi
+expect text Bez odpovedi
