@@ -31,6 +31,7 @@
 #include "protocol/constants.hpp"
 #include "protocol/info.hpp"
 #include "boot/fw_progress.hpp"
+#include "logic/router_core.hpp"
 
 using namespace stmcpp::units;
 
@@ -41,7 +42,13 @@ namespace router {
 	using protocol::Packet;
 
 	// Timing according to lib/protocol (constants.hpp)
-	static constexpr duration RETRY_TIMEOUT = duration::fromMilliSeconds(protocol::RETRY_TIMEOUT_MS);
+	// Router clock: µs since boot as a uint32 (= stmcpp::systick::getDuration(), SysTick period TICK_US)
+	static constexpr uint32_t TICK_US = 1000;
+	static uint32_t nowUs() {
+		return stmcpp::systick::getTicks() * TICK_US;
+	}
+	static constexpr uint32_t RETRY_TIMEOUT_US = protocol::RETRY_TIMEOUT_MS * 1000u;
+	static constexpr uint32_t KEEPALIVE_LOSS_US = protocol::KEEPALIVE_LOSS_MS * 1000u;
 	static constexpr duration KEEPALIVE_PERIOD = duration::fromMilliSeconds(protocol::KEEPALIVE_PERIOD_MS);
 	static constexpr duration KEEPALIVE_LOSS = duration::fromMilliSeconds(protocol::KEEPALIVE_LOSS_MS);
 
@@ -63,12 +70,12 @@ namespace router {
 	}
 
 	static uint32_t nowMs() {
-		return static_cast<uint32_t>(stmcpp::systick::getDuration() / 1_ms);
+		return routercore::msFromTicks(stmcpp::systick::getTicks(), TICK_US);
 	}
 
 	// Availability of the peers
-	static duration _lastPcRx = 0_ms;
-	static bool _pcEverSeen = false;
+	// [[gnu::used]]: tools/basetest reads it (test_lifecycle.py pc_alive())
+	[[gnu::used]] static routercore::PeerPresence _pc(KEEPALIVE_LOSS_US);
 	// used: tests (tools/basetest, conftest.remote_alive) compute isRemoteAlive() from them through the probe
 	[[gnu::used]] static duration _lastRemoteRx = 0_ms;
 	[[gnu::used]] static bool _remoteEverSeen = false;
@@ -83,26 +90,15 @@ namespace router {
 	static duration _lastCountReport = 0_ms;
 
 	// Unacknowledged packets that the Base itself sent (waiting for ACK/NAK)
-	struct Pending {
-		Packet pkt;
-		duration sentAt;
-		uint8_t retries;
-		bool used;
-	};
-	static constexpr uint8_t MAX_PENDING = 4;
-	static Pending _pending[MAX_PENDING] = {};
+	static routercore::RetryQueue _pending;
 
-	// Deduplication: the last PacketId processed locally from each node (index = address)
-	struct LastRx {
-		uint8_t packetId;
-		bool valid;
-	};
-	static LastRx _lastRx[4] = {};
+	// Deduplication: the last PacketId processed locally from each node
+	static routercore::RxDedup _dedup;
 
 	// Restart into the bootloader (ENTER_BOOTLOADER)
 	static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the bootloader
 	static bool _enterBootloader = false;
-	static duration _enterBootloaderAt = 0_ms;
+	static uint32_t _enterBootloaderAt = 0; // nowUs()
 
 	// ── Helper functions ──────────────────────────────────────────────────
 
@@ -126,7 +122,8 @@ namespace router {
 	}
 
 	bool isPcAlive() {
-		return _pcEverSeen && (stmcpp::systick::getDuration() - _lastPcRx) < KEEPALIVE_LOSS;
+		_pc.update(nowUs());
+		return _pc.alive();
 	}
 
 	bool isRemoteAlive() {
@@ -211,49 +208,30 @@ namespace router {
 	bool sendReliable(Packet &pkt) {
 		pkt.source = protocol::ADDR_BASE;
 
-		for (auto &p : _pending) {
-			if (p.used) continue;
+		if (_pending.full()) return false;
 
-			pkt.packetId = _packetId++;
-			Transport via = transportFor(pkt.dest);
-			if (!transmit(pkt, via)) return false;
+		pkt.packetId = _packetId++;
+		Transport via = transportFor(pkt.dest);
+		if (!transmit(pkt, via)) return false;
 
-			p.pkt = pkt;
-			p.sentAt = stmcpp::systick::getDuration();
-			p.retries = 0;
-			p.used = true;
-			return true;
-		}
-		return false; // Queue full
+		return _pending.add(pkt, nowUs());
 	}
 
 	// An ACK/NAK from the destination node closes the corresponding unacknowledged packet
 	static void resolvePending(const Packet &rx) {
-		if (rx.payloadLen < 1) return;
-		uint8_t ackedId = rx.payload[0];
-		for (auto &p : _pending) {
-			if (p.used && p.pkt.dest == rx.source && p.pkt.packetId == ackedId) {
-				p.used = false;
-			}
-		}
+		_pending.resolve(rx);
 	}
 
 	static void retryPending() {
-		duration now = stmcpp::systick::getDuration();
-		for (auto &p : _pending) {
-			if (!p.used || (now - p.sentAt) < RETRY_TIMEOUT) continue;
-
-			if (p.retries >= protocol::MAX_RETRIES) {
-				Debug::log(Debug::Level::WARNING, "router", "retries exhausted: type 0x%02x to 0x%02x pid %u", static_cast<unsigned>(p.pkt.msgType),
-						   p.pkt.dest, p.pkt.packetId);
-				p.used = false; // We give up; the GUI has its own timeouts
-				continue;
-			}
+		_pending.poll(
+			nowUs(), RETRY_TIMEOUT_US, protocol::MAX_RETRIES,
 			// Same PacketId — the receiver acknowledges the duplicate but does not execute it twice
-			transmit(p.pkt, transportFor(p.pkt.dest));
-			p.retries++;
-			p.sentAt = now;
-		}
+			[](const Packet &p) { transmit(p, transportFor(p.dest)); },
+			[](const Packet &p) {
+				// We give up; the GUI has its own timeouts
+				Debug::log(Debug::Level::WARNING, "router", "retries exhausted: type 0x%02x to 0x%02x pid %u", static_cast<unsigned>(p.msgType), p.dest,
+						   p.packetId);
+			});
 	}
 
 	// The payload tells the remote whether the PC is alive; a change is sent at once (the remote's "Cekam na PC" splash)
@@ -353,14 +331,9 @@ namespace router {
 		bool ack = needsAck(pkt);
 
 		// Deduplication of repeated packets: acknowledge again, but do not execute
-		if (ack && pkt.source < 4) {
-			LastRx &last = _lastRx[pkt.source];
-			if (last.valid && last.packetId == pkt.packetId) {
-				sendAck(pkt, via);
-				return;
-			}
-			last.packetId = pkt.packetId;
-			last.valid = true;
+		if (ack && _dedup.isRepeat(pkt.source, pkt.packetId)) {
+			sendAck(pkt, via);
+			return;
 		}
 
 		switch (pkt.msgType) {
@@ -448,7 +421,7 @@ namespace router {
 				Debug::log(Debug::Level::INFO, "ota", "ENTER_BOOTLOADER from 0x%02x, reset in 250 ms", pkt.source);
 				requestBootloader();
 				_enterBootloader = true;
-				_enterBootloaderAt = stmcpp::systick::getDuration() + 250_ms;
+				_enterBootloaderAt = nowUs() + 250u * 1000u;
 				break;
 
 			default:
@@ -484,8 +457,7 @@ namespace router {
 		Debug::log(Debug::Level::DEBUG, "router", "rx %s 0x%02x->0x%02x pid %u type 0x%02x len %u", via == Transport::USB_CDC ? "cdc" : "ble", pkt.source, pkt.dest,
 				   pkt.packetId, static_cast<unsigned>(pkt.msgType), pkt.payloadLen);
 		if (via == Transport::USB_CDC) {
-			_lastPcRx = now;
-			_pcEverSeen = true;
+			_pc.onRx(nowUs());
 		} else {
 			_lastRemoteRx = now;
 			_remoteEverSeen = true;
@@ -591,7 +563,7 @@ namespace router {
 		updateFwScreen();
 
 		// Pending reboot into the USB bootloader (after the ACK has been flushed).
-		if (_enterBootloader && stmcpp::systick::getDuration() >= _enterBootloaderAt) {
+		if (_enterBootloader && routercore::deadlineReached(nowUs(), _enterBootloaderAt)) {
 			tud_cdc_write_flush();
 			NVIC_SystemReset();
 		}

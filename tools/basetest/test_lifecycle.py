@@ -17,11 +17,12 @@ KEEPALIVE_LOSS_MS = 6000  # lib/protocol constants.hpp
 
 
 def pc_alive(base) -> bool:
-    """router::isPcAlive() (LTO drops it): _pcEverSeen and the last packet from the CDC younger than KEEPALIVE_LOSS."""
-    res = base.u("stmcpp::systick::resolution_")
-    now = (res * base.u("stmcpp::systick::ticks_")) & 0xFFFFFFFF
-    age_ms = ((now - base.u("router::_lastPcRx")) & 0xFFFFFFFF) / res
-    return base.read_bool("router::_pcEverSeen") and age_ms < KEEPALIVE_LOSS_MS
+    """router::isPcAlive() (LTO drops it): router::_pc is a routercore::PeerPresence (router_core.hpp)
+    {u32 _loss, u32 _lastRx, u32 _now, bool _everSeen}, times in µs = ticks * 1000."""
+    pc = base.sym("router::_pc")
+    now = (1000 * base.u("stmcpp::systick::ticks_")) & 0xFFFFFFFF
+    age_ms = ((now - base.read_uint(pc + 4)) & 0xFFFFFFFF) / 1000
+    return bool(base.read_uint(pc + 12, 1)) and age_ms < KEEPALIVE_LOSS_MS
 
 
 def link_ready(base) -> bool:
