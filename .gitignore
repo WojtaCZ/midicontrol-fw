@@ -16,3 +16,6 @@ build/
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
 build-screens/
+
+# generated on every build by cmake/git.cmake (Q1-22a)
+/inc/git.hpp
