@@ -10,6 +10,7 @@ add_executable(screens
 	host.cpp
 	${FW}/src/menu.cpp
 	${FW}/src/logic/ble_status.cpp
+	${FW}/src/logic/now_playing.cpp
 	${FW}/lib/ui/src/confirm_screen.cpp
 	${FW}/lib/ui/src/list.cpp
 	${FW}/lib/ui/src/menu_screen.cpp
