@@ -42,7 +42,7 @@ Build outputs in `build/`:
 - `bootloader/base-bootloader.hex` — bootloader (`bootloader/`, its own CMake project; `-DBUILD_BOOTLOADER=OFF` skips it)
 - `midicontrol-fw-full.hex` — bootloader + `-update.hex` merged
 
-Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`) is auto-generated on each build via `cmake/git.cmake`. Hardware-independent logic (`src/logic`, plus the protocol `crc8`) has host gtest tests (`test/host`, command under `bluetooth` below; 64 tests incl. the crc8 check value 0xA2); hardware tests (USB-CDC, both ST-Links, logic analyzer) live in `tools/basetest/` (README there).
+Requires `arm-none-eabi-gcc`. A git metadata header (`inc/git.hpp`, `inline constexpr char[]` strings, `git::dirty`) is generated on each build by `cmake/git.cmake`; it is untracked and in `.gitignore` (Q1-22 a): never commit it. Hardware-independent logic (`src/logic`, plus the protocol `crc8`) has host gtest tests (`test/host`, command under `bluetooth` below; 64 tests incl. the crc8 check value 0xA2); hardware tests (USB-CDC, both ST-Links, logic analyzer) live in `tools/basetest/` (README there).
 
 **Screen images**: `tools/screens/export.sh [outdir] [scale]` builds the real GUI code (`src/menu.cpp`, `lib/ui`, `lib/gfx`) for the host with stubbed hardware (`tools/screens/stubs/`, `host.cpp`) and saves every screen as PNG plus `sheet.png` (all screens in a grid) and `index.html` (default `build-screens/png/`). The scenarios are in `tools/screens/main.cpp`; add one when you add a screen. Use it to check UI changes and for the manual's pictures.
 

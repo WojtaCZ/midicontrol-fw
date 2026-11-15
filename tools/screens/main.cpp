@@ -66,9 +66,9 @@ int main(int argc, char **argv) {
 	GUI::setRequestSongListCallback([](uint8_t) { host::state.requests++; });
 	GUI::setPlaySongCallback([](const char *) {});
 	GUI::setStopCallback([] {});
-	snap("splash", "Splash after power-on");
+	snap("splash", "Splash after power-on: closes by itself after 3 s; once a key was pressed it stays until Enter (Up/Down alone do not close it)");
 
-	key(E::Enter); // the splash timer presses Enter
+	key(E::Enter); // the splash timer's Enter (no real key came first, so it closes the splash; P1-8)
 	snap("main_play", "Main menu, Prehraj selected");
 	key(E::Down);
 	snap("main_record", "Main menu, Nahraj selected");
