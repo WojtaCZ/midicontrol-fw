@@ -20,7 +20,7 @@ STM32G431CBTx (Cortex-M4F, 144 MHz) firmware for the MIDIcontrol **base station*
 
 - **User-visible changes** (screen text, menus, keys, timeouts, web page, CLI output, config keys, install steps): in the same commit series update midicontrolpy-sw/docs/SYSTEM.md (status/glossary/timing; then run midicontrolpy-sw/tools/sync-system-doc.sh), this CLAUDE.md/README, midicontrolpy-sw/docs/status-web-and-service.md for the PC, the screen scenarios in tools/screens/main.cpp, and the Czech user manual.
 
-The packet protocol is defined in **`lib/protocol/PROTOCOL.md`** (shared `midicontrol-protocol` submodule) — that file is authoritative. `readme.md` documents the display SysEx format (`F0 4D 43 ...`), which is also the anchor format in the song files.
+The packet protocol is defined in **`lib/protocol/PROTOCOL.md`** (shared `midicontrol-protocol` submodule) — that file is authoritative. `docs/display-sysex.md` documents the display SysEx format (`F0 4D 43 ...`), which is also the anchor format in the song files.
 
 ## Build Commands
 

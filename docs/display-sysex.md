@@ -1,7 +1,7 @@
 # Special MIDI Messages
 
 > Paketový protokol mezi PC, základnou a ovladačem (USB-CDC / BLE) je popsán v
-> [`lib/protocol/PROTOCOL.md`](lib/protocol/PROTOCOL.md). Tento dokument popisuje jen SysEx zprávy displeje
+> [`lib/protocol/PROTOCOL.md`](../lib/protocol/PROTOCOL.md). Tento dokument popisuje jen SysEx zprávy displeje
 > (stejný formát `F0 4D 43 ...` je kotva v souborech písní i ozvěna stavu displeje do PC).
 
 ## SysEx zprávy pro ovládání displeje
