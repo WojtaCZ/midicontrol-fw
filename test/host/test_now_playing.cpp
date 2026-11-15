@@ -71,3 +71,25 @@ TEST(NowPlaying, StartWhileStoppingIsPlaying) {
 	EXPECT_EQ(m.state(), State::Playing);
 	EXPECT_FALSE(m.expired(Machine::STOPPING_TIMEOUT_MS * 10));
 }
+
+// PM-1/UI2-1: the STOP was NAKed or never answered (PC alive): the song still plays, so the screen
+// goes back to Playing and one more press sends STOP again.
+TEST(NowPlaying, StopFailedReturnsToPlaying) {
+	Machine m;
+	m.start();
+	m.press(100);
+	m.stopFailed();
+	EXPECT_EQ(m.state(), State::Playing) << "a failed STOP must not leave the screen in Zastavuji";
+	EXPECT_FALSE(m.expired(100 + Machine::STOPPING_TIMEOUT_MS));
+	EXPECT_EQ(m.press(200), Action::SendStop);
+}
+
+// A late failure after SIGNAL_STOPPED changes nothing.
+TEST(NowPlaying, StopFailedAfterStoppedIsIgnored) {
+	Machine m;
+	m.start();
+	m.press(0);
+	m.stopped(10);
+	m.stopFailed();
+	EXPECT_EQ(m.state(), State::Stopped);
+}

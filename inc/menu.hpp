@@ -9,6 +9,7 @@
 #include <ui/item.hpp>
 #include <ui/theme.hpp>
 #include <ui/input.hpp>
+#include "protocol/types.hpp"
 
 namespace GUI {
     // Initialize the theme, screens, navigator; called once at startup
@@ -48,6 +49,10 @@ namespace GUI {
 
     // Section label from SIGNAL_ANCHOR ("Sloka 2", "Sloka 2 +1" while repeats are pending)
     void setNowPlayingAnchor(const char* label);
+
+    // PM-1/UI2-1: a request the base sent to the PC (GET_SONG_LIST, PLAY_SONG, STOP_SONG) was NAKed,
+    // never answered or not sent; text from routercore::failureText. Other types are ignored.
+    void requestFailed(protocol::MsgType type, const char* text);
 
     // "Napajeni varhan" checkbox (Nastaveni) according to the actual SSR state (e.g. after SET_CURRENT from the PC)
     void syncPowerCheckbox();

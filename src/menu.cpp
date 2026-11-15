@@ -296,6 +296,16 @@ public:
         markDirty();
     }
 
+    // STOP_SONG failed (PM-1): "Prehravam" again with the reason in the info line; OK sends STOP again
+    void stopFailed(const char* text) {
+        if (machine_.state() != State::Stopping) return;
+        machine_.stopFailed();
+        std::strncpy(info_, text, sizeof(info_) - 1);
+        info_[sizeof(info_) - 1] = '\0';
+        infoScroll_.reset();
+        markDirty();
+    }
+
     State state() const { return machine_.state(); }
     // "Zastaveno" shown long enough, or "Zastavuji" without an answer (SM-1)
     bool expired() const { return machine_.expired(stmcpp::systick::getTicks()); }
@@ -418,11 +428,12 @@ static ui::MenuScreen songListScreen("Pisne", _songListItems, 0);
 
 static void onSongSelected(ui::MenuItem* item, void* userData) {
     (void)userData;
+    // Pop the song list first: a failure reported at once (requestFailed) pushes its message on top.
+    // NowPlaying is pushed by SIGNAL_PLAYING. The title points into _songNames, valid after the pop.
+    nav.pop();
     if (_playSongCallback && item) {
         _playSongCallback(item->title());
     }
-    // Pop song list — NowPlaying will be pushed by the existing PLAY_SONG handler
-    nav.pop();
 }
 
 // ── Remote update screen (relayed from the PC) ─────────────────────────
@@ -441,9 +452,9 @@ static void playCallback(ui::MenuItem* item, void* userData) {
     _hasMoreSongs = false;
     _loadingScreenShown = false;
     _songListState = SongListState::WaitingFirst;
-    _requestSongListCallback(0);
     songListDelayScheduler.start();   // 500ms delay before showing loading screen
     songListTimeoutScheduler.start(); // 3s timeout
+    _requestSongListCallback(0);      // last: a failure reported at once stops both schedulers
 }
 
 static void recordCallback(ui::MenuItem* item, void* userData) {
@@ -760,6 +771,45 @@ void hideFwProgress() {
 void setNowPlayingAnchor(const char* label) {
     if (nowPlayingScreen.state() == NowPlayingScreen::State::Stopped) return;
     nowPlayingScreen.setSection(label);
+    Oled::wakeupCallback();
+    nav.forceRender();
+}
+
+void requestFailed(protocol::MsgType type, const char* text) {
+    switch (type) {
+        case protocol::MsgType::GET_SONG_LIST:
+            if (_songListState == SongListState::WaitingFirst) {
+                // the reason instead of the generic "PC neodpovida" timeout
+                _songListState = SongListState::Idle;
+                songListDelayScheduler.stop();
+                songListTimeoutScheduler.stop();
+                songListLoadingScreen.setSubtitle(text);
+                songListLoadingScreen.setComment("");
+                if (!_loadingScreenShown) {
+                    nav.push(&songListLoadingScreen);
+                    _loadingScreenShown = true;
+                }
+            } else if (_songListState == SongListState::WaitingMore) {
+                _songListState = SongListState::Idle; // the next scroll down asks again
+                return;
+            } else {
+                return;
+            }
+            break;
+        case protocol::MsgType::PLAY_SONG:
+            if (fwPushed) return;
+            // same splash as the song list; its dismiss only pops (the list state is Idle here)
+            songListLoadingScreen.setSubtitle(text);
+            songListLoadingScreen.setComment("");
+            if (nav.current() != &songListLoadingScreen) nav.push(&songListLoadingScreen);
+            break;
+        case protocol::MsgType::STOP_SONG:
+            if (!_nowPlayingActive) return;
+            nowPlayingScreen.stopFailed(text);
+            break;
+        default:
+            return;
+    }
     Oled::wakeupCallback();
     nav.forceRender();
 }

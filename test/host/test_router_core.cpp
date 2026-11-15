@@ -3,6 +3,7 @@
 // Ported from the step-2 verifier red tests (BF-1, PM-13, PM-6) onto the real code. DISABLED_ = known red, enabled by its fix.
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <vector>
 
 #include "protocol/constants.hpp"
@@ -227,6 +228,67 @@ TEST(PM6, RetransmitsWithoutReplyThenGivesUp) {
 		   [&](const Packet &) { gaveUp++; });
 	EXPECT_EQ(resends, protocol::MAX_RETRIES);
 	EXPECT_EQ(gaveUp, 1);
+}
+
+// PM-1/UI2-1: the base's own requests (PLAY_SONG, STOP_SONG, GET_SONG_LIST) learn why they failed.
+namespace {
+	Packet basePacket(MsgType type, uint8_t pid) {
+		Packet p{};
+		p.source   = protocol::ADDR_BASE;
+		p.dest	   = protocol::ADDR_PC;
+		p.msgType  = type;
+		p.packetId = pid;
+		return p;
+	}
+} // namespace
+
+TEST(PM1, NakReasonReachesTheOriginator) {
+	routercore::RetryQueue q;
+	ASSERT_TRUE(q.add(basePacket(MsgType::PLAY_SONG, 9), msAt(0)));
+	routercore::RetryQueue::Closed c{};
+	ASSERT_TRUE(q.resolve(reply(MsgType::NAK, 9, NakReason::NOT_FOUND), &c)) << "NAK must close the entry and say so";
+	EXPECT_EQ(c.type, MsgType::PLAY_SONG);
+	EXPECT_TRUE(c.nak);
+	EXPECT_EQ(c.reason, NakReason::NOT_FOUND);
+	EXPECT_FALSE(q.resolve(reply(MsgType::NAK, 9, NakReason::NOT_FOUND), &c)) << "already closed";
+}
+
+TEST(PM1, AckIsNotAFailure) {
+	routercore::RetryQueue q;
+	ASSERT_TRUE(q.add(basePacket(MsgType::GET_SONG_LIST, 4), msAt(0)));
+	routercore::RetryQueue::Closed c{};
+	ASSERT_TRUE(q.resolve(reply(MsgType::ACK, 4), &c));
+	EXPECT_EQ(c.type, MsgType::GET_SONG_LIST);
+	EXPECT_FALSE(c.nak);
+}
+
+TEST(PM1, ReplyForAnotherPidClosesNothing) {
+	routercore::RetryQueue q;
+	ASSERT_TRUE(q.add(basePacket(MsgType::STOP_SONG, 5), msAt(0)));
+	EXPECT_FALSE(q.resolve(reply(MsgType::ACK, 6)));
+	EXPECT_FALSE(q.full());
+}
+
+TEST(PM1, FailureTexts) {
+	using routercore::Failure;
+	using routercore::failureText;
+	ASSERT_NE(failureText(Failure::Nak, NakReason::NOT_FOUND), nullptr);
+	EXPECT_STREQ(failureText(Failure::Nak, NakReason::NOT_FOUND), "Pisen nenalezena");
+	EXPECT_STREQ(failureText(Failure::Nak, NakReason::BUSY), "PC zaneprazdneno");
+	EXPECT_STREQ(failureText(Failure::Nak, NakReason::UNREACHABLE), "PC nedostupne");
+	EXPECT_STREQ(failureText(Failure::Nak, NakReason::NOT_PLAYING), "Nehraje se");
+	EXPECT_STREQ(failureText(Failure::Nak, NakReason::INVALID_PAYLOAD), "Odmitnuto");
+	EXPECT_STREQ(failureText(Failure::Nak, NakReason::UNKNOWN_MSG), "Odmitnuto");
+	EXPECT_STREQ(failureText(Failure::NoAnswer), "PC neodpovida");
+	EXPECT_STREQ(failureText(Failure::NotSent), "Neodeslano");
+	// one 7x10 line on the 128 px OLED, plain ASCII (no diacritics)
+	for (auto f : {Failure::Nak, Failure::NoAnswer, Failure::NotSent})
+		for (uint8_t r = 1; r <= 7; r++) {
+			const char *t = failureText(f, static_cast<NakReason>(r));
+			ASSERT_NE(t, nullptr);
+			EXPECT_LE(std::strlen(t), 18u) << t;
+			for (const char *c = t; *c; c++) EXPECT_TRUE(*c >= 0x20 && *c < 0x7F) << t;
+		}
 }
 
 // Q1-1 c: 2 h backstop. Literal reading (coordinator): SSR on and no valid PC packet for 2 h -> SSR off +

@@ -69,8 +69,15 @@ namespace routercore {
 		bool full() const;
 		// Remember a packet that was just transmitted; false when the queue is full
 		bool add(const protocol::Packet &pkt, uint32_t now);
-		// ACK/NAK from rx.source for the PacketId in payload[0] closes the matching entry
-		void resolve(const protocol::Packet &rx);
+		// What resolve() closed: the request's type and, for a NAK, the reason (PM-1)
+		struct Closed {
+			protocol::MsgType	type;
+			bool				nak;
+			protocol::NakReason reason;
+		};
+		// ACK/NAK from rx.source for the PacketId in payload[0] closes the matching entry;
+		// true when one was closed, then *out (if given) says which and how
+		bool resolve(const protocol::Packet &rx, Closed *out = nullptr);
 		// Entries without an answer for `timeout`: resend(pkt) with the same PacketId, after maxRetries giveUp(pkt)
 		template<typename Resend, typename GiveUp>
 		void poll(uint32_t now, uint32_t timeout, uint8_t maxRetries, Resend &&resend, GiveUp &&giveUp) {
@@ -90,6 +97,10 @@ namespace routercore {
 	private:
 		Entry _entries[SIZE] = {};
 	};
+
+	// PM-1/UI2-1: why a request the base sent itself failed, as a short OLED text (Czech, no diacritics)
+	enum class Failure : uint8_t { Nak, NoAnswer, NotSent };
+	const char *failureText(Failure f, protocol::NakReason reason = protocol::NakReason::UNKNOWN_MSG);
 
 	// Q1-1 c: base backstop for organ power. SSR on and no valid PC packet for 2 h (PC lost, absent or
 	// never seen) -> the router switches the SSR off and sends All Notes Off. A PC packet restarts the

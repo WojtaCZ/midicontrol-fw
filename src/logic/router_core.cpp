@@ -50,11 +50,32 @@ namespace routercore {
 		return false;
 	}
 
-	void RetryQueue::resolve(const protocol::Packet &rx) {
-		if (rx.payloadLen < 1) return;
+	bool RetryQueue::resolve(const protocol::Packet &rx, Closed *out) {
+		if (rx.payloadLen < 1) return false;
 		uint8_t ackedId = rx.payload[0];
 		for (auto &e : _entries) {
-			if (e.used && e.pkt.dest == rx.source && e.pkt.packetId == ackedId) e.used = false;
+			if (!e.used || e.pkt.dest != rx.source || e.pkt.packetId != ackedId) continue;
+			e.used = false;
+			if (out) {
+				out->type	= e.pkt.msgType;
+				out->nak	= rx.msgType == protocol::MsgType::NAK;
+				out->reason = (out->nak && rx.payloadLen >= 2) ? static_cast<protocol::NakReason>(rx.payload[1]) : protocol::NakReason::UNKNOWN_MSG;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	const char *failureText(Failure f, protocol::NakReason reason) {
+		using protocol::NakReason;
+		if (f == Failure::NoAnswer) return "PC neodpovida";
+		if (f == Failure::NotSent) return "Neodeslano"; // retry queue full
+		switch (reason) { // same texts as the remote (player_screen.cpp)
+			case NakReason::NOT_FOUND: return "Pisen nenalezena";
+			case NakReason::BUSY: return "PC zaneprazdneno";
+			case NakReason::UNREACHABLE: return "PC nedostupne";
+			case NakReason::NOT_PLAYING: return "Nehraje se";
+			default: return "Odmitnuto";
 		}
 	}
 

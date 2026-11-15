@@ -19,6 +19,10 @@ namespace nowplaying {
 		_since = now;
 	}
 
+	void Machine::stopFailed() {
+		if (_state == State::Stopping) _state = State::Playing;
+	}
+
 	bool Machine::expired(uint32_t now) const {
 		if (_state == State::Stopped) return now - _since >= STOPPED_SHOW_MS;
 		// SM-1: no SIGNAL_STOPPED (PC gone or STOP lost): do not hold the base UI, the settings menu stays reachable

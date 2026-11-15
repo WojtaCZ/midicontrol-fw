@@ -16,6 +16,7 @@ namespace nowplaying {
 		void   start();						  // SIGNAL_PLAYING
 		Action press(uint32_t now);			  // the OK button
 		void   stopped(uint32_t now);		  // SIGNAL_STOPPED, or the PC was declared lost
+		void   stopFailed();			  // STOP_SONG NAKed or unanswered (PM-1): back to Playing, the next press stops again
 		bool   expired(uint32_t now) const;	  // the screen should go now
 		State  state() const { return _state; }
 

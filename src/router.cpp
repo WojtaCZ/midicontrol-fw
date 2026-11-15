@@ -202,21 +202,33 @@ namespace router {
 		sendSimple(rx.source, MsgType::NAK, payload, 2, via);
 	}
 
+	// PM-1/UI2-1: the originator learns why its request failed (the GUI ignores types it did not send)
+	static void reportFailure(MsgType type, routercore::Failure f, NakReason reason = NakReason::UNKNOWN_MSG) {
+		const char *text = routercore::failureText(f, reason);
+		Debug::log(Debug::Level::WARNING, "router", "request type 0x%02x failed: %s", static_cast<unsigned>(type), text);
+		GUI::requestFailed(type, text);
+	}
+
 	bool sendReliable(Packet &pkt) {
 		pkt.source = protocol::ADDR_BASE;
 
-		if (_pending.full()) return false;
+		if (_pending.full()) {
+			reportFailure(pkt.msgType, routercore::Failure::NotSent);
+			return false;
+		}
 
 		pkt.packetId = _packetId++;
 		Transport via = transportFor(pkt.dest);
-		if (!transmit(pkt, via)) return false;
+		// PM-1: a failed first send (CDC buffer full, link busy) is queued anyway and retried like a lost packet
+		if (!transmit(pkt, via)) Debug::log(Debug::Level::WARNING, "router", "first send of type 0x%02x failed, retrying", static_cast<unsigned>(pkt.msgType));
 
 		return _pending.add(pkt, nowMs());
 	}
 
-	// An ACK/NAK from the destination node closes the corresponding unacknowledged packet
+	// An ACK/NAK from the destination node closes the corresponding unacknowledged packet; a NAK reason goes to the originator
 	static void resolvePending(const Packet &rx) {
-		_pending.resolve(rx);
+		routercore::RetryQueue::Closed closed{};
+		if (_pending.resolve(rx, &closed) && closed.nak) reportFailure(closed.type, routercore::Failure::Nak, closed.reason);
 	}
 
 	static void retryPending() {
@@ -225,9 +237,9 @@ namespace router {
 			// Same PacketId — the receiver acknowledges the duplicate but does not execute it twice
 			[](const Packet &p) { transmit(p, transportFor(p.dest)); },
 			[](const Packet &p) {
-				// We give up; the GUI has its own timeouts
 				Debug::log(Debug::Level::WARNING, "router", "retries exhausted: type 0x%02x to 0x%02x pid %u", static_cast<unsigned>(p.msgType), p.dest,
 						   p.packetId);
+				reportFailure(p.msgType, routercore::Failure::NoAnswer); // PM-1: giving up is visible
 			});
 	}
 
