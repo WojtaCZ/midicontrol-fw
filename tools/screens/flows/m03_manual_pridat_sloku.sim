@@ -1,0 +1,11 @@
+# Manual postup-pridat-sloku: "the base can only stop while playing" (no add-verse button on the base)
+tick 3000
+event playing 406
+event anchor Sloka 2
+expect screen nowplaying
+key down
+key up
+expect var stops=0
+key enter
+expect var stops=1
+expect text Zastavuji

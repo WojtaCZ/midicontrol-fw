@@ -1,0 +1,35 @@
+# Manual postup-prvni-instalace (base side), steps 1, 4, 5, 6. Keep in step with midicontrolpy-sw/docs/manual/docs/postupy.md
+# 1: no remote stored, no PC yet: splash, after 3 s the menu titled "Sparuj ovladac" under the "Odpojeno" overlay
+state remote=-
+state pc=0
+expect screen splash
+tick 3000
+tick 30
+expect screen nopc
+expect text Odpojeno
+state pc=1
+tick 30
+expect screen main
+expect text Sparuj ovladac
+# 4: Nastaveni -> Sparovat ovladac -> push: Parovani, Hledam ovladac...
+key down
+key down
+key enter
+expect screen settings
+key down
+key down
+key down
+key down
+key down
+key down
+expect scrolled Sparovat ovladac
+key enter
+expect screen pairing
+expect text Parovani
+expect text Hledam ovladac...
+# 5: result
+event pairing Sparovano
+expect text Sparovano
+# 6: push closes the screen
+key enter
+expect screen settings

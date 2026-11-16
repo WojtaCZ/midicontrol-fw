@@ -1,0 +1,13 @@
+# Manual postup-aktualizace-firmwaru, step 5 (base during a remote update) and step 7 failure text
+tick 3000
+key enter
+event fw transfer 10
+expect screen fwupdate
+expect text Aktualizace
+expect text Prenos do ovladace
+event fw install 100
+expect text Instalace ovladace
+event fw error 100
+expect text Chyba aktualizace
+event fw_end
+expect screen main

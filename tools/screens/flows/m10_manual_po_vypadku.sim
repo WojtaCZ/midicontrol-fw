@@ -1,0 +1,13 @@
+# Manual postup-po-vypadku-proudu, step 2 (base): starts by itself, menu after 3 s, Odpojeno until the PC runs;
+# the stored remote stays (title Hlavni menu, not Sparuj ovladac)
+state remote=D88039F1A2B4
+state pc=0
+expect screen splash
+tick 3000
+tick 30
+expect screen nopc
+expect text Odpojeno
+state pc=1
+tick 30
+expect screen main
+expect text Hlavni menu

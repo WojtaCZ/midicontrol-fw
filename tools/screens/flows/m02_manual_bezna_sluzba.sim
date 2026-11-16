@@ -1,0 +1,12 @@
+# Manual postup-bezna-sluzba (base side): a song started from the remote shows Prehravam + section; stop -> Zastaveno
+tick 3030
+expect screen main
+event playing 406B
+expect screen nowplaying
+expect text Prehravam
+event anchor Sloka 1
+expect text Sloka: 1
+event stopped
+expect text Zastaveno
+tick 1600
+expect screen main
