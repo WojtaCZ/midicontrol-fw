@@ -3,6 +3,8 @@
 #define BASE_H
 
 #include <string>
+#include <cstdint>
+#include "../src/logic/organ_source.hpp"
 #include <stm32g431xx.h>
 #include <stmcpp/error.hpp>
 
@@ -24,6 +26,9 @@ namespace base{
         void disable();
         void toggle(void);
         void set(bool value);
+        // Who switched the power on (A5, INFO ORGAN_SRC): call BEFORE enable()/set(true); disable() forgets it
+        void setSource(organsrc::Source src);
+        uint8_t sourceCode(); // 0 off, 1 PC, 2 menu, 3 unknown
     };
 
     namespace Encoder{

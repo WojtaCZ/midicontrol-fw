@@ -346,6 +346,7 @@ namespace router {
 		w.u8(Tag::BLE_PAIRING, static_cast<uint8_t>(Bluetooth::pairingState()));
 		w.u8(Tag::DISPLAY, display::isConnected() ? 1 : 0);
 		w.u8(Tag::SSR, base::current::isEnabled() ? 1 : 0);
+		w.u8(Tag::ORGAN_SRC, base::current::sourceCode());
 		{
 			// Link quality last: the payload limit drops these before anything older (the remote's payload is nearly full)
 			const linkstats::InfoFields lf = Bluetooth::linkStats().infoFields(stmcpp::systick::getTicks(), Bluetooth::isConnected());
@@ -373,6 +374,7 @@ namespace router {
 					sendNak(pkt, NakReason::INVALID_PAYLOAD, via);
 					break;
 				}
+				if (pkt.payload[0] != 0) base::current::setSource(organsrc::fromSender(pkt.source)); // A5: INFO ORGAN_SRC
 				base::current::set(pkt.payload[0] != 0);
 				GUI::syncPowerCheckbox(); // Menu checkbox according to the actual SSR state
 				if (ack) sendAck(pkt, via);

@@ -467,6 +467,7 @@ static void powerCallback(ui::MenuItem* item, void* userData) {
     if (base::current::isEnabled()) {
         base::current::disable();
     } else {
+        base::current::setSource(organsrc::Source::MENU);
         base::current::enable();
     }
     if (item) item->setChecked(base::current::isEnabled());

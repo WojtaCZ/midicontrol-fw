@@ -131,6 +131,16 @@ namespace base{
 
 namespace base::current{
 
+	static organsrc::Tracker _source; // A5: who switched the power on
+
+	void setSource(organsrc::Source src){
+		_source.setSource(src);
+	}
+
+	uint8_t sourceCode(){
+		return _source.code(isEnabled());
+	}
+
 	// Get actual state of the current source
 	bool isEnabled(){
 		return current_enable.getIntendedState();
@@ -144,16 +154,19 @@ namespace base::current{
 
 	// Disable the current source
 	void disable(){
+		_source.clear();
 		current_enable.clear();
 		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
 
 	void toggle(void){
+		if (isEnabled()) _source.clear(); else _source.setSource(organsrc::Source::MENU);
 		current_enable.toggle();
 		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
 
 	void set(bool value){
+		if (!value) _source.clear();
 		current_enable.write(value);
 		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
