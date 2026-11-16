@@ -5,6 +5,7 @@ The CDC carries only protocol frames; everything outside a frame ends up in `.st
 import glob
 import os
 import queue
+import random
 import subprocess
 import threading
 import time
@@ -107,6 +108,7 @@ class Link:
         self.q = queue.Queue()
         self._backlog = []  # packets read from the queue that did not match the predicate
         self._pid = 0
+        self.nonce = random.randint(1, 0xFFFF)  # protocol v2 session nonce (0 = none); constant for this process
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self.paused = False  # True: do not send keepalive and do not answer the base's keepalive (the PC "goes silent")
@@ -120,6 +122,8 @@ class Link:
         self._ka = None
         self._ka_period = keepalive_period
         if keepalive:
+            # Hello before any request: the base forgets the previous process's duplicate window on a new nonce
+            self._send_keepalive(bg=True)
             self._ka = threading.Thread(target=self._guard, args=(self._ka_loop, keepalive_period), daemon=True)
             self._ka.start()
 
@@ -167,8 +171,11 @@ class Link:
         while not self._stop.wait(period):
             if self.paused:
                 continue
-            self.keepalives_sent += 1
-            self._send(proto.Packet(proto.ADDR_PC, proto.ADDR_BASE, 0, proto.MT.KEEPALIVE), bg=True)
+            self._send_keepalive(bg=True)
+
+    def _send_keepalive(self, bg):
+        self.keepalives_sent += 1
+        self._send(proto.Packet(proto.ADDR_PC, proto.ADDR_BASE, 0, proto.MT.KEEPALIVE, self.nonce.to_bytes(2, "little")), bg=bg)
 
     # -- API
     def next_pid(self) -> int:

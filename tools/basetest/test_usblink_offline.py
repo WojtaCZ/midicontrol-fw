@@ -115,3 +115,35 @@ def test_background_keepalive_runs_and_pauses():
     time.sleep(0.2)
     assert L.keepalives_sent == n
     L.close()
+
+
+def test_hello_keepalive_carries_a_nonce_and_it_stays_the_same():
+    # Protocol v2 (A1): a new process announces itself with a KEEPALIVE [nonce u16 LE] before any request, so the base
+    # forgets the previous process's duplicate window (its pids start over). Without keepalive the link stays silent.
+    ser = FakeSerial()
+    link = Link(ser=ser, keepalive=True, keepalive_period=0.05)
+    try:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and len(proto.FrameParser().feed(bytes(ser.tx))) < 3:
+            time.sleep(0.02)
+    finally:
+        link.close()
+    pkts = proto.FrameParser().feed(bytes(ser.tx))
+    kas = [p for p in pkts if p.mtype == MT.KEEPALIVE]
+    assert len(kas) >= 3
+    assert pkts[0].mtype == MT.KEEPALIVE  # the hello comes first
+    assert all(len(p.payload) == 2 for p in kas)
+    nonce = int.from_bytes(kas[0].payload, "little")
+    assert nonce != 0
+    assert all(int.from_bytes(p.payload, "little") == nonce for p in kas)
+    assert link.nonce == nonce
+
+
+def test_no_hello_without_keepalive():
+    ser = FakeSerial()
+    link = Link(ser=ser, keepalive=False)
+    try:
+        time.sleep(0.1)
+    finally:
+        link.close()
+    assert bytes(ser.tx) == b""
