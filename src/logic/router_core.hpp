@@ -35,24 +35,45 @@ namespace routercore {
 		bool	 _alive	   = false;
 	};
 
-	// Duplicate detection: the last PacketId processed locally from each node (index = address)
+	// Duplicate detection: the last WINDOW PacketIds processed locally from each node (index = address).
+	// A window (not only the last id) also catches a stale retry of an older, already executed command (PM-13);
+	// 8 is far below the 256-id wrap.
 	class RxDedup {
 	public:
-		static constexpr uint8_t NODES = 4;
+		static constexpr uint8_t NODES	= 4;
+		static constexpr uint8_t WINDOW = 8;
 
-		// true: a retransmission of the last packet from this source (ACK again, do not execute).
-		// false: a new packet, now remembered.
+		// true: a retransmission of a recently processed packet from this source (ACK again, do not execute).
+		// false: a new packet, now remembered (the oldest one leaves the window).
 		bool isRepeat(uint8_t source, uint8_t packetId);
-		// Start afresh for one node (Q1-8 b: the PC was declared lost, its next process restarts the PacketIds)
+		// Start afresh for one node (a new PC session, or Q1-8 b: the PC was declared lost)
 		void forget(uint8_t source);
 
 	private:
-		struct LastRx {
-			uint8_t packetId;
-			bool	valid;
+		struct Ring {
+			uint8_t ids[WINDOW];
+			uint8_t count; // valid entries, up to WINDOW
+			uint8_t next;  // slot the next id is written to
 		};
-		LastRx _last[NODES] = {};
+		Ring _ring[NODES] = {};
 	};
+
+	// PC session nonce (KEEPALIVE payload [nonce u16 LE], protocol v2): changes when the PC process restarts.
+	// 0 means "no nonce" (v1 PC) and never counts.
+	class PcSession {
+	public:
+		// true when the nonce is non-zero and differs from the stored one (the first non-zero nonce counts)
+		bool observe(uint16_t nonce);
+		void forget() { _nonce = 0; } // the PC was declared lost: the next hello is a new session whatever its nonce
+		uint16_t nonce() const { return _nonce; } // 0 = none seen
+
+	private:
+		uint16_t _nonce = 0;
+	};
+
+	// KEEPALIVE from the PC: a new session nonce makes the duplicate window of the PC forget.
+	// Returns true when it did. payload may be empty (v1 PC).
+	bool onPcKeepalive(PcSession &session, RxDedup &dedup, const uint8_t *payload, uint8_t len);
 
 	// Reliable packets the base sent itself, waiting for an ACK/NAK
 	class RetryQueue {

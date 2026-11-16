@@ -1,6 +1,6 @@
 // Router logic (src/logic/router_core.*) as src/router.cpp drives it: time is the router clock,
 // nowMs() = msFromTicks(getTicks(), TICK_US) (TICK_US = 1000, SysTick 1 ms), uint32 ms that wraps every 49.7 days.
-// Ported from the step-2 verifier red tests (BF-1, PM-13, PM-6) onto the real code. DISABLED_ = known red, enabled by its fix.
+// Ported from the step-2 verifier red tests (BF-1, PM-13, PM-6) onto the real code.
 #include <gtest/gtest.h>
 
 #include <cstring>
@@ -32,9 +32,15 @@ namespace {
 
 	// router.cpp handleLocal(): dedup, then SET_CURRENT drives the SSR
 	struct Base {
-		routercore::RxDedup dedup;
-		bool				ssrOn = false;
+		routercore::RxDedup	   dedup;
+		routercore::PcSession  session;
+		bool				   ssrOn = false;
 		int					acks  = 0;
+		// router.cpp handleLocal() KEEPALIVE from the PC: the shared helper, payload [nonce lo, hi] (empty = v1 PC)
+		void keepalive(uint16_t nonce) {
+			const uint8_t pl[2] = {static_cast<uint8_t>(nonce), static_cast<uint8_t>(nonce >> 8)};
+			routercore::onPcKeepalive(session, dedup, pl, 2);
+		}
 		void				handle(const Packet &pkt) {
 			   if (dedup.isRepeat(pkt.source, pkt.packetId)) {
 				   acks++;
@@ -136,8 +142,8 @@ TEST(BF1, DeadlineAcrossClockWrap) {
 }
 
 // PM-13 (base side): organOn pid 5, ACK lost; organOff pid 6; the PC retries pid 5.
-// RESIDUAL, stays red on the base (no monotonic pid check by decision): covered on the PC side.
-TEST(PM13, DISABLED_StaleRetryOfOnAfterOffMustNotPowerTheOrgan) {
+// Fixed by the duplicate window (last 8 PacketIds per source), not by a monotonic pid check.
+TEST(PM13, StaleRetryOfOnAfterOffMustNotPowerTheOrgan) {
 	Base b;
 	b.handle(setCurrent(5, true));
 	b.handle(setCurrent(6, false));
@@ -146,14 +152,84 @@ TEST(PM13, DISABLED_StaleRetryOfOnAfterOffMustNotPowerTheOrgan) {
 	EXPECT_FALSE(b.ssrOn) << "stale SET_CURRENT(on) retry executed after SET_CURRENT(off): SSR on with nobody playing";
 }
 
-// Learning 2026-11-07: a new PC process restarts its PacketId counter.
-// RESIDUAL when the base never declared the PC lost in between (restart faster than KEEPALIVE_LOSS):
-// covered on the PC side. With a loss in between see NewPcSessionAfterPcLossIsExecuted.
-TEST(PM13, DISABLED_NewPcSessionCommandIsNotSwallowedAsDuplicate) {
+// Learning 2026-11-07: a new PC process restarts its PacketId counter. Its hello KEEPALIVE carries a new session
+// nonce, which makes the base forget the old process's PacketIds (also when the base never declared the PC lost).
+TEST(PM13, NewPcSessionCommandIsNotSwallowedAsDuplicate) {
 	Base b;
+	b.keepalive(0x1111);
 	b.handle(setCurrent(1, true)); // old process, last frame
+	b.keepalive(0x2222); // new process: hello
 	b.handle(setCurrent(1, false)); // new process, first reliable frame, pid 1 again
 	EXPECT_FALSE(b.ssrOn) << "SET_CURRENT(off) of a new PC session ACKed but not executed";
+}
+
+TEST(PM13, NonceChangeForgetsPcDedup) {
+	routercore::RxDedup	  d;
+	routercore::PcSession s;
+	const uint8_t		  n1[2] = {0x34, 0x12};
+	const uint8_t		  n2[2] = {0x35, 0x12};
+	routercore::onPcKeepalive(s, d, n1, 2);
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, 3));
+	EXPECT_TRUE(d.isRepeat(protocol::ADDR_PC, 3));
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_REMOTE, 3));
+	routercore::onPcKeepalive(s, d, n2, 2);
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, 3)) << "new session: pid 3 is new again";
+	EXPECT_TRUE(d.isRepeat(protocol::ADDR_REMOTE, 3)) << "only the PC's window is forgotten";
+}
+
+TEST(PM13, SameNonceKeepsDedup) {
+	Base b;
+	b.keepalive(0xBEEF);
+	b.handle(setCurrent(20, true));
+	b.ssrOn = false;
+	b.keepalive(0xBEEF); // the periodic keepalive of the same process
+	b.handle(setCurrent(20, true));
+	EXPECT_FALSE(b.ssrOn) << "retry executed after a keepalive with the same nonce";
+}
+
+TEST(PM13, ZeroNonceNeverResets) {
+	Base b;
+	b.handle(setCurrent(7, true));
+	b.ssrOn = false;
+	b.keepalive(0); // v1 PC: nonce 0
+	routercore::PcSession s;
+	EXPECT_FALSE(s.observe(0));
+	routercore::RxDedup d;
+	routercore::onPcKeepalive(s, d, nullptr, 0); // empty payload (old PC)
+	b.handle(setCurrent(7, true));
+	EXPECT_FALSE(b.ssrOn) << "nonce 0 reset the duplicate window";
+	b.keepalive(0x1234);
+	b.keepalive(0); // a zero after a real nonce does not count as a change either
+	b.handle(setCurrent(8, true));
+	b.ssrOn = false;
+	b.handle(setCurrent(8, true));
+	EXPECT_FALSE(b.ssrOn);
+}
+
+TEST(PM13, NonceForgottenOnPcLossSoSameNonceRestartWorks) {
+	routercore::PcSession s;
+	EXPECT_TRUE(s.observe(0x4242));
+	EXPECT_FALSE(s.observe(0x4242));
+	s.forget(); // PC declared lost (router.cpp logChanges())
+	EXPECT_TRUE(s.observe(0x4242)) << "restarted PC with the same nonce after a loss is a new session";
+}
+
+TEST(PM13, WindowSuppressesOlderRetry) {
+	routercore::RxDedup d;
+	for (uint8_t id = 1; id <= 8; ++id) EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, id));
+	for (uint8_t id = 1; id <= 8; ++id) EXPECT_TRUE(d.isRepeat(protocol::ADDR_PC, id)) << int(id);
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, 9)); // pushes 1 out of the window
+	EXPECT_TRUE(d.isRepeat(protocol::ADDR_PC, 2));
+	EXPECT_TRUE(d.isRepeat(protocol::ADDR_PC, 9));
+}
+
+TEST(PM13, WindowDoesNotHideNewIdAfterWrap) {
+	routercore::RxDedup d;
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, 1));
+	for (uint8_t id = 2; id <= 9; ++id) EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, id));
+	// ids 1 is now older than 8 newer ids: the PacketId counter wrapped, 1 is a new command
+	EXPECT_FALSE(d.isRepeat(protocol::ADDR_PC, 1));
+	EXPECT_TRUE(d.isRepeat(protocol::ADDR_PC, 1));
 }
 
 // Q1-8 b: a PC restart that the base noticed (PC declared lost in between, router.cpp logChanges()) starts

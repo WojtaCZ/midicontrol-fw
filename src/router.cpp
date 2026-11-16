@@ -91,6 +91,7 @@ namespace router {
 
 	// Deduplication: the last PacketId processed locally from each node
 	static routercore::RxDedup _dedup;
+	static routercore::PcSession _pcSession; // KEEPALIVE nonce of the PC process (protocol v2)
 	static routercore::SsrBackstop _backstop; // Q1-1 c: SSR on, 2 h without a PC packet -> off
 
 	// Restart into the bootloader (ENTER_BOOTLOADER)
@@ -255,18 +256,23 @@ namespace router {
 			});
 	}
 
-	// The payload tells the remote whether the PC is alive; a change is sent at once (the remote's "Cekam na PC" splash)
+	// The payload tells the remote whether the PC is alive; a change (also of the PC's session nonce) is sent at once (the remote's "Cekam na PC" splash)
 	static void sendKeepaliveToRemote() {
 		static bool lastPc = false;
+		static uint16_t lastNonce = 0;
 		duration now = stmcpp::systick::getDuration();
 		uint8_t pc = static_cast<uint8_t>(isPcAlive());
-		if ((now - _lastKeepalive) < KEEPALIVE_PERIOD && (pc != 0) == lastPc) return;
+		const uint16_t nonce = _pcSession.nonce();
+		if ((now - _lastKeepalive) < KEEPALIVE_PERIOD && (pc != 0) == lastPc && nonce == lastNonce) return;
 		_lastKeepalive = now;
 		if (!Bluetooth::canSendData()) return;
 		lastPc = pc != 0;
-		// [pcAlive, rssi]: the base's own RSSI of this link (i8 dBm, 0x80 unknown) for the remote's link diagnostics; older remotes read byte 0 only
-		const uint8_t payload[2] = {pc, static_cast<uint8_t>(Bluetooth::linkStats().rssiNow(stmcpp::systick::getTicks()))};
-		sendSimple(protocol::ADDR_REMOTE, MsgType::KEEPALIVE, payload, 2, Transport::BLE);
+		lastNonce = nonce;
+		// [pcAlive, rssi, nonce lo, hi]: the base's own RSSI of this link (i8 dBm, 0x80 unknown) for the remote's link diagnostics,
+		// the PC's session nonce (0 = none) so a restarted PC's PacketIds are not taken for duplicates; older remotes read byte 0 only
+		const uint8_t payload[4] = {pc, static_cast<uint8_t>(Bluetooth::linkStats().rssiNow(stmcpp::systick::getTicks())),
+									static_cast<uint8_t>(nonce), static_cast<uint8_t>(nonce >> 8)};
+		sendSimple(protocol::ADDR_REMOTE, MsgType::KEEPALIVE, payload, 4, Transport::BLE);
 	}
 
 	static void requestBootloader() {
@@ -318,6 +324,7 @@ namespace router {
 		w.str(Tag::BRANCH, git::branch, 24);
 		w.str(Tag::BUILT, built);
 		w.u8(Tag::DIRTY, git::dirty ? 1 : 0);
+		w.u8(Tag::PROTO_VER, protocol::PROTOCOL_VERSION);
 		w.u32(Tag::UPTIME_MS, stmcpp::systick::getTicks());
 		w.u8(Tag::RESET_CAUSE, static_cast<uint8_t>((resetcause::last() >> 24) & 0xFEU));
 		const fault::Record *f = fault::saved();
@@ -420,6 +427,11 @@ namespace router {
 				break;
 
 			case MsgType::KEEPALIVE:
+				// PC hello: [nonce u16 LE] (empty from a v1 PC); a new nonce = a new PC process, forget its PacketIds.
+				// KEEPALIVE is not ACKed, so it never passes the duplicate filter above.
+				if (pkt.source == protocol::ADDR_PC && routercore::onPcKeepalive(_pcSession, _dedup, pkt.payload, pkt.payloadLen)) {
+					Debug::log(Debug::Level::INFO, "router", "new PC session (nonce 0x%04x)", _pcSession.nonce());
+				}
 				sendSimple(pkt.source, MsgType::KEEPALIVE_ACK, nullptr, 0, via);
 				break;
 
@@ -526,6 +538,7 @@ namespace router {
 			GUI::dismissNowPlaying();
 			// Q1-8 b: a restarted PC process numbers its packets from 1 again; do not ACK-and-drop its first ones
 			_dedup.forget(protocol::ADDR_PC);
+			_pcSession.forget();
 			Debug::log(Debug::Level::WARNING, "router", "PC lost: all notes off, organ power off");
 		}
 		// Q1-1 c: backstop for a manual on without a PC (D19 keeps it on otherwise): All Notes Off, SSR off

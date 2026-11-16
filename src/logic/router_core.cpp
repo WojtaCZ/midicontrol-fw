@@ -23,15 +23,31 @@ namespace routercore {
 
 	bool RxDedup::isRepeat(uint8_t source, uint8_t packetId) {
 		if (source >= NODES) return false;
-		LastRx &last = _last[source];
-		if (last.valid && last.packetId == packetId) return true;
-		last.packetId = packetId;
-		last.valid	  = true;
+		Ring &r = _ring[source];
+		for (uint8_t i = 0; i < r.count; ++i) {
+			if (r.ids[i] == packetId) return true;
+		}
+		r.ids[r.next] = packetId;
+		r.next		  = static_cast<uint8_t>((r.next + 1) % WINDOW);
+		if (r.count < WINDOW) ++r.count;
 		return false;
 	}
 
 	void RxDedup::forget(uint8_t source) {
-		if (source < NODES) _last[source].valid = false;
+		if (source < NODES) _ring[source] = {};
+	}
+
+	bool PcSession::observe(uint16_t nonce) {
+		if (nonce == 0 || nonce == _nonce) return false;
+		_nonce = nonce;
+		return true;
+	}
+
+	bool onPcKeepalive(PcSession &session, RxDedup &dedup, const uint8_t *payload, uint8_t len) {
+		if (len < 2 || !payload) return false;
+		if (!session.observe(static_cast<uint16_t>(payload[0] | (payload[1] << 8)))) return false;
+		dedup.forget(protocol::ADDR_PC);
+		return true;
 	}
 
 	bool RetryQueue::full() const {
