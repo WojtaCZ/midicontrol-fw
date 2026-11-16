@@ -49,6 +49,8 @@ namespace display {
     volatile uint32_t rxAccepted = 0;
     volatile uint32_t rxRejected = 0;
     static indicator::QuietBus quietBus;
+    // A3: who wrote the number on the shared bus last (own writes vs frames received from other masters)
+    static indicator::WriterTracker writerTracker;
 
     static constexpr uint8_t BLANK = 0xE0; // Blank digit (0xE in the upper nibble)
 
@@ -210,7 +212,11 @@ namespace display {
 
     void applyNowPlaying(const uint8_t *payload, uint8_t len){
         if (len == 0) {
-            clear();
+            clear(); // unconditional: the base's own paths and v1 PCs
+            return;
+        }
+        if (len == 1 && payload[0] == protocol::NPI_CLEAR_IF_OWN) {
+            clearIfOwn();
             return;
         }
         if (len < 5) return; // Invalid length — NOW_PLAYING_INFO is not acknowledged, just ignored
@@ -252,13 +258,25 @@ namespace display {
         }
 
         // One frame for the whole message
+        writerTracker.onOwnWrite();
         sendState();
     }
 
     void clear(){
         for (uint8_t i = 1; i <= 7; ++i) currentState[i] = BLANK;
         currentState[8] = OFF;
+        writerTracker.onCleared();
         sendState();
+    }
+
+    // A3: clear only if the number on the bus is still ours; a foreign master's number stays untouched
+    void clearIfOwn(){
+        bool foreign = writerTracker.writer() == indicator::WriterTracker::Writer::Foreign;
+        if (writerTracker.tryClear()) {
+            clear();
+        } else if (foreign) {
+            Debug::log(Debug::Level::INFO, "disp", "indicator: foreign number kept");
+        }
     }
 
     void setSong(uint16_t song, bool visible){
@@ -272,6 +290,7 @@ namespace display {
             for (uint8_t i = 3; i <= 6; ++i) currentState[i] = BLANK;
         }
 
+        writerTracker.onOwnWrite();
         sendState();
     }
 
@@ -285,6 +304,7 @@ namespace display {
             currentState[2] = BLANK;
         }
 
+        writerTracker.onOwnWrite();
         sendState();
     }
 
@@ -296,11 +316,13 @@ namespace display {
             currentState[7] = BLANK;
         }
 
+        writerTracker.onOwnWrite();
         sendState();
     }
 
     void setLed(ledColor led){
         currentState[8] = led;
+        writerTracker.onOwnWrite();
         sendState();
     }
 
@@ -410,6 +432,10 @@ namespace display {
     // (the bench has no second bus master).
     __attribute__((noinline, used)) void onRxFrame(){
         if (indicator::frameAccepted(display::rxBuffer, sizeof(display::rxBuffer))) {
+            // The receiver is off while we transmit, so this is another master's frame. One that equals what we want
+            // on the bus anyway is not a new writer (compare before the state is overwritten).
+            bool same = memcmp(display::currentState, display::rxBuffer, sizeof(display::rxBuffer)) == 0;
+            display::writerTracker.onRxFrame(display::rxBuffer, same);
             memcpy(display::currentState, display::rxBuffer, sizeof(display::rxBuffer));
             display::rxAccepted = display::rxAccepted + 1;
             // The SysEx echo is sent by the main loop (TinyUSB is not ISR-safe)

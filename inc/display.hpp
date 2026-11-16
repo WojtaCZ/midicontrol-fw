@@ -24,9 +24,12 @@ namespace display{
     void sendState();
 
     // NOW_PLAYING_INFO payload (see lib/protocol/PROTOCOL.md): BCD per digit, 0xF = blank digit,
-    // 0xFF = unchanged, 0xFE = blank the field, empty payload = clear everything. Always a single frame.
+    // 0xFF = unchanged, 0xFE = blank the field, empty payload = clear everything unconditionally, [0x01] = clear only if the base's number is still on the bus. Always a single frame.
     void applyNowPlaying(const uint8_t *payload, uint8_t len);
     void clear();
+    // Clears only if the number on the bus is still the one the base wrote (A3). A number another master put on the
+    // bus after ours stays. NOW_PLAYING_INFO [NPI_CLEAR_IF_OWN] and the PC-loss path use this.
+    void clearIfOwn();
 
     void setSong(uint16_t song, bool visible);
     void setVerse(uint8_t verse, bool visible);

@@ -544,6 +544,8 @@ namespace router {
 			GUI::syncPowerCheckbox();
 			// SM-1: nothing plays any more; "Zastaveno", then the "Cekam na PC" overlay over the main menu
 			GUI::dismissNowPlaying();
+			// A3 / owner 2026-11-16: the number we left on the indicator goes, a foreign master's number stays
+			display::clearIfOwn();
 			// Q1-8 b: a restarted PC process numbers its packets from 1 again; do not ACK-and-drop its first ones
 			_dedup.forget(protocol::ADDR_PC);
 			_pcSession.forget();
