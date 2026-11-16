@@ -91,6 +91,7 @@ namespace router {
 
 	// Deduplication: the last PacketId processed locally from each node
 	static routercore::RxDedup _dedup;
+	static routercore::NonceRelay _nonceRelay; // the nonce the remote was last told
 	static routercore::PcSession _pcSession; // KEEPALIVE nonce of the PC process (protocol v2)
 	static routercore::SsrBackstop _backstop; // Q1-1 c: SSR on, 2 h without a PC packet -> off
 
@@ -257,17 +258,18 @@ namespace router {
 	}
 
 	// The payload tells the remote whether the PC is alive; a change (also of the PC's session nonce) is sent at once (the remote's "Cekam na PC" splash)
-	static void sendKeepaliveToRemote() {
+	// force: a PC session nonce change, sent at once (before the frames of the new session are forwarded)
+	static void sendKeepaliveToRemote(bool force = false) {
 		static bool lastPc = false;
-		static uint16_t lastNonce = 0;
 		duration now = stmcpp::systick::getDuration();
 		uint8_t pc = static_cast<uint8_t>(isPcAlive());
 		const uint16_t nonce = _pcSession.nonce();
-		if ((now - _lastKeepalive) < KEEPALIVE_PERIOD && (pc != 0) == lastPc && nonce == lastNonce) return;
+		const bool nonceDue = _nonceRelay.pending(nonce);
+		if (!force && (now - _lastKeepalive) < KEEPALIVE_PERIOD && (pc != 0) == lastPc && !nonceDue) return;
 		_lastKeepalive = now;
-		if (!Bluetooth::canSendData()) return;
+		if (!Bluetooth::canSendData()) return; // a pending nonce stays pending: retried from forward() and every loop pass
 		lastPc = pc != 0;
-		lastNonce = nonce;
+		_nonceRelay.sent(nonce);
 		// [pcAlive, rssi, nonce lo, hi]: the base's own RSSI of this link (i8 dBm, 0x80 unknown) for the remote's link diagnostics,
 		// the PC's session nonce (0 = none) so a restarted PC's PacketIds are not taken for duplicates; older remotes read byte 0 only
 		const uint8_t payload[4] = {pc, static_cast<uint8_t>(Bluetooth::linkStats().rssiNow(stmcpp::systick::getTicks())),
@@ -431,6 +433,7 @@ namespace router {
 				// KEEPALIVE is not ACKed, so it never passes the duplicate filter above.
 				if (pkt.source == protocol::ADDR_PC && routercore::onPcKeepalive(_pcSession, _dedup, pkt.payload, pkt.payloadLen)) {
 					Debug::log(Debug::Level::INFO, "router", "new PC session (nonce 0x%04x)", _pcSession.nonce());
+					sendKeepaliveToRemote(true); // before any later frame of this pass is forwarded
 				}
 				sendSimple(pkt.source, MsgType::KEEPALIVE_ACK, nullptr, 0, via);
 				break;
@@ -469,6 +472,8 @@ namespace router {
 	static void forward(const Packet &pkt, Transport from) {
 		Transport to = (from == Transport::USB_CDC) ? Transport::BLE : Transport::USB_CDC;
 
+		// a nonce the remote has not heard yet goes first (the link may have become usable since the hello)
+		if (to == Transport::BLE && _nonceRelay.pending(_pcSession.nonce())) sendKeepaliveToRemote(true);
 		bool reachable = (to == Transport::BLE) ? Bluetooth::canSendData() : pcReachable();
 		if (reachable && transmit(pkt, to)) {
 			if (to == Transport::BLE) LED::notifyActivity(LED::PIXEL_BLUETOOTH);

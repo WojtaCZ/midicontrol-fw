@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "protocol/constants.hpp"
@@ -212,6 +213,57 @@ TEST(PM13, NonceForgottenOnPcLossSoSameNonceRestartWorks) {
 	EXPECT_FALSE(s.observe(0x4242));
 	s.forget(); // PC declared lost (router.cpp logChanges())
 	EXPECT_TRUE(s.observe(0x4242)) << "restarted PC with the same nonce after a loss is a new session";
+}
+
+// router.cpp order: a PC hello with a new nonce is relayed to the remote at once, before a later reliable frame of the
+// same loop pass; when the BLE link cannot send yet, the nonce stays pending and still goes out first.
+namespace {
+	struct RelaySim {
+		routercore::NonceRelay relay;
+		routercore::PcSession  session;
+		routercore::RxDedup	   dedup;
+		bool				   bleUp = true;
+		std::vector<std::string> remoteTx; // what the remote hears, in order
+		void sendKeepalive() {
+			if (!bleUp) return;
+			relay.sent(session.nonce());
+			remoteTx.push_back("KA" + std::to_string(session.nonce()));
+		}
+		void pcHello(uint16_t nonce) {
+			const uint8_t pl[2] = {static_cast<uint8_t>(nonce), static_cast<uint8_t>(nonce >> 8)};
+			if (routercore::onPcKeepalive(session, dedup, pl, 2)) sendKeepalive();
+		}
+		void forwardToRemote(const char *what) {
+			if (relay.pending(session.nonce())) sendKeepalive();
+			if (bleUp) remoteTx.push_back(what);
+		}
+	};
+} // namespace
+
+TEST(PM13, NonceKeepaliveReachesRemoteBeforeLaterFrameOfSamePass) {
+	RelaySim r;
+	r.pcHello(0x1111);
+	r.remoteTx.clear();
+	r.pcHello(0x2222);
+	r.forwardToRemote("CMD");
+	ASSERT_EQ(r.remoteTx.size(), 2u);
+	EXPECT_EQ(r.remoteTx[0], "KA" + std::to_string(0x2222));
+	EXPECT_EQ(r.remoteTx[1], "CMD");
+}
+
+TEST(PM13, NonceKeepaliveStaysPendingWhileLinkDownThenGoesFirst) {
+	RelaySim r;
+	r.bleUp = false;
+	r.pcHello(0x3333);
+	r.forwardToRemote("CMD");
+	EXPECT_TRUE(r.remoteTx.empty());
+	EXPECT_TRUE(r.relay.pending(0x3333));
+	r.bleUp = true;
+	r.forwardToRemote("CMD2");
+	ASSERT_EQ(r.remoteTx.size(), 2u);
+	EXPECT_EQ(r.remoteTx[0], "KA" + std::to_string(0x3333));
+	EXPECT_EQ(r.remoteTx[1], "CMD2");
+	EXPECT_FALSE(r.relay.pending(0x3333));
 }
 
 TEST(PM13, WindowSuppressesOlderRetry) {

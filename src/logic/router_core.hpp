@@ -71,6 +71,17 @@ namespace routercore {
 		uint16_t _nonce = 0;
 	};
 
+	// Which PC session nonce the remote has been told. The base->remote KEEPALIVE carries it; a change must reach
+	// the remote before any later frame of the new session (the remote would swallow it as a duplicate).
+	class NonceRelay {
+	public:
+		bool pending(uint16_t current) const { return current != _sent; }
+		void sent(uint16_t current) { _sent = current; }
+
+	private:
+		uint16_t _sent = 0;
+	};
+
 	// KEEPALIVE from the PC: a new session nonce makes the duplicate window of the PC forget.
 	// Returns true when it did. payload may be empty (v1 PC).
 	bool onPcKeepalive(PcSession &session, RxDedup &dedup, const uint8_t *payload, uint8_t len);
