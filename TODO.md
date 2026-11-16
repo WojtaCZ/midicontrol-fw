@@ -118,6 +118,7 @@ Rule for every entry: user-visible change = update docs/manual (and facts) + doc
 - Risk / open points: check hardware tests in tools/basetest do not call a removed feature.
 
 ### C7 Move "Ident. MIDI" to a service area (Q2-29c)
+- **Owner answer 2026-11-16 (follow-up):** the submenu name `Servis` is approved (resolves VERIFY (1) below).
 - Goal: the Ident. MIDI checkbox leaves the normal Nastaveni list and moves to a service area (hidden from the normal user).
 - Current code: src/menu.cpp `settingsItems` = LED, Ident. MIDI, Napajeni varhan, Verze FW, Displej, Bluetooth, Sparovat ovladac, Zpet (indices 0..7; `checkboxPower` is index 2; :570-571 set checked state; :499-505 callbacks). Accessors in inc/menu.hpp: `navigator()`, `checkboxPower()`, `checkboxLedMaster()`, `checkboxMidiRole()`. Settings field `midiRoleId` in src/settings.cpp / inc/settings.hpp.
 - Change: (1) VERIFY what "service area" means (owner: Q2-29c in audit/OWNER-ANSWERS.md; read the exact answer before coding). Proposed: a new submenu "Servis" reached from Nastaveni (last item before Zpet) holding Ident. MIDI. (2) Re-index all `settingsItems[n]` uses (:570-571 and any in main.cpp/sim) or look up by pointer. (3) Keep the setting persisted as today. (4) Update `checkboxMidiRole()` users in tools/screens/host stubs.
@@ -164,6 +165,15 @@ Rule for every entry: user-visible change = update docs/manual (and facts) + doc
 - Tests: test/host/test_indicator_bus.cpp and test_status_framer.cpp are the nearest; add cases for the frame bytes of short numbers; sim: flows with `event playing 12` and `expect text`.
 - Manual/facts: manual zakladna "Co ukazuje tabule" and tabule chapter; facts/base.md.
 - Risk / open points: "check current code" in the answer means the result may be: already correct. If so, add the tests only and close.
+
+### C12 Confirm before turning the organ off while playing or recording (Q2-29b, moved from remote D6)
+- Goal: owner 2026-11-16: `Napajeni varhan` OFF on the base asks for confirmation when a song plays or a recording runs; otherwise it switches at once.
+- Current code: the SSR checkbox is in Nastaveni (`src/menu.cpp`, `base::current`); `NowPlayingScreen` knows the playing state from `SIGNAL_*`; no recording state on the base yet (A7/C3). VERIFY the exact checkbox callback line before coding.
+- Change: in the checkbox callback, when switching OFF and (playing || recording) push `ui::ConfirmScreen` "Vypnout varhany?" (18 chars max, 7x10 font); `Ano` -> switch off (the PC sees it via STATUS, A5 "by menu"), `Ne` -> checkbox stays on. Switching ON never asks.
+- Depends on: A7/C3 for the recording state (playing half can go first).
+- Tests: base sim flow `m*_organ_off_confirm.sim` (playing -> uncheck -> expect confirm; Ne keeps SSR on; stopped -> uncheck switches at once); tools/screens/main.cpp scenario for the new screen.
+- Manual/facts: `zakladna.md` (Napajeni varhan), `facts/base.md`; SYSTEM.md if a SYS row covers it.
+- Risk / open points: none beyond the VERIFY above.
 
 ### E3 (base) Per-screen timing checks in sim flows (Q3-9)
 - Goal: sim flows assert the real per-screen timeouts, not only the screen ids.
