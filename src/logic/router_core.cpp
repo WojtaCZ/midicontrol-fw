@@ -43,6 +43,18 @@ namespace routercore {
 		return true;
 	}
 
+	uint8_t buildStatus(uint8_t *payload, bool bleUsable, bool ssrOn, bool displayConnected, bool pcAlive, const RemoteBoot &boot) {
+		const uint16_t id = boot.valid() ? boot.id() : 0;
+		payload[0]		  = static_cast<uint8_t>(bleUsable);
+		payload[1]		  = static_cast<uint8_t>(ssrOn);
+		payload[2]		  = static_cast<uint8_t>(displayConnected);
+		payload[3]		  = static_cast<uint8_t>(pcAlive);
+		payload[4]		  = boot.valid() ? STATUS_FLAG_REMOTE_BOOT_VALID : 0;
+		payload[5]		  = static_cast<uint8_t>(id);
+		payload[6]		  = static_cast<uint8_t>(id >> 8);
+		return 7;
+	}
+
 	bool onPcKeepalive(PcSession &session, RxDedup &dedup, const uint8_t *payload, uint8_t len) {
 		if (len < 2 || !payload) return false;
 		if (!session.observe(static_cast<uint16_t>(payload[0] | (payload[1] << 8)))) return false;

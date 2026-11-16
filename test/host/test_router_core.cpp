@@ -550,3 +550,84 @@ TEST(Backstop, PcPacketAcrossMsClockWrap) {
 	EXPECT_TRUE(pollEverySecond(b, start + 60 * 60000u, TWO_H - 1000, ssr).empty());
 	EXPECT_EQ(pollEverySecond(b, start + 60 * 60000u + TWO_H, 1000, ssr).size(), 1u);
 }
+
+// A2: remote boot id from KEEPALIVE_ACK, reported in STATUS_RESP (protocol v2, 7 B)
+TEST(RemoteBoot, AckWithThreeBytesStoresId) {
+	routercore::RemoteBoot b;
+	const uint8_t		   ack[3] = {0xD8, 0x34, 0x12}; // rssi, id lo, id hi
+	b.onKeepaliveAck(ack, 3);
+	EXPECT_TRUE(b.valid());
+	EXPECT_EQ(b.id(), 0x1234);
+}
+
+TEST(RemoteBoot, AckWithOneByteKeepsInvalid) {
+	routercore::RemoteBoot b;
+	const uint8_t		   ack[1] = {0xD8};
+	b.onKeepaliveAck(ack, 1);
+	EXPECT_FALSE(b.valid());
+	b.onKeepaliveAck(ack, 0);
+	EXPECT_FALSE(b.valid());
+}
+
+TEST(RemoteBoot, ShortAckDoesNotDisturbStoredId) {
+	routercore::RemoteBoot b;
+	const uint8_t		   ack3[3] = {0, 0x01, 0x02};
+	const uint8_t		   ack1[1] = {0};
+	b.onKeepaliveAck(ack3, 3);
+	b.onKeepaliveAck(ack1, 1);
+	EXPECT_TRUE(b.valid());
+	EXPECT_EQ(b.id(), 0x0201);
+}
+
+TEST(RemoteBoot, NewIdReplacesOld) {
+	routercore::RemoteBoot b;
+	const uint8_t		   a[3] = {0, 0x01, 0x00};
+	const uint8_t		   c[3] = {0, 0x02, 0x00};
+	b.onKeepaliveAck(a, 3);
+	b.onKeepaliveAck(c, 3);
+	EXPECT_EQ(b.id(), 2);
+}
+
+TEST(RemoteBoot, LossClears) {
+	routercore::RemoteBoot b;
+	const uint8_t		   ack[3] = {0, 0x01, 0x02};
+	b.onKeepaliveAck(ack, 3);
+	b.forget();
+	EXPECT_FALSE(b.valid());
+}
+
+TEST(StatusResp, LayoutIsSevenBytesWithBootId) {
+	routercore::RemoteBoot b;
+	const uint8_t		   ack[3] = {0, 0xCD, 0xAB};
+	b.onKeepaliveAck(ack, 3);
+	uint8_t p[16] = {};
+	ASSERT_EQ(routercore::buildStatus(p, true, false, true, true, b), 7);
+	EXPECT_EQ(p[0], 1);
+	EXPECT_EQ(p[1], 0);
+	EXPECT_EQ(p[2], 1);
+	EXPECT_EQ(p[3], 1);
+	EXPECT_EQ(p[4], 0x01);
+	EXPECT_EQ(p[5], 0xCD);
+	EXPECT_EQ(p[6], 0xAB);
+}
+
+TEST(StatusResp, InvalidBootIdGivesZeroFlagsAndId) {
+	routercore::RemoteBoot b; // never seen, or v1 remote, or cleared on loss
+	uint8_t				   p[16];
+	std::memset(p, 0xFF, sizeof(p));
+	ASSERT_EQ(routercore::buildStatus(p, false, true, false, false, b), 7);
+	EXPECT_EQ(p[4], 0x00);
+	EXPECT_EQ(p[5], 0x00);
+	EXPECT_EQ(p[6], 0x00);
+}
+
+TEST(StatusResp, V1BaseOldPcPrefixUnchanged) {
+	// an old PC reads only the first 4 bytes: they keep their meaning
+	routercore::RemoteBoot b;
+	uint8_t				   p[16] = {};
+	routercore::buildStatus(p, true, true, false, true, b);
+	EXPECT_EQ(p[0], 1);
+	EXPECT_EQ(p[1], 1);
+	EXPECT_EQ(p[2], 0);
+	EXPECT_EQ(p[3], 1);
+}

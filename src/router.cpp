@@ -92,6 +92,7 @@ namespace router {
 	// Deduplication: the last PacketId processed locally from each node
 	static routercore::RxDedup _dedup;
 	static routercore::NonceRelay _nonceRelay; // the nonce the remote was last told
+	static routercore::RemoteBoot _remoteBoot; // boot id from the remote's KEEPALIVE_ACK (protocol v2), cleared on loss
 	static routercore::PcSession _pcSession; // KEEPALIVE nonce of the PC process (protocol v2)
 	static routercore::SsrBackstop _backstop; // Q1-1 c: SSR on, 2 h without a PC packet -> off
 
@@ -382,11 +383,9 @@ namespace router {
 				Packet resp = {};
 				resp.dest = pkt.source;
 				resp.msgType = MsgType::STATUS_RESP;
-				resp.payload[0] = static_cast<uint8_t>(bleLinkUsable()); // SYS-LINK-07: only once secured
-				resp.payload[1] = static_cast<uint8_t>(base::current::isEnabled());
-				resp.payload[2] = static_cast<uint8_t>(display::isConnected());
-				resp.payload[3] = static_cast<uint8_t>(isPcAlive());
-				resp.payloadLen = 4;
+				// SYS-LINK-07: ble only once secured. Protocol v2: 7 B with the remote's boot id (A2)
+				resp.payloadLen = routercore::buildStatus(resp.payload, bleLinkUsable(), base::current::isEnabled(), display::isConnected(),
+														  isPcAlive(), _remoteBoot);
 				sendReliable(resp); // The response is acknowledged too
 				break;
 			}
@@ -443,6 +442,8 @@ namespace router {
 				if (pkt.source == protocol::ADDR_REMOTE && pkt.payloadLen >= 1) {
 					Bluetooth::linkStats().setPeerRssi(static_cast<int8_t>(pkt.payload[0]), stmcpp::systick::getTicks());
 				}
+				// Protocol v2 remote: [rssi, boot_id u16 LE]; a v1 remote sends 1 byte and leaves the id invalid
+				if (pkt.source == protocol::ADDR_REMOTE) _remoteBoot.onKeepaliveAck(pkt.payload, pkt.payloadLen);
 				break;
 
 			case MsgType::ACK:
@@ -561,6 +562,7 @@ namespace router {
 		bool remote = isRemoteAlive();
 		if (remote != _remoteAliveLogged) {
 			_remoteAliveLogged = remote;
+			if (!remote) _remoteBoot.forget(); // never report a stale boot id (A2)
 			Debug::log(remote ? Debug::Level::INFO : Debug::Level::WARNING, "router", "remote %s", remote ? "alive" : "lost");
 		}
 		duration now = stmcpp::systick::getDuration();

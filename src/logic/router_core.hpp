@@ -82,6 +82,31 @@ namespace routercore {
 		uint16_t _sent = 0;
 	};
 
+	// Boot id of the remote as the last KEEPALIVE_ACK reported it (protocol v2: [rssi, boot_id u16 LE]; a v1 remote sends
+	// 1 byte). Reported in STATUS_RESP so the PC sees a remote reboot shorter than its 5 s poll. Cleared when the
+	// remote is declared lost, so a stale id is never reported.
+	class RemoteBoot {
+	public:
+		// KEEPALIVE_ACK payload from the remote; a short payload (v1 remote) changes nothing.
+		void onKeepaliveAck(const uint8_t *payload, uint8_t len) {
+			if (!payload || len < 3) return;
+			_id	   = static_cast<uint16_t>(payload[1] | (payload[2] << 8));
+			_valid = true;
+		}
+		void forget() { _valid = false; }
+		bool valid() const { return _valid; }
+		uint16_t id() const { return _id; }
+
+	private:
+		uint16_t _id	= 0;
+		bool	 _valid = false;
+	};
+
+	// STATUS_RESP payload (protocol v2, 7 B): [ble, ssr, display, pcAlive, flags, boot_id u16 LE].
+	// flags bit0 = remote boot id valid (boot_id is 0 otherwise), bits 1-7 reserved 0. Returns the length (7).
+	constexpr uint8_t STATUS_FLAG_REMOTE_BOOT_VALID = 0x01;
+	uint8_t buildStatus(uint8_t *payload, bool bleUsable, bool ssrOn, bool displayConnected, bool pcAlive, const RemoteBoot &boot);
+
 	// KEEPALIVE from the PC: a new session nonce makes the duplicate window of the PC forget.
 	// Returns true when it did. payload may be empty (v1 PC).
 	bool onPcKeepalive(PcSession &session, RxDedup &dedup, const uint8_t *payload, uint8_t len);
