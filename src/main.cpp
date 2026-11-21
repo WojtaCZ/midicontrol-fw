@@ -279,6 +279,16 @@ static void onUserStopPlayback() {
 	router::sendReliable(stopPkt);
 }
 
+// Callback: the "Nahraj" item (A7) -> RECORD_SONG to the PC, [0x01] start / [0x00] stop. Only the base starts recordings.
+static void onRecordRequest(bool start) {
+	protocol::Packet pkt = {};
+	pkt.dest = protocol::ADDR_PC;
+	pkt.msgType = protocol::MsgType::RECORD_SONG;
+	pkt.payload[0] = start ? 0x01 : 0x00;
+	pkt.payloadLen = 1;
+	router::sendReliable(pkt);
+}
+
 // One-shot scheduler: auto-dismiss the splash screen after 3 seconds (not if the user pressed a key meanwhile, P1-8)
 stmcpp::scheduler::Scheduler splashDismissScheduler(3000_ms, [](){
 	GUI::splashAutoDismiss();
@@ -345,6 +355,7 @@ extern "C" int main(void) {
 	Oled::init();
 	GUI::init();
 	GUI::setStopCallback(onUserStopPlayback);
+	GUI::setRecordCallback(onRecordRequest);
 	GUI::setRequestSongListCallback(onRequestSongList);
 	GUI::setPlaySongCallback(onPlaySongSelected);
 

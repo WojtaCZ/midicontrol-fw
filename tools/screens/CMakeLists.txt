@@ -23,6 +23,7 @@ set(GUI_SOURCES
 	host.cpp
 	${FW}/src/logic/ble_status.cpp
 	${FW}/src/logic/now_playing.cpp
+	${FW}/src/logic/recording.cpp
 	${FW_LIB_DIR}/ui/src/confirm_screen.cpp
 	${FW_LIB_DIR}/ui/src/list.cpp
 	${FW_LIB_DIR}/ui/src/menu_screen.cpp

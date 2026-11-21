@@ -457,8 +457,15 @@ static void playCallback(ui::MenuItem* item, void* userData) {
     _requestSongListCallback(offset); // last: a failure reported at once stops both schedulers
 }
 
+static recording::Machine _recording;
+static GUI::RecordCallback _recordCallback = nullptr;
+
+// The base is the only place a recording starts (A7). The menu item starts it, or stops a running one.
 static void recordCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
+    const recording::Action a = _recording.press();
+    if (!_recordCallback || a == recording::Action::None) return;
+    _recordCallback(a == recording::Action::SendStart); // TODO(C3): show the state ("Priprava"/"Nahravam"/...)
 }
 
 static void powerCallback(ui::MenuItem* item, void* userData) {
@@ -836,6 +843,23 @@ void requestFailed(protocol::MsgType type, const char* text) {
 void syncPowerCheckbox() {
     settingsItems[2].setChecked(base::current::isEnabled());
     nav.forceRender();
+}
+
+void recordingSignal(bool recording) {
+    if (recording) _recording.signalRecording();
+    else _recording.signalStopped();
+}
+
+void recordingFailed(routercore::Failure f, protocol::NakReason reason) {
+    _recording.requestFailed(f, reason);
+}
+
+recording::State recordingState() {
+    return _recording.state();
+}
+
+void setRecordCallback(RecordCallback cb) {
+    _recordCallback = cb;
 }
 
 void setStopCallback(StopCallback cb) {

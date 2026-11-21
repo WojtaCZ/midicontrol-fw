@@ -220,6 +220,7 @@ namespace router {
 	static void reportFailure(MsgType type, routercore::Failure f, NakReason reason = NakReason::UNKNOWN_MSG) {
 		const char *text = routercore::failureText(f, reason);
 		Debug::log(Debug::Level::WARNING, "router", "request type 0x%02x failed: %s", static_cast<unsigned>(type), text);
+		if (type == MsgType::RECORD_SONG) GUI::recordingFailed(f, reason);
 		GUI::requestFailed(type, text);
 	}
 
@@ -314,7 +315,11 @@ namespace router {
 				GUI::showNowPlaying(code);
 				break;
 			}
+			case MsgType::SIGNAL_RECORDING:
+				GUI::recordingSignal(true); // A7: no Now Playing screen for a recording
+				break;
 			case MsgType::SIGNAL_STOPPED:
+				GUI::recordingSignal(false);
 				GUI::dismissNowPlaying();
 				break;
 			case MsgType::SIGNAL_ANCHOR: {

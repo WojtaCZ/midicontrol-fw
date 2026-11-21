@@ -10,6 +10,7 @@
 #include <ui/theme.hpp>
 #include <ui/input.hpp>
 #include "protocol/types.hpp"
+#include "../src/logic/recording.hpp"
 
 namespace GUI {
     // Initialize the theme, screens, navigator; called once at startup
@@ -56,6 +57,16 @@ namespace GUI {
     // PM-1/UI2-1: a request the base sent to the PC (GET_SONG_LIST, PLAY_SONG, STOP_SONG) was NAKed,
     // never answered or not sent; text from routercore::failureText. Other types are ignored.
     void requestFailed(protocol::MsgType type, const char* text);
+
+    // A7: recording ("Nahraj"). recordingSignal: SIGNAL_RECORDING (true) / SIGNAL_STOPPED (false) seen by the router;
+    // recordingFailed: RECORD_SONG was NAKed, unanswered or not sent. The state is recording::Machine.
+    // TODO(C3): screens "Priprava", "Nahravam", "Zaneprazdneno", "PC nema nahravani" (recordingState() drives them).
+    void recordingSignal(bool recording);
+    void recordingFailed(routercore::Failure f, protocol::NakReason reason);
+    recording::State recordingState();
+    // Sender for RECORD_SONG (start = true: [0x01], false: [0x00]); set by main
+    using RecordCallback = void (*)(bool start);
+    void setRecordCallback(RecordCallback cb);
 
     // "Napajeni varhan" checkbox (Nastaveni) according to the actual SSR state (e.g. after SET_CURRENT from the PC)
     void syncPowerCheckbox();
