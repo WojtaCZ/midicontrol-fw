@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 	stmcpp::systick::ticks_ = 10000; // BLE activity animation idle
 
 	GUI::init();
-	GUI::setRequestSongListCallback([](uint8_t) { host::state.requests++; });
+	GUI::setRequestSongListCallback([](uint16_t) { host::state.requests++; });
 	GUI::setPlaySongCallback([](const char *) {});
 	GUI::setStopCallback([] {});
 	snap("splash", "Splash after power-on: closes by itself after 3 s; once a key was pressed it stays until Enter (Up/Down alone do not close it)");

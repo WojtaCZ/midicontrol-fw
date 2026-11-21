@@ -9,6 +9,7 @@
 #include "logic/ble_status.hpp"
 #include "logic/now_playing.hpp"
 #include "logic/splash_guard.hpp"
+#include "logic/song_window.hpp"
 #include "settings.hpp"
 #include "router.hpp"
 
@@ -224,15 +225,15 @@ static bool _nowPlayingActive = false;
 
 // ── Song list data ──────────────────────────────────────────────────────
 
-static constexpr int MAX_SONGS = 32;
+// A9: no cap on the list: a WINDOW of songwin::Window::CAP entries; _win holds the absolute index (in the PC's list)
+// of item 0 and the paging state (src/logic/song_window.hpp).
+static constexpr int MAX_SONGS = songwin::Window::CAP;
 static char _songNames[MAX_SONGS][24];       // 23 chars + null
 static ui::MenuItem _songListItems[MAX_SONGS + 1]; // items + Back
-static int _songCount = 0;
-static bool _hasMoreSongs = false;
+static songwin::Window _win;
 static bool _loadingScreenShown = false;
 
-enum class SongListState : uint8_t { Idle, WaitingFirst, WaitingMore };
-static SongListState _songListState = SongListState::Idle;
+using SongListState = songwin::Window::State;
 
 static RequestSongListCallback _requestSongListCallback = nullptr;
 static PlaySongCallback _playSongCallback = nullptr;
@@ -412,7 +413,7 @@ static ui::SplashScreen pairStatusScreen("Parovani", "", "Hledam ovladac...", on
 
 static void onLoadingDismiss(void* userData) {
     (void)userData;
-    _songListState = SongListState::Idle;
+    _win.abort();
     _loadingScreenShown = false;
     songListTimeoutScheduler.stop();
     songListDelayScheduler.stop();
@@ -449,13 +450,11 @@ static void playCallback(ui::MenuItem* item, void* userData) {
     if (!isPcAlive()) return;
     if (!_requestSongListCallback) return;
 
-    _songCount = 0;
-    _hasMoreSongs = false;
     _loadingScreenShown = false;
-    _songListState = SongListState::WaitingFirst;
+    uint16_t offset = _win.startFirst();
     songListDelayScheduler.start();   // 500ms delay before showing loading screen
     songListTimeoutScheduler.start(); // 3s timeout
-    _requestSongListCallback(0);      // last: a failure reported at once stops both schedulers
+    _requestSongListCallback(offset); // last: a failure reported at once stops both schedulers
 }
 
 static void recordCallback(ui::MenuItem* item, void* userData) {
@@ -683,15 +682,19 @@ static void handleKey(ui::InputEvent event) {
         }
     }
 
+    const int selBefore = (cur == &songListScreen) ? songListScreen.selectedIndex() : 0;
     nav.handleInput(event);
 
-    // Auto-load next page when scrolling near bottom of song list
-    if (event == ui::InputEvent::Down && cur == &songListScreen && _songListState == SongListState::Idle
-        && _hasMoreSongs && _songCount < MAX_SONGS) {
-        auto* menu = static_cast<ui::MenuScreen*>(cur);
-        if (menu->selectedIndex() >= _songCount - 2 && _requestSongListCallback) {
-            _songListState = SongListState::WaitingMore;
-            _requestSongListCallback(static_cast<uint8_t>(_songCount));
+    // A9: page the song list window. Down near the end asks for start + count, Up at the first item asks for
+    // max(0, start - 12); the response rebuilds the window by absolute index (song_window.hpp).
+    if (cur == &songListScreen && _requestSongListCallback) {
+        uint16_t offset = 0;
+        bool ask = false;
+        if (event == ui::InputEvent::Down) ask = _win.downRequest(songListScreen.selectedIndex(), offset);
+        else if (event == ui::InputEvent::Up) ask = _win.upRequest(selBefore, offset);
+        if (ask) {
+            songListTimeoutScheduler.start(); // 3 s: no answer -> Idle, the next scroll asks again (D12)
+            _requestSongListCallback(offset); // last: a failure reported at once stops the scheduler
         }
     }
 
@@ -756,7 +759,7 @@ void showFwProgress(const char* hint, uint8_t percent) {
     fwProgressScreen.setPercent(percent);
     if (!fwPushed) {
         // A song list request in progress and the screen state flags that the stack reset removes
-        _songListState = SongListState::Idle;
+        _win.abort();
         _loadingScreenShown = false;
         songListTimeoutScheduler.stop();
         songListDelayScheduler.stop();
@@ -793,9 +796,9 @@ void setNowPlayingAnchor(const char* label) {
 void requestFailed(protocol::MsgType type, const char* text) {
     switch (type) {
         case protocol::MsgType::GET_SONG_LIST:
-            if (_songListState == SongListState::WaitingFirst) {
+            if (_win.state() == SongListState::WaitingFirst) {
                 // the reason instead of the generic "PC neodpovida" timeout
-                _songListState = SongListState::Idle;
+                _win.abort();
                 songListDelayScheduler.stop();
                 songListTimeoutScheduler.stop();
                 songListLoadingScreen.setSubtitle(text);
@@ -804,8 +807,9 @@ void requestFailed(protocol::MsgType type, const char* text) {
                     nav.push(&songListLoadingScreen);
                     _loadingScreenShown = true;
                 }
-            } else if (_songListState == SongListState::WaitingMore) {
-                _songListState = SongListState::Idle; // the next scroll down asks again
+            } else if (_win.state() == SongListState::WaitingMore) {
+                _win.abort(); // the next scroll asks again
+                songListTimeoutScheduler.stop();
                 return;
             } else {
                 return;
@@ -847,42 +851,46 @@ void setPlaySongCallback(PlaySongCallback cb) {
 }
 
 void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
-    if (_songListState == SongListState::Idle) return;
+    if (_win.state() == SongListState::Idle) return;
 
-    bool isFirstPage = (_songListState == SongListState::WaitingFirst);
-    _songListState = SongListState::Idle;
-    _hasMoreSongs = hasMore;
+    bool isFirstPage = (_win.state() == SongListState::WaitingFirst);
+    songListTimeoutScheduler.stop();
+    if (isFirstPage) songListDelayScheduler.stop();
 
-    if (isFirstPage) {
-        songListTimeoutScheduler.stop();
-        songListDelayScheduler.stop();
-    }
-
-    // Save the current position for append
-    int savedIndex = isFirstPage ? 0 : songListScreen.selectedIndex();
-
-    if (isFirstPage) {
-        _songCount = 0;
-    }
-
-    // Parse the semicolon-separated song names
-    int nameStart = 0;
-    for (int i = 0; i <= len && _songCount < MAX_SONGS; ++i) {
+    // Count the codes first: the window offset advances by the codes RECEIVED (RF-18)
+    int received = 0;
+    for (int i = 0, nameStart = 0; i <= len; ++i) {
         if (i == len || payload[i] == ';') {
-            int nameLen = i - nameStart;
-            if (nameLen > 0) {
-                if (nameLen > 23) nameLen = 23;
-                std::memcpy(_songNames[_songCount], &payload[nameStart], nameLen);
-                _songNames[_songCount][nameLen] = '\0';
-                _songListItems[_songCount] = ui::MenuItem(_songNames[_songCount], onSongSelected);
-                _songCount++;
-            }
+            if (i > nameStart) ++received;
             nameStart = i + 1;
         }
     }
 
+    const int oldCount = _win.count();
+    const songwin::Window::Plan plan = _win.onResponse(received, hasMore);
+    if (!plan.ok) return;
+
+    // Keep the old entries that stay (shift them to the front), then store the first keepNew codes of the page
+    if (plan.dropFront > 0 && plan.dropFront < oldCount) {
+        std::memmove(_songNames[0], _songNames[plan.dropFront], static_cast<size_t>(oldCount - plan.dropFront) * sizeof(_songNames[0]));
+    }
+    int n = (plan.dropFront < oldCount) ? oldCount - plan.dropFront : 0;
+    for (int i = 0, nameStart = 0; i <= len && n < plan.count; ++i) {
+        if (i == len || payload[i] == ';') {
+            int nameLen = i - nameStart;
+            if (nameLen > 0) {
+                if (nameLen > 23) nameLen = 23;
+                std::memcpy(_songNames[n], &payload[nameStart], nameLen);
+                _songNames[n][nameLen] = '\0';
+                n++;
+            }
+            nameStart = i + 1;
+        }
+    }
+    for (int i = 0; i < plan.count; ++i) _songListItems[i] = ui::MenuItem(_songNames[i], onSongSelected);
+
     // Empty folder (first page only)
-    if (isFirstPage && _songCount == 0) {
+    if (isFirstPage && plan.count == 0) {
         if (!_loadingScreenShown) {
             // The loading screen has not been shown yet — show it with the error
             songListLoadingScreen.setSubtitle("Zadne pisne");
@@ -898,11 +906,11 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
     }
 
     // Add the Back item
-    _songListItems[_songCount] = ui::MenuItem::back("Zpet");
+    _songListItems[plan.count] = ui::MenuItem::back("Zpet");
 
-    // Rebuild the song list screen with the current count
-    songListScreen = ui::MenuScreen("Pisne", _songListItems, _songCount + 1);
-    songListScreen.setSelectedIndex(savedIndex);
+    // Rebuild the song list screen with the current window
+    songListScreen = ui::MenuScreen("Pisne", _songListItems, plan.count + 1);
+    songListScreen.setSelectedIndex(plan.cursor);
 
     if (isFirstPage) {
         // Pop the loading screen if it was shown, push the song list
@@ -912,14 +920,14 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
         }
         nav.push(&songListScreen);
     }
-    // For append: the screen is already on the stack, forceRender is enough
+    // For a later page: the screen is already on the stack, forceRender is enough
 
     nav.forceRender();
 }
 
 // Called from the delay scheduler (500ms) — shows the loading screen if we are still waiting
 void songListDelayShow() {
-    if (_songListState == SongListState::WaitingFirst && !_loadingScreenShown) {
+    if (_win.state() == SongListState::WaitingFirst && !_loadingScreenShown) {
         songListLoadingScreen.setSubtitle("Nacitani...");
         songListLoadingScreen.setComment("Cekam na PC");
         nav.push(&songListLoadingScreen);
@@ -930,7 +938,7 @@ void songListDelayShow() {
 
 // Called from the timeout scheduler (3s)
 void songListTimeout() {
-    if (_songListState == SongListState::WaitingFirst) {
+    if (_win.state() == SongListState::WaitingFirst) {
         songListDelayScheduler.stop();
         if (!_loadingScreenShown) {
             songListLoadingScreen.setSubtitle("PC neodpovida");
@@ -942,6 +950,10 @@ void songListTimeout() {
             songListLoadingScreen.setComment("");
         }
         nav.forceRender();
+    } else if (_win.state() == SongListState::WaitingMore) {
+        // A9: no answer for the next/previous window: back to Idle, the next scroll asks again.
+        // TODO(D12): visible feedback / one-action Back while waiting.
+        _win.abort();
     }
 }
 

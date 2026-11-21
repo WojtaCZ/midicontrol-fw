@@ -196,7 +196,7 @@ static int runScript(const char *path, const char *outPath) {
 	stmcpp::systick::ticks_ = 10000;
 	host::state.lastWake = 10000;
 	GUI::init();
-	GUI::setRequestSongListCallback([](uint8_t off) { host::state.requests++; g_requests++; g_lastOffset = off; });
+	GUI::setRequestSongListCallback([](uint16_t off) { host::state.requests++; g_requests++; g_lastOffset = off; });
 	GUI::setPlaySongCallback([](const char *n) { g_played = n; });
 	GUI::setStopCallback([] { g_stops++; });
 	splashSched.start();

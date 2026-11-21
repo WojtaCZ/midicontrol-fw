@@ -241,12 +241,16 @@ stmcpp::scheduler::Scheduler ledScheduler(50_ms, [](){
 
 // Callback: the OLED menu requests the song list from the PC (with an offset for pagination).
 // The Base is just another requester: it sends dest=PC, SONG_LIST_RESP comes back to the Base.
-static void onRequestSongList(uint8_t offset) {
+static void onRequestSongList(uint16_t offset) {
 	protocol::Packet pkt = {};
 	pkt.dest = protocol::ADDR_PC;
 	pkt.msgType = protocol::MsgType::GET_SONG_LIST;
-	pkt.payload[0] = offset;
+	pkt.payload[0] = static_cast<uint8_t>(offset & 0xFF);
 	pkt.payloadLen = 1;
+	if (offset >= 256) { // A9: u16 LE, 2 bytes only when needed (a v1 PC still serves the first 256 songs)
+		pkt.payload[1] = static_cast<uint8_t>(offset >> 8);
+		pkt.payloadLen = 2;
+	}
 	router::sendReliable(pkt);
 }
 

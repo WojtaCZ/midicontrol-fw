@@ -1,4 +1,4 @@
-# B9: Down near the end of a page with "more" requests the next page (offset = count)
+# B9/A9: Down near the end of a page with "more" requests the next page (offset = count)
 tick 3000
 key enter
 tick 600
@@ -8,14 +8,17 @@ expect var requests=1
 key down
 expect var requests=2
 expect var lastOffset=3
-# while the next page is awaited a further Down does not ask again; there is no timeout for it
+# while the next page is awaited a further Down does not ask again; after the 3 s timeout (A9) the next Down asks again
 key down
-tick 10000
 expect var requests=2
-expect screen songs
-event songs 410;411 more
-expect var requests=2
-key down
+tick 3100
 key down
 expect var requests=3
+expect var lastOffset=3
+expect screen songs
+event songs 410;411 more
+expect var requests=3
+key down
+key down
+expect var requests=4
 expect var lastOffset=5

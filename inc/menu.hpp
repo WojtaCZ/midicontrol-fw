@@ -65,7 +65,7 @@ namespace GUI {
     void setStopCallback(StopCallback cb);
 
     // Callbacks for the song list and playback
-    using RequestSongListCallback = void (*)(uint8_t offset);
+    using RequestSongListCallback = void (*)(uint16_t offset); // absolute index in the PC's list (A9)
     using PlaySongCallback = void (*)(const char* songName);
     void setRequestSongListCallback(RequestSongListCallback cb);
     void setPlaySongCallback(PlaySongCallback cb);
