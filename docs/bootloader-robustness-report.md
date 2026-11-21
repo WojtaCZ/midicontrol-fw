@@ -21,7 +21,7 @@ Builds: base `bl-robust` (= main 29ca88d code), remote main 1c042ae.
   `$$$` timeout. On the remote the same change was tried and dropped: it broke the BLE regression every combined run
   (the module ignores `$$$` right after `%SECURED%`), so the remote keeps relying on StuckCommandMode (`%DATA%` ->
   K,1). The base-side wedge found while testing this was a status-parser bug, fixed separately. See
-  `midicontrolpy-sw/docs/FAULTS.md` (2.9).
+  `midicontrol-sw/docs/FAULTS.md` (2.9).
 
 ## Verdict
 

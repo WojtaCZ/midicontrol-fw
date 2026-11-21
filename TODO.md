@@ -106,7 +106,7 @@ Rule for every entry: user-visible change = update docs/manual (and facts) + doc
 - Depends on: A1 (session reset rule; works without it).
 - Tests: extend test/host/test_router_core.cpp (repeat, new id, forget, wrap 255 -> 0).
 - Manual/facts: none visible except SYSTEM.md router/dedup row (VERIFY row id: grep -n "dedup" docs/SYSTEM.md).
-- Risk / open points: VERIFY whether the PC resends signals with the same id on purpose (retries) or reuses ids across different signals. Check midicontrolpy-sw packet id allocation (`grep -rn packetId` there) before choosing "last id only".
+- Risk / open points: VERIFY whether the PC resends signals with the same id on purpose (retries) or reuses ids across different signals. Check midicontrol-sw packet id allocation (`grep -rn packetId` there) before choosing "last id only".
 
 ### C6 Remove dead firmware code (Q2-27)
 - Goal: delete code with no callers listed in the audit; keep protocol items (RECORD_SONG, SIGNAL_RECORDING) reserved.

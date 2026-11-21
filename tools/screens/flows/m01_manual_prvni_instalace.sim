@@ -1,4 +1,4 @@
-# Manual postup-prvni-instalace (base side), steps 1, 4, 5, 6. Keep in step with midicontrolpy-sw/docs/manual/docs/postupy.md
+# Manual postup-prvni-instalace (base side), steps 1, 4, 5, 6. Keep in step with midicontrol-sw/docs/manual/docs/postupy.md
 # 1: no remote stored, no PC yet: splash, after 3 s the menu titled "Sparuj ovladac" under the "Odpojeno" overlay
 state remote=-
 state pc=0

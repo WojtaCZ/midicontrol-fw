@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `docs/SYSTEM.md` is the owner's specification of what the whole MIDIcontrol system (PC software, base, remote,
 bootloader, protocol) is expected to do, with requirement IDs, owner decisions and a gap list. Its main copy lives in
-`midicontrolpy-sw/docs/SYSTEM.md`; the copies in the other repos are kept identical by
-`midicontrolpy-sw/tools/sync-system-doc.sh` (`--check` reports drift). Edit only the main copy. When the code and the spec
+`midicontrol-sw/docs/SYSTEM.md`; the copies in the other repos are kept identical by
+`midicontrol-sw/tools/sync-system-doc.sh` (`--check` reports drift). Edit only the main copy. When the code and the spec
 disagree, the spec says what is wanted: ask the owner instead of changing the spec to match the code.
 `docs/HARDWARE-base.md` / `docs/HARDWARE-remote.md` (or `docs/HARDWARE.md` in the matching firmware repo) describe the
 base (STM32G431) and remote (STM32G071) hardware. The firmware pin maps are authoritative; the KiCad repos are historical.
@@ -18,7 +18,7 @@ This repo holds the MAIN copy of the base hardware description, `docs/HARDWARE.m
 
 STM32G431CBTx (Cortex-M4F, 144 MHz) firmware for the MIDIcontrol **base station**: USB-MIDI card for the PC player, packet router between the PC (USB-CDC) and the handheld remote (BLE, Microchip **RNBD350**, RN4870 command set; the log text and some comments still say RN4870), SSR driver for organ power, church indicator (7-segment display) driver, OLED (SH1106 via I2C) with an encoder menu, and RGB status LEDs. Written in C++23 with no exceptions; no heap use in interrupt handlers (fixed-size lock-free ring buffers, `inc/ringbuffer.hpp`).
 
-- **User-visible changes** (screen text, menus, keys, timeouts, web page, CLI output, config keys, install steps): in the same commit series update midicontrolpy-sw/docs/SYSTEM.md (status/glossary/timing; then run midicontrolpy-sw/tools/sync-system-doc.sh), this CLAUDE.md/README, midicontrolpy-sw/docs/status-web-and-service.md for the PC, the screen scenarios in tools/screens/main.cpp, and the Czech user manual in `midicontrolpy-sw/docs/manual/` (its `facts/*.md` too; pictures: `docs/manual/README.md`).
+- **User-visible changes** (screen text, menus, keys, timeouts, web page, CLI output, config keys, install steps): in the same commit series update midicontrol-sw/docs/SYSTEM.md (status/glossary/timing; then run midicontrol-sw/tools/sync-system-doc.sh), this CLAUDE.md/README, midicontrol-sw/docs/status-web-and-service.md for the PC, the screen scenarios in tools/screens/main.cpp, and the Czech user manual in `midicontrol-sw/docs/manual/` (its `facts/*.md` too; pictures: `docs/manual/README.md`).
 
 The packet protocol is defined in **`lib/protocol/PROTOCOL.md`** (shared `midicontrol-protocol` submodule) — that file is authoritative. `docs/display-sysex.md` documents the display SysEx format (`F0 4D 43 ...`), which is also the anchor format in the song files.
 

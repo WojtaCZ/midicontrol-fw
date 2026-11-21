@@ -20,7 +20,7 @@ using E = ui::InputEvent;
 static shot::Exporter *exporter = nullptr;
 static int			   counter	= 0;
 
-// Song codes as the PC player lists them (file stems in midicontrolpy-sw/songs)
+// Song codes as the PC player lists them (file stems in midicontrol-sw/songs)
 static const char SONGS[] = "401;403;406A;406B;407;512;513;516;517;519;523";
 
 static void snap(const char *name, const char *caption) {

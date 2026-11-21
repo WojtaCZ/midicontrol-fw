@@ -1,11 +1,11 @@
-<!-- COPY of midicontrolpy-sw/docs/SYSTEM.md. Do not edit here: edit the main copy, then run midicontrolpy-sw/tools/sync-system-doc.sh -->
+<!-- COPY of midicontrol-sw/docs/SYSTEM.md. Do not edit here: edit the main copy, then run midicontrol-sw/tools/sync-system-doc.sh -->
 
 # MIDIcontrol system specification
 
 Version 2026-11-14. Owner decisions D1-D31 applied (binding). Items marked **(proposed default)** come from
 P1-P12: technical choices the owner delegated to the developers (D30); change them only with a reason. Code reference (branch audit/step1-docs): base
 `midicontrol-fw` f3302ee, remote `midicontroller-fw` 29c9a5c, bootloader `midicontrol-bootloader` 16d99a4, protocol
-`midicontrol-protocol` 6fb3efb, PC `midicontrolpy-sw` c45c17a (the docker branch is not covered).
+`midicontrol-protocol` 6fb3efb, PC `midicontrol-sw` c45c17a (the docker branch is not covered).
 Update 2026-11-15 (audit step 2): the owner answers of 2026-11-14/15 (Q1-1 b+c, Q1-2 a, Q1-8 b, Q1-11 b, Q1-22 a,
 Q-UI2-4 and the approved proposals P1-7..P1-27 listed in `audit/STEP1-REPORT.md`) are requirements. Step-2 code is on
 branch `audit/step2-review` (not merged, not flashed): base b78d891, remote 43bb5fd, PC 5c42931, protocol dc4806f
@@ -15,8 +15,8 @@ Wire protocol: `midicontrol-protocol/PROTOCOL.md`.
 
 > **How to use this document**
 >
-> 1. The main copy lives in `midicontrolpy-sw/docs/SYSTEM.md`. The other repos hold identical copies,
->    updated by `midicontrolpy-sw/tools/sync-system-doc.sh`. Edit only the main copy, then run the script.
+> 1. The main copy lives in `midicontrol-sw/docs/SYSTEM.md`. The other repos hold identical copies,
+>    updated by `midicontrol-sw/tools/sync-system-doc.sh`. Edit only the main copy, then run the script.
 >    The script never writes into a submodule; `--check` also compares the copies in the firmware repos'
 >    `lib/protocol` and `lib/bootloader` and reports a stale one (fix it in that repo, then bump the pointer) (P1-25).
 > 2. This document states what the **owner expects** the system to do. The expected behaviour is the spec;
@@ -63,7 +63,7 @@ power policy and serves a status web page.
                                                                       ^ USB composite               | manual
                                                                       | CDC0 protocol, MIDI, CDC1 log | controllers
                                                                +-----------------------------+
-                                                               |  PC (0x01) midicontrolpy-sw |
+                                                               |  PC (0x01) midicontrol-sw |
                                                                |  song files *.mid, *.conf   |
                                                                |  web status :50118 (LAN)    |
                                                                +-----------------------------+
@@ -75,7 +75,7 @@ power policy and serves a status web page.
 |---|---|---|
 | Remote (0x03) | `midicontroller-fw` | Song code entry, play / pause / resume / stop / add verse, record start/stop, song list, manual organ-on, shows PC state, pairing to one base, battery/charger, auto power-off, diagnostics, OTA via its bootloader |
 | Base (0x02) | `midicontrol-fw` | USB device to the PC (CDC protocol, USB-MIDI, CDC log); USB-MIDI <-> DIN; frame router PC<->remote; BLE central, pairing, link supervision; SSR; indicator bus (send + observe); OLED menu; safety cut-off on PC loss; fault records, watchdogs; bootloader |
-| PC (0x01) | `midicontrolpy-sw` | Song store, song list, playback (sections, add verse, pause/resume), recording, organ power policy (on at play, idle-off), stops / default registration, indicator updates, diag polling and store, web page + firmware upload, CLI, firmware updater |
+| PC (0x01) | `midicontrol-sw` | Song store, song list, playback (sections, add verse, pause/resume), recording, organ power policy (on at play, idle-off), stops / default registration, indicator updates, diag polling and store, web page + firmware upload, CLI, firmware updater |
 | Shared protocol | `midicontrol-protocol` | Frame format, message types, NAK reasons, diag codes, INFO TLVs; C++ library for both MCUs (PC vendors a copy) |
 | Bootloader | `midicontrol-bootloader` | Shared bootloader code; update trailer (magic 0x4D43544C, board ID 2 base / 3 remote, CRC) |
 | Indicator bus | existing church hardware | Shared multi-master bus; shows song (4 digits), verse (2 digits), letter, LED; 9-byte frames at 1200 Bd |
@@ -312,7 +312,7 @@ The base is one writer among several.
 |---|---|---|---|
 | SYS-DOC-01 | Indicator bus protocol and song code set documented from the owner's V2 protocol files (D7), sec. 5 | implemented | `midicontrol-protocol/INDICATOR-BUS.md` |
 | SYS-DOC-02 | `midicontrol-fw` IMPLEMENTATION_PROMPT.md marked obsolete (proposed default, P11) | implemented | OBSOLETE banner at the top of midicontrol-fw IMPLEMENTATION_PROMPT.md (c0d26cf) |
-| SYS-DOC-03 | Doc inconsistencies resolved from code (RSSI poll 10 vs 11 s, ST-Link serials, ConfirmScreen language, JSON schema 1 vs 2, upload head limit 4 vs 8 KiB) (proposed default, P9) | implemented | RSSI 11 s (sec. 8, remote TODO.md, midicontrolpy-sw docs/FAULTS.md c45c17a), serials agree in both fw CLAUDE.md/HARDWARE docs, ConfirmScreen Ano/Ne (remote CLAUDE.md), `/api/status` schema 2 (status-web-and-service.md), 8 KiB head+body / 4 KiB body (PC CLAUDE.md, status-web-and-service.md) |
+| SYS-DOC-03 | Doc inconsistencies resolved from code (RSSI poll 10 vs 11 s, ST-Link serials, ConfirmScreen language, JSON schema 1 vs 2, upload head limit 4 vs 8 KiB) (proposed default, P9) | implemented | RSSI 11 s (sec. 8, remote TODO.md, midicontrol-sw docs/FAULTS.md c45c17a), serials agree in both fw CLAUDE.md/HARDWARE docs, ConfirmScreen Ano/Ne (remote CLAUDE.md), `/api/status` schema 2 (status-web-and-service.md), 8 KiB head+body / 4 KiB body (PC CLAUDE.md, status-web-and-service.md) |
 | SYS-DOC-04 | SysEx manufacturer ID 0x4D kept; the display format is fixed by existing church hardware (proposed default, P10) | implemented | - |
 | SYS-DOC-05 | Hardware docs: firmware pin map + bench are authoritative; KiCad repos are historical (D11). Schematics showing RN4870 are pre-adapter (D10) | implemented | docs/HARDWARE.md in both fw repos |
 
@@ -349,37 +349,37 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | # | Requirement(s) | Gap | Repo(s) to change |
 |---|---|---|---|
 | 1 | SYS-PC-03, SYS-NOTE-03 | CLOSED 2026-11-12 (PcLossGuard, test_pc_loss.py; DIN half waits for gap 28): Base: on PC loss (USB gone / keepalive timeout) send All Notes Off + SSR off immediately (D1) | midicontrol-fw |
-| 2 | SYS-PWR-07, SYS-NOTE-04 | CLOSED 2026-11-12 (startup_reset.cpp, test_startup_reset.cpp): PC start/restart: All Notes Off + organ off, indicator untouched (D14). Power rule changed by Q1-1 b (a manual on stays on), see SYS-PWR-07 | midicontrolpy-sw |
-| 3 | SYS-ORG-04, SYS-USE-10 | Organ stays on between songs; no off at song end/stop (D2, D5) | midicontrolpy-sw |
-| 4 | SYS-ORG-05 | Configurable idle-off timer on the PC (D5). Step 2: 30 min timer only for an organ found on at PC start or reconnect (41f143b); not a config key yet; a manual on at runtime and KeepPowerOn after a song arm no timer | midicontrolpy-sw |
-| 5 | SYS-ORG-07 | Manual organ-on from base/remote overrides until the next idle timeout; PC learns manual state; remote control. Today the PC switches a manual on off at stop (also with nothing playing), song end and failed start (US-2/3/4, Q-US-2); the startup reset keeps it since step 2 (Q1-1 b); the remote has no organ control or display (US-5, routing Q-US-3); a manual base-on with no PC is cut by the 2 h backstop since step 2 (Q1-1 c, SYS-IDLE-04; was US-17, Q-US-4) | midicontrolpy-sw, midicontroller-fw, midicontrol-protocol (if a new message), midicontrol-fw |
+| 2 | SYS-PWR-07, SYS-NOTE-04 | CLOSED 2026-11-12 (startup_reset.cpp, test_startup_reset.cpp): PC start/restart: All Notes Off + organ off, indicator untouched (D14). Power rule changed by Q1-1 b (a manual on stays on), see SYS-PWR-07 | midicontrol-sw |
+| 3 | SYS-ORG-04, SYS-USE-10 | Organ stays on between songs; no off at song end/stop (D2, D5) | midicontrol-sw |
+| 4 | SYS-ORG-05 | Configurable idle-off timer on the PC (D5). Step 2: 30 min timer only for an organ found on at PC start or reconnect (41f143b); not a config key yet; a manual on at runtime and KeepPowerOn after a song arm no timer | midicontrol-sw |
+| 5 | SYS-ORG-07 | Manual organ-on from base/remote overrides until the next idle timeout; PC learns manual state; remote control. Today the PC switches a manual on off at stop (also with nothing playing), song end and failed start (US-2/3/4, Q-US-2); the startup reset keeps it since step 2 (Q1-1 b); the remote has no organ control or display (US-5, routing Q-US-3); a manual base-on with no PC is cut by the 2 h backstop since step 2 (Q1-1 c, SYS-IDLE-04; was US-17, Q-US-4) | midicontrol-sw, midicontroller-fw, midicontrol-protocol (if a new message), midicontrol-fw |
 | 6 | SYS-PAIR-04, SYS-FW-07 | CLOSED 2026-11-12 (`peerguard::Guard`, `test_remote_guard.py`, `PeerGuard.*`): Remote accepts connection/frames/OTA only from the bonded base (D3) | midicontroller-fw |
 | 7 | SYS-PAIR-06 | CLOSED 2026-11-12 (menu "Sparovat zakl.", `test_pairing_window_*`): Explicit "pair new base" action on the remote (D3) | midicontroller-fw |
 | 8 | SYS-LINK-05 | CLOSED 2026-11-12 (`test_remote_guard.py`, `test_remote_status_rx.py`, `StatusFramer.*`): Remote ignores RN status text injected by a peer (F2/F4) | midicontroller-fw |
-| 9 | SYS-LINK-06 | Remote requests now-playing after the link is secured (D8, P1-9). Step 2 has the PC push the state on ble 0 -> 1 instead (211a7d7, 83fb028); the owner decides whether the push meets D8 | midicontroller-fw, midicontrolpy-sw (answer), midicontrol-protocol (if a new message) |
+| 9 | SYS-LINK-06 | Remote requests now-playing after the link is secured (D8, P1-9). Step 2 has the PC push the state on ble 0 -> 1 instead (211a7d7, 83fb028); the owner decides whether the push meets D8 | midicontroller-fw, midicontrol-sw (answer), midicontrol-protocol (if a new message) |
 | 10 | SYS-LINK-07 | CLOSED 2026-11-12 (`test_cdc_local.py::test_status_ble_only_when_secured`, `BleLinkUsable.*`): GET_STATUS BLE "connected" only when secured (P5) | midicontrol-fw |
 | 11 | SYS-PWR-02 | CLOSED 2026-11-12: first BLE attempt after base boot fails; cause = remote advertising restart collides with the first connection setup, now a non-counted setup failure, link up on the first CE (P1) | midicontrol-fw |
-| 12 | SYS-USE-09, SYS-NOTE-01 | Real pause: halt, All Notes Off, keep position (D6) | midicontrolpy-sw, midicontroller-fw, midicontrol-fw (OLED) |
-| 13 | SYS-USE-21 | Resume at the same spot; resume message + UI (D6) | midicontrol-protocol, midicontrolpy-sw, midicontroller-fw, midicontrol-fw |
-| 14 | SYS-USE-20 | Default registration for songs without stops (D16) | midicontrolpy-sw |
-| 15 | SYS-USE-14, SYS-USE-15, SYS-REC-01 | Record start/stop from the base; RECORD_SONG / SIGNAL_RECORDING defined (D9, D29). The base "Nahraj" item is an empty stub today (menu.cpp:109, :453; UI-1, P-UI-1) | midicontrol-protocol, midicontrolpy-sw, midicontrol-fw |
-| 16 | SYS-REC-02 | Record organ MIDI from DIN into a new song file; verify DIN-in path | midicontrolpy-sw, midicontrol-fw |
-| 17 | SYS-REC-03, SYS-REC-04, SYS-BUS-03 | Embed bus frames seen during recording as display SysEx; recorded file plays back with anchors (D9) | midicontrolpy-sw (+ midicontrol-fw if the echo is incomplete) |
+| 12 | SYS-USE-09, SYS-NOTE-01 | Real pause: halt, All Notes Off, keep position (D6) | midicontrol-sw, midicontroller-fw, midicontrol-fw (OLED) |
+| 13 | SYS-USE-21 | Resume at the same spot; resume message + UI (D6) | midicontrol-protocol, midicontrol-sw, midicontroller-fw, midicontrol-fw |
+| 14 | SYS-USE-20 | Default registration for songs without stops (D16) | midicontrol-sw |
+| 15 | SYS-USE-14, SYS-USE-15, SYS-REC-01 | Record start/stop from the base; RECORD_SONG / SIGNAL_RECORDING defined (D9, D29). The base "Nahraj" item is an empty stub today (menu.cpp:109, :453; UI-1, P-UI-1) | midicontrol-protocol, midicontrol-sw, midicontrol-fw |
+| 16 | SYS-REC-02 | Record organ MIDI from DIN into a new song file; verify DIN-in path | midicontrol-sw, midicontrol-fw |
+| 17 | SYS-REC-03, SYS-REC-04, SYS-BUS-03 | Embed bus frames seen during recording as display SysEx; recorded file plays back with anchors (D9) | midicontrol-sw (+ midicontrol-fw if the echo is incomplete) |
 | 18 | SYS-BUS-01, SYS-BUS-02 | Observe the shared bus; mirror foreign song number on base OLED and remote, playback untouched (D13) | midicontrol-fw, midicontroller-fw, midicontrol-protocol |
 | 19 | SYS-IDLE-03 | Remote power easy wins (BLE module / peripheral sleep) (D17) | midicontroller-fw |
-| 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7). Done: update refused while a song plays or a Play is claimed (b3340d2, 766c596); base in bootloader detected and reported (385f536). Open: refuse Play during an update (Q-W2-5); re-flash offer is console advice only (Q-W2-6) | midicontrolpy-sw |
+| 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7). Done: update refused while a song plays or a Play is claimed (b3340d2, 766c596); base in bootloader detected and reported (385f536). Open: refuse Play during an update (Q-W2-5); re-flash offer is console advice only (Q-W2-6) | midicontrol-sw |
 | 23 | SYS-DIAG-04 | CLOSED 2026-11-14 (protocol 6ce5716): PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
 | 24 | SYS-BUS-08 | CLOSED 2026-11-12 (`test_display.py::test_rx_frame_flag_check`, `IndicatorFrame.*`): check the `0xB0` flag on received indicator frames | midicontrol-fw |
 | 25 | SYS-DOC-02 | CLOSED 2026-11-14 (midicontrol-fw c0d26cf): Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
-| 26 | SYS-DOC-03 | CLOSED 2026-11-14 (midicontrolpy-sw c45c17a): Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
-| 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20). PC part (clear only what the PC set, P1-10) done in step 2 (698ca54); open: "no other master wrote since" needs the base to know the last writer (Q-W2-7) | midicontrol-fw, midicontrolpy-sw |
+| 26 | SYS-DOC-03 | CLOSED 2026-11-14 (midicontrol-sw c45c17a): Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrol-sw |
+| 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20). PC part (clear only what the PC set, P1-10) done in step 2 (698ca54); open: "no other master wrote since" needs the base to know the last writer (Q-W2-7) | midicontrol-fw, midicontrol-sw |
 | 28 | SYS-NOTE-05 | Find and fix the DIN MIDI fault (cable / ATtiny port direction / MIDI_TX_VCC_ON / TX polarity); verify both directions before installation (D31) | midicontrol-fw, midicontrol-hw (ATtiny fw?) |
 | 29 | SYS-BUS-05 | CLOSED 2026-11-12 (`test_display.py::test_quiet_bus_holds_tx`, `QuietBus.*`): wait for a short quiet bus before transmitting (D25); real-bus check in midicontrol-fw/TODO.md | midicontrol-fw |
-| 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrolpy-sw |
-| 31 | SYS-USE-18 | CLOSED 2026-11-12 (songcheck_warns_*): songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
+| 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrol-sw |
+| 31 | SYS-USE-18 | CLOSED 2026-11-12 (songcheck_warns_*): songcheck warns on shifted display digits (D24) | midicontrol-sw |
 | 32 | SYS-USE-17, SYS-USE-22 | Enforce the 1999 song cap on the live indicator path: `setSong()` caps but has no caller, display.cpp:211 `applyNowPlaying` passes 2000-9999 (US-6). PC `fromSongCode` fixed in step 2 (bab7e84) | midicontrol-fw |
 | 33 | SYS-PAIR-07, sec. 3.2 Reconnect | Spec says reconnect with bare `C` (P12); code sends `Z` + `CE,0,<stored addr>` (stricter; bare `C` never connected to the remote's Coded-only advertiser on the bench, learning 2026-11-07). Owner decides which is the rule (SA-7, Q-SA-3) | midicontrol-fw (or this spec) |
-| 34 | sec. 3.1 Reliability, SYS-PC-07 | Owner chose Q1-8 b: the base forgets the PC's PacketId on PC loss (step 2, fd11669); the PC starts its PacketIds at a random value (92a5228, pending Q-D-14). Residual: a PC restart faster than the 6 s loss timeout keeps the old slot; 1/256 chance that the first frame is ACKed but not executed. A full fix needs a protocol change (session id) (SA-4, Q-SA-2) | midicontrol-fw, midicontrolpy-sw, midicontrol-protocol (if a session id) |
+| 34 | sec. 3.1 Reliability, SYS-PC-07 | Owner chose Q1-8 b: the base forgets the PC's PacketId on PC loss (step 2, fd11669); the PC starts its PacketIds at a random value (92a5228, pending Q-D-14). Residual: a PC restart faster than the 6 s loss timeout keeps the old slot; 1/256 chance that the first frame is ACKed but not executed. A full fix needs a protocol change (session id) (SA-4, Q-SA-2) | midicontrol-fw, midicontrol-sw, midicontrol-protocol (if a session id) |
 | 35 | SYS-ORG-02 | PA4 (SSR) level during reset, bootloader stay and OTA never measured; no pull-down (D28) (SB-3, Q-SB-1) | midicontrol-fw, midicontrol-hw |
 | 36 | sec. 3.2 Link | Remote module stuck in command mode while connected and the base is quiet is not detected (late `CMD>` after a `$$$` timeout, lost `END`; remote bluetooth.cpp:343-391); an unconnected module recovers via the RST re-init (RD-1, Q-RD-5) | midicontroller-fw |
 | 37 | sec. 2 Remote row, sec. 3.3 Routing vs SYS-REC-01 | Spec contradiction: sec. 2 gives the remote record start/stop and sec. 3.3 routes RECORD_SONG remote -> PC; SYS-REC-01 / D29 say recording is base-only (D29 is the later owner decision, 2026-11-12: remote recording not wanted), so sec. 2 / 3.3 likely only need rewording; no remote recording is to be built. Owner rewords. Not part of this gap: remote manual organ-on is required (SYS-ORG-07, gap 5); resume is the missing message of gap 13 (SA-2, Q-SA-1, Q-RD-1) | this spec |

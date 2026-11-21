@@ -1,4 +1,4 @@
-"""FW_UPDATE_* client of the harness (like ../midicontrolpy-sw/src/firmware_update.cpp, but with exact control over what and
+"""FW_UPDATE_* client of the harness (like ../midicontrol-sw/src/firmware_update.cpp, but with exact control over what and
 when is sent): stopping after N bytes, altered images. Transport = anything with send(Packet)/recv(timeout, pred)/drain(),
 i.e. usblink.Link (base application, remote via the base) or a Link on the base bootloader port (abcd:1235)."""
 

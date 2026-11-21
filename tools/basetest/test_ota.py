@@ -1,7 +1,7 @@
 """OTA under running watchdogs (Task 7B): remote via the base, base via the CDC, base with a probe reset in the middle of the transfer.
 The IWDG + loop watchdog run on both boards (6C/6D): this verifies that the bootloader and the application kick them during erase/staging.
 
-The PC updater (../midicontrolpy-sw `midicontrol --cmd "update <base|remote> <file>"`) is built externally against the bench
+The PC updater (../midicontrol-sw `midicontrol --cmd "update <base|remote> <file>"`) is built externally against the bench
 RtMidi shim; the path is in $BASETEST_UPDATER (mandatory, no default). The updater holds the protocol CDC (flock/TIOCEXCL),
 so the harness link is detached for the duration of the updater. The log CDC is held by the harness (the updater's LogPort points to a nonexistent file).
 Remote: it restarts after the OTA; if it does not come back within 30 s, the test fails (and is NOT repeated). Files: BASETEST_REMOTE_BIN
