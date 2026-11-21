@@ -99,6 +99,7 @@ namespace router {
 	// Restart into the bootloader (ENTER_BOOTLOADER)
 	static constexpr uint32_t kEnterBootMagic = 0xB00710AD; // must match the bootloader
 	static bool _enterBootloader = false;
+	static routercore::BootNotice _bootNotice; // A8
 	static uint32_t _enterBootloaderAt = 0; // nowMs()
 
 	// ── Helper functions ──────────────────────────────────────────────────
@@ -266,6 +267,7 @@ namespace router {
 		uint8_t pc = static_cast<uint8_t>(isPcAlive());
 		const uint16_t nonce = _pcSession.nonce();
 		const bool nonceDue = _nonceRelay.pending(nonce);
+		if (_bootNotice.active()) return; // A8: the remote clears BASE_UPDATING on a KEEPALIVE, so none until the reset
 		if (!force && (now - _lastKeepalive) < KEEPALIVE_PERIOD && (pc != 0) == lastPc && !nonceDue) return;
 		_lastKeepalive = now;
 		if (!Bluetooth::canSendData()) return; // a pending nonce stays pending: retried from forward() and every loop pass
@@ -276,6 +278,15 @@ namespace router {
 		const uint8_t payload[4] = {pc, static_cast<uint8_t>(Bluetooth::linkStats().rssiNow(stmcpp::systick::getTicks())),
 									static_cast<uint8_t>(nonce), static_cast<uint8_t>(nonce >> 8)};
 		sendSimple(protocol::ADDR_REMOTE, MsgType::KEEPALIVE, payload, 4, Transport::BLE);
+	}
+
+	// A8: SIGNAL_INFO [BASE_UPDATING | SONG_HAS_SECTIONS] to the remote, right after ENTER_BOOTLOADER and 100 ms later.
+	// Best effort, no pending entry: a v1 remote answers NAK UNKNOWN_MSG, which resolvePending ignores. The song bit is the
+	// default (the base does not know the song flag; the PC resyncs it after the update).
+	static void sendBaseUpdating() {
+		if (!_bootNotice.poll(nowMs()) || !Bluetooth::canSendData()) return;
+		const uint8_t flags = protocol::SIGNAL_INFO_BASE_UPDATING | protocol::SIGNAL_INFO_SONG_HAS_SECTIONS;
+		sendSimple(protocol::ADDR_REMOTE, MsgType::SIGNAL_INFO, &flags, 1, Transport::BLE);
 	}
 
 	static void requestBootloader() {
@@ -461,6 +472,7 @@ namespace router {
 				requestBootloader();
 				_enterBootloader = true;
 				_enterBootloaderAt = nowMs() + 250u;
+				_bootNotice.start(nowMs()); // A8: tell the remote ("Zakladna: aktualizace"), sent from process()
 				break;
 
 			default:
@@ -616,6 +628,7 @@ namespace router {
 		}
 
 		retryPending();
+		sendBaseUpdating();
 		sendKeepaliveToRemote();
 		flushCdc();
 		logChanges();

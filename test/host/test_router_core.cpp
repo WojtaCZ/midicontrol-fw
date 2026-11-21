@@ -631,3 +631,34 @@ TEST(StatusResp, V1BaseOldPcPrefixUnchanged) {
 	EXPECT_EQ(p[2], 0);
 	EXPECT_EQ(p[3], 1);
 }
+
+// A8: ENTER_BOOTLOADER announces the update to the remote once at once and once more 100 ms later, then stays quiet;
+// the base sends no KEEPALIVE while the notice is active (the remote clears BASE_UPDATING on a KEEPALIVE).
+TEST(A8, BootNoticeSendsTwiceThenStops) {
+	routercore::BootNotice n;
+	EXPECT_FALSE(n.active());
+	EXPECT_FALSE(n.poll(1000));
+	n.start(1000);
+	EXPECT_TRUE(n.active());
+	EXPECT_TRUE(n.poll(1000));	// at once
+	EXPECT_FALSE(n.poll(1050)); // not yet
+	EXPECT_FALSE(n.poll(1099));
+	EXPECT_TRUE(n.poll(1100));	// the resend
+	EXPECT_FALSE(n.poll(1101));
+	EXPECT_FALSE(n.poll(1250)); // exactly two frames per start
+	EXPECT_TRUE(n.active());	// keeps blocking KEEPALIVE until the reset
+}
+
+TEST(A8, BootNoticeAcrossClockWrap) {
+	routercore::BootNotice n;
+	n.start(0xFFFFFFC0u);
+	EXPECT_TRUE(n.poll(0xFFFFFFC0u));
+	EXPECT_FALSE(n.poll(0xFFFFFFF0u));
+	EXPECT_TRUE(n.poll(0xFFFFFFC0u + 100u)); // wrapped deadline
+}
+
+TEST(A8, BaseUpdatingFlagValue) {
+	// the frame the router sends: BASE_UPDATING | SONG_HAS_SECTIONS = 0x03, bit1 as in PROTOCOL.md
+	EXPECT_EQ(protocol::SIGNAL_INFO_BASE_UPDATING, 0x02);
+	EXPECT_EQ(protocol::SIGNAL_INFO_BASE_UPDATING | protocol::SIGNAL_INFO_SONG_HAS_SECTIONS, 0x03);
+}

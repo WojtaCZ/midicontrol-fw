@@ -15,6 +15,28 @@ namespace routercore {
 	// Has the deadline been reached? (both on the same free-running clock; wrap-safe while less than 2^31 apart)
 	bool deadlineReached(uint32_t now, uint32_t deadline);
 
+	// A8: "the base is about to update" announcement to the remote. ENTER_BOOTLOADER starts it; poll() reports when a
+	// SIGNAL_INFO [BASE_UPDATING] is due: once at once and once more RESEND_MS later (best effort, no ACK wait; the base
+	// resets at 250 ms). While active() the base sends no KEEPALIVE (the remote clears the state on the next one).
+	class BootNotice {
+	public:
+		static constexpr uint32_t RESEND_MS = 100;
+		void start(uint32_t now) { _active = true; _sent = 0; _t0 = now; }
+		bool active() const { return _active; }
+		// true when a frame is due now (call every loop pass; it returns true at most twice per start)
+		bool poll(uint32_t now) {
+			if (!_active || _sent >= 2) return false;
+			if (_sent == 1 && !deadlineReached(now, _t0 + RESEND_MS)) return false;
+			++_sent;
+			return true;
+		}
+
+	private:
+		bool	 _active = false;
+		uint8_t	 _sent	 = 0;
+		uint32_t _t0	 = 0;
+	};
+
 	// Presence of a peer (the PC on USB-CDC): alive from a received packet, lost after `loss` without one.
 	// Lost is a latch (BF-1): only a received packet makes the peer alive again, never the clock wrapping.
 	class PeerPresence {
