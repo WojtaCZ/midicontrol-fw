@@ -135,6 +135,21 @@ namespace {
 		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 	}
 
+	// Millisecond clock for the FW_UPDATE_STATUS retry, derived from the cycle counter (16 MHz). Accumulated so that the
+	// 32-bit millisecond value never wraps against CYCCNT's own wrap. Call at least every few seconds (the main loop does).
+	uint32_t nowMs() {
+		static uint32_t lastCycles = 0, remainder = 0, ms = 0;
+		const uint32_t c = DWT->CYCCNT;
+		remainder += c - lastCycles;
+		lastCycles = c;
+		ms += remainder / 16000u;
+		remainder %= 16000u;
+		return ms;
+	}
+
+	// After CRC_OK the app is applied at once; the PC's ACK of that last status is awaited at most this long (A4).
+	constexpr uint32_t kApplyAckCycles = 250u * 16000u;
+
 	void showProgress(const char *hint, uint8_t percent) {
 		boot::oled::show("Aktualizace", hint, percent);
 	}
@@ -148,6 +163,7 @@ namespace {
 	void onPacket(const protocol::Packet &in) {
 		protocol::Packet out;
 		bool hasOut = false;
+		if (in.msgType == protocol::MsgType::ACK) s_rx.onAck(in); // the PC's ACK of our FW_UPDATE_STATUS
 		auto action = s_rx.handle(in, out, hasOut);
 		if (action == boot::FwReceiver::Action::None) return;
 		s_lastPacketCycles = DWT->CYCCNT;
@@ -217,6 +233,23 @@ extern "C" void SystemInit(void) {
 	#endif
 }
 
+namespace {
+	// One pass of the USB device stack plus the packet parser.
+	void serviceUsb() {
+		tud_task();
+
+		if (tud_cdc_available()) {
+			uint8_t buf[64];
+			uint32_t n = tud_cdc_read(buf, sizeof(buf));
+			for (uint32_t i = 0; i < n; ++i) {
+				if (s_parser.feed(buf[i])) {
+					onPacket(s_parser.getPacket());
+				}
+			}
+		}
+	}
+}
+
 extern "C" int main(void) {
 	usbClockInit();
 
@@ -245,16 +278,12 @@ extern "C" int main(void) {
 
 	while (1) {
 		boot::wdg::kick(); // the application's IWDG keeps running after ENTER_BOOTLOADER and cannot be stopped
-		tud_task();
+		serviceUsb();
 
-		if (tud_cdc_available()) {
-			uint8_t buf[64];
-			uint32_t n = tud_cdc_read(buf, sizeof(buf));
-			for (uint32_t i = 0; i < n; ++i) {
-				if (s_parser.feed(buf[i])) {
-					onPacket(s_parser.getPacket());
-				}
-			}
+		// FW_UPDATE_STATUS the PC has not ACKed yet: resend the same frame (same PacketId), 500 ms x 3.
+		{
+			protocol::Packet st;
+			if (s_rx.pollStatusRetry(nowMs(), st)) sendPacket(st);
 		}
 
 		// The PC went silent in the middle of a transfer (cable, cancellation): prompt for a retry, the pointer stays.
@@ -265,6 +294,12 @@ extern "C" int main(void) {
 		}
 
 		if (s_applyRequested) {
+			// The CRC_OK status was just sent: give the PC's ACK of it a short moment (never longer, the reboot must not wait).
+			const uint32_t t0 = DWT->CYCCNT;
+			while (s_rx.awaitingStatusAck() && DWT->CYCCNT - t0 < kApplyAckCycles) {
+				boot::wdg::kick();
+				serviceUsb();
+			}
 			// Flush the final ACK, then reset into the freshly programmed app.
 			for (volatile uint32_t i = 0; i < 400000; ++i) {
 				boot::wdg::kick();
