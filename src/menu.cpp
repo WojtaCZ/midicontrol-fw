@@ -858,6 +858,10 @@ recording::State recordingState() {
     return _recording.state();
 }
 
+void recordingPcLost() {
+    _recording.pcLost();
+}
+
 void setRecordCallback(RecordCallback cb) {
     _recordCallback = cb;
 }

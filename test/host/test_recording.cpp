@@ -95,6 +95,14 @@ TEST(Recording, PcLostGoesIdle) {
 	EXPECT_EQ(m.state(), State::Idle);
 }
 
+TEST(Recording, PressAfterPcLostDuringRecordingStartsAgain) {
+	Machine m;
+	m.signalRecording();
+	m.pcLost();
+	EXPECT_EQ(m.press(), Action::SendStart);
+	EXPECT_EQ(m.state(), State::Starting);
+}
+
 TEST(Recording, LateFailureOutsideAnAttemptIsIgnored) {
 	Machine m;
 	m.requestFailed(Failure::Nak, NakReason::BUSY);

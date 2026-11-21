@@ -64,6 +64,8 @@ namespace GUI {
     void recordingSignal(bool recording);
     void recordingFailed(routercore::Failure f, protocol::NakReason reason);
     recording::State recordingState();
+    // The PC was lost or restarted: it has no recording any more, so the state returns to Idle (I1).
+    void recordingPcLost();
     // Sender for RECORD_SONG (start = true: [0x01], false: [0x00]); set by main
     using RecordCallback = void (*)(bool start);
     void setRecordCallback(RecordCallback cb);

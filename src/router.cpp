@@ -285,7 +285,7 @@ namespace router {
 	// Best effort, no pending entry: a v1 remote answers NAK UNKNOWN_MSG, which resolvePending ignores. The song bit is the
 	// default (the base does not know the song flag; the PC resyncs it after the update).
 	static void sendBaseUpdating() {
-		if (!_bootNotice.poll(nowMs()) || !Bluetooth::canSendData()) return;
+		if (!Bluetooth::canSendData() || !_bootNotice.poll(nowMs())) return; // poll() consumes a send: only when the link can take it (M2)
 		const uint8_t flags = protocol::SIGNAL_INFO_BASE_UPDATING | protocol::SIGNAL_INFO_SONG_HAS_SECTIONS;
 		sendSimple(protocol::ADDR_REMOTE, MsgType::SIGNAL_INFO, &flags, 1, Transport::BLE);
 	}
@@ -450,6 +450,7 @@ namespace router {
 				// KEEPALIVE is not ACKed, so it never passes the duplicate filter above.
 				if (pkt.source == protocol::ADDR_PC && routercore::onPcKeepalive(_pcSession, _dedup, pkt.payload, pkt.payloadLen)) {
 					Debug::log(Debug::Level::INFO, "router", "new PC session (nonce 0x%04x)", _pcSession.nonce());
+					GUI::recordingPcLost(); // a new PC process has no recording (I1)
 					sendKeepaliveToRemote(true); // before any later frame of this pass is forwarded
 				}
 				sendSimple(pkt.source, MsgType::KEEPALIVE_ACK, nullptr, 0, via);
@@ -563,6 +564,7 @@ namespace router {
 			GUI::dismissNowPlaying();
 			// A3 / owner 2026-11-16: the number we left on the indicator goes, a foreign master's number stays
 			display::clearIfOwn();
+			GUI::recordingPcLost(); // I1: no SIGNAL_STOPPED will come
 			// Q1-8 b: a restarted PC process numbers its packets from 1 again; do not ACK-and-drop its first ones
 			_dedup.forget(protocol::ADDR_PC);
 			_pcSession.forget();
