@@ -11,7 +11,7 @@
 //   event <name> [args]                       playing <song> | stopped | anchor <label> | songs <a;b;c|-> [more]
 //                                             | songs_delay | songs_timeout | pairing <text> | fw <transfer|install|error> <pct>
 //                                             | fw_end | recording <on|off> | recfail <busy|nosupport|other|none> | pclost | fail <GET_SONG_LIST|PLAY_SONG|STOP_SONG> <text> | sync_power
-//   expect screen <id>                        id: splash main settings firmware display bluetooth pairing
+//   expect screen <id>                        id: splash main settings service firmware display bluetooth pairing
 //                                             songs_loading songs nowplaying fwupdate nopc recording
 //   expect text <line> | expect notext <line> exact match of one drawn text line (trimmed; a line wider
 //                                             than the display shows its clipped window, as on the OLED)
@@ -44,6 +44,7 @@ static const char *screenId() {
 	if (c == &splashScreen) return "splash";
 	if (c == &mainScreen) return "main";
 	if (c == &settingsScreen) return "settings";
+	if (c == &serviceScreen) return "service";
 	if (c == &firmwareScreen) return "firmware";
 	if (c == &displayScreen) return "display";
 	if (c == &bluetoothScreen) return "bluetooth";

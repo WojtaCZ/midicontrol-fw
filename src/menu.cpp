@@ -92,14 +92,22 @@ static void pairCallback(ui::MenuItem* item, void* userData);
 
 // ── Settings menu items & screen (defined first so mainItems can reference it) ─
 
+// C7 (Q2-29c): the service area; "Ident. MIDI" lives here, out of the normal user's way.
+static ui::MenuItem serviceItems[] = {
+    ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
+    ui::MenuItem::back("Zpet"),
+};
+
+static ui::MenuScreen serviceScreen("Servis", serviceItems, 2);
+
 static ui::MenuItem settingsItems[] = {
     ui::MenuItem::checkbox("LED",  true,  ledMasterCallback),
-    ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
     ui::MenuItem::checkbox("Napajeni varhan", false, powerCallback),
     ui::MenuItem("Verze FW", firmwareCallback),
     ui::MenuItem("Displej",  displayCallback),
     ui::MenuItem("Bluetooth", bluetoothCallback),
     ui::MenuItem("Sparovat ovladac", pairCallback),
+    ui::MenuItem("Servis", static_cast<ui::Screen*>(&serviceScreen)),
     ui::MenuItem::back("Zpet"),
 };
 
@@ -668,7 +676,7 @@ void init() {
 
     // Synchronize the checkboxes from the saved settings
     settingsItems[0].setChecked(settings::ledMasterEnable());
-    settingsItems[1].setChecked(settings::midiRoleIdentifier());
+    serviceItems[0].setChecked(settings::midiRoleIdentifier());
 
     nav.push(&splashScreen);
 }
@@ -695,7 +703,7 @@ void render() {
     // Status icons on the menu screens and on the now playing screen (not on SplashScreen, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
 
-    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen || cur == &nowPlayingScreen);
+    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen || cur == &nowPlayingScreen);
 
     if (showStatusIcons && Bluetooth::isConnected()) {
         int iconX = theme.displayOffsetX + theme.displayWidth - 14;
@@ -762,7 +770,7 @@ static void handleKey(ui::InputEvent event) {
     // because the navigator doesn't have RTTI to auto-detect MenuScreen
     ui::Screen* cur = nav.current();
     if (event == ui::InputEvent::Enter && cur) {
-        if (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen) {
+        if (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen) {
             auto* menu = static_cast<ui::MenuScreen*>(cur);
             ui::MenuItem* sel = menu->selectedItem();
 
@@ -811,7 +819,7 @@ ui::Navigator& navigator() {
 }
 
 ui::MenuItem& checkboxPower() {
-    return settingsItems[2];
+    return settingsItems[1];
 }
 
 ui::MenuItem& checkboxLedMaster() {
@@ -819,7 +827,7 @@ ui::MenuItem& checkboxLedMaster() {
 }
 
 ui::MenuItem& checkboxMidiRole() {
-    return settingsItems[1];
+    return serviceItems[0];
 }
 
 void showPairingResult(const char* text) {
@@ -935,7 +943,7 @@ void requestFailed(protocol::MsgType type, const char* text) {
 }
 
 void syncPowerCheckbox() {
-    settingsItems[2].setChecked(base::current::isEnabled());
+    settingsItems[1].setChecked(base::current::isEnabled());
     nav.forceRender();
 }
 

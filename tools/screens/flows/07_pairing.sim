@@ -8,7 +8,6 @@ key down
 key down
 key down
 key down
-key down
 key enter
 expect screen pairing
 expect text Parovani

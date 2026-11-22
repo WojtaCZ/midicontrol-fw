@@ -1,4 +1,4 @@
-# B3: checkboxes toggle on push and reach the stubbed settings/SSR
+# B3: checkboxes toggle on push and reach the stubbed settings/SSR; C7: Ident. MIDI lives in the Servis submenu
 tick 3000
 key down
 key down
@@ -12,13 +12,26 @@ expect var led=0
 key enter
 expect var led=1
 key down
-expect text Ident. MI
-expect var midi=1
-key enter
-expect var midi=0
-key down
 expect var power=0
 key enter
 expect var power=1
 key enter
 expect var power=0
+# Servis is the row before Zpet (index 6): 5 more Down from Napajeni
+key down
+key down
+key down
+key down
+key down
+expect text Servis
+key enter
+expect screen service
+expect text Ident. MI
+expect var midi=1
+key enter
+expect var midi=0
+key enter
+expect var midi=1
+key down
+key enter
+expect screen settings

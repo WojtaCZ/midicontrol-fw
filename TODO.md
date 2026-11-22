@@ -150,7 +150,7 @@ DONE 2026-11-22: RecordScreen (Priprava / Nahravam + Enter = Stop / Zastavuji / 
 - Manual/facts: only if a removed item was documented (VERIFY: grep the manual facts for each name).
 - Risk / open points: check hardware tests in tools/basetest do not call a removed feature.
 
-### C7 Move "Ident. MIDI" to a service area (Q2-29c)
+### C7 Move "Ident. MIDI" to a service area (Q2-29c) - DONE (C7: Nastaveni > Servis holds Ident. MIDI; flows 04,05,07,25,m01 re-indexed; manual Nastaveni table + screenshots NOT updated here: sw docs hand-off)
 - **Owner answer 2026-11-16 (follow-up):** the submenu name `Servis` is approved (resolves VERIFY (1) below).
 - Goal: the Ident. MIDI checkbox leaves the normal Nastaveni list and moves to a service area (hidden from the normal user).
 - Current code: src/menu.cpp `settingsItems` = LED, Ident. MIDI, Napajeni varhan, Verze FW, Displej, Bluetooth, Sparovat ovladac, Zpet (indices 0..7; `checkboxPower` is index 2; :570-571 set checked state; :499-505 callbacks). Accessors in inc/menu.hpp: `navigator()`, `checkboxPower()`, `checkboxLedMaster()`, `checkboxMidiRole()`. Settings field `midiRoleId` in src/settings.cpp / inc/settings.hpp.

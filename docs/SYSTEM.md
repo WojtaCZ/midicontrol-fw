@@ -496,7 +496,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | Baterie: Napeti / Uroven / Nabiji / Nabito / Nenabiji / Vybiji | Battery page (remote) |
 | Verze FW: Revize / Vetev / Datum / Cas | Firmware version page |
 | Modul: OK / OK, bez RST / neodpovida / mlci | BLE module self-test, Bluetooth page: OK / OK but the reset line does not work / no reply / silent (Q-TG-4) |
-| Ident. MIDI / LED / Displej | Base settings: MIDI identification, status LED, church board page |
+| Ident. MIDI / LED / Displej | Base settings (Ident. MIDI is in the Nastaveni > Servis submenu since C7): MIDI identification, status LED, church board page |
 | Stisk: Nastaveni | Press: settings (hint on the remote's Odpojeno overlay) |
 | MIDIControl BASE / CONTROLLER | Power-on splash, English product name (Q-TG-1) |
 
