@@ -460,12 +460,77 @@ static void playCallback(ui::MenuItem* item, void* userData) {
 static recording::Machine _recording;
 static GUI::RecordCallback _recordCallback = nullptr;
 
+// C3: the recording screen follows recording::Machine. "Priprava" while the PC warms the organ up, "Nahravam"
+// with Enter = Stop, "Zastavuji" until SIGNAL_STOPPED; a refusal (BUSY, protocol v1 PC, any other failure) stays
+// until Enter. "Nahravani nelze: hraje" is the base's own refusal while a song plays (one at a time).
+static bool _recordShown = false;     // the screen is in the navigator stack
+static bool _recordRefused = false;   // the base refused (playing): not a machine state
+
+static void onRecordEnter(void* userData);
+static ui::SplashScreen recordScreen("Nahravani", "", "", onRecordEnter);
+
+static void syncRecordScreen() {
+    const recording::State st = _recording.state();
+    const char* sub = "";
+    const char* com = "";
+    if (_recordRefused) {
+        sub = "Nahravani nelze: hraje";
+    } else {
+        switch (st) {
+            case recording::State::Starting:   sub = "Priprava"; break;
+            case recording::State::Recording:  sub = "Nahravam"; com = "Enter = Stop"; break;
+            case recording::State::Stopping:   sub = "Zastavuji"; break;
+            case recording::State::Busy:       sub = "Zaneprazdneno"; break;
+            case recording::State::NoSupport:  sub = "PC nema nahravani"; break;
+            case recording::State::Failed:     sub = "Nahravani selhalo"; break;
+            case recording::State::Idle:       break;
+        }
+    }
+    const bool want = _recordRefused || st != recording::State::Idle;
+    if (want) {
+        if (fwPushed) return; // the update screen owns the display
+        recordScreen.setSubtitle(sub);
+        recordScreen.setComment(com);
+        if (!_recordShown) {
+            nav.push(&recordScreen);
+            _recordShown = true;
+        }
+        Oled::wakeupCallback();
+    } else if (_recordShown) {
+        _recordShown = false;
+        if (nav.current() == &recordScreen) nav.pop();
+    }
+    nav.forceRender();
+}
+
+static void onRecordEnter(void* userData) {
+    (void)userData;
+    if (_recordRefused) {
+        _recordRefused = false;
+    } else {
+        switch (_recording.state()) {
+            case recording::State::Recording:
+            case recording::State::Stopping:
+                if (_recording.press() != recording::Action::None && _recordCallback) _recordCallback(false);
+                break;
+            case recording::State::Starting: return; // wait for the PC (the organ warms up)
+            default: _recording.dismiss(); break;
+        }
+    }
+    syncRecordScreen();
+}
+
 // The base is the only place a recording starts (A7). The menu item starts it, or stops a running one.
 static void recordCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
+    if (_nowPlayingActive) { // one at a time: a song plays
+        _recordRefused = true;
+        syncRecordScreen();
+        return;
+    }
     const recording::Action a = _recording.press();
-    if (!_recordCallback || a == recording::Action::None) return;
-    _recordCallback(a == recording::Action::SendStart); // TODO(C3): show the state ("Priprava"/"Nahravam"/...)
+    if (_recordCallback && a != recording::Action::None) _recordCallback(a == recording::Action::SendStart);
+    syncRecordScreen();
 }
 
 static void powerCallback(ui::MenuItem* item, void* userData) {
@@ -772,6 +837,7 @@ void showFwProgress(const char* hint, uint8_t percent) {
         songListDelayScheduler.stop();
         _pairStatusShown = false;
         _nowPlayingActive = false;
+        _recordShown = false;
         // Stack = main menu + update screen (no splash/submenu below it)
         nav.reset(&mainScreen);
         nav.push(&fwProgressScreen);
@@ -848,10 +914,12 @@ void syncPowerCheckbox() {
 void recordingSignal(bool recording) {
     if (recording) _recording.signalRecording();
     else _recording.signalStopped();
+    syncRecordScreen();
 }
 
 void recordingFailed(routercore::Failure f, protocol::NakReason reason) {
     _recording.requestFailed(f, reason);
+    syncRecordScreen();
 }
 
 recording::State recordingState() {
@@ -860,6 +928,8 @@ recording::State recordingState() {
 
 void recordingPcLost() {
     _recording.pcLost();
+    _recordRefused = false;
+    syncRecordScreen();
 }
 
 void setRecordCallback(RecordCallback cb) {

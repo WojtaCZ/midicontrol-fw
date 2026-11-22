@@ -1,9 +1,6 @@
-# B2: "Nahraj" is a no-op (F1-8); no remote stored: title "Sparuj ovladac"
+# B2: no remote stored: title "Sparuj ovladac"
 tick 3000
 expect text Hlavni menu
-key down
-key enter
-expect screen main
 state remote=-
 tick 30
 expect text Sparuj ovladac

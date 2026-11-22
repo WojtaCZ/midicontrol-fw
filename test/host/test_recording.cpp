@@ -108,3 +108,16 @@ TEST(Recording, LateFailureOutsideAnAttemptIsIgnored) {
 	m.requestFailed(Failure::Nak, NakReason::BUSY);
 	EXPECT_EQ(m.state(), State::Idle);
 }
+
+TEST(Recording, DismissLeavesRefusalButNotARunningRecording) {
+	Machine m;
+	m.press();
+	m.requestFailed(Failure::Nak, NakReason::BUSY);
+	EXPECT_EQ(m.state(), State::Busy);
+	m.dismiss();
+	EXPECT_EQ(m.state(), State::Idle);
+	m.press();
+	m.signalRecording();
+	m.dismiss();
+	EXPECT_EQ(m.state(), State::Recording);
+}

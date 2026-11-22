@@ -1,7 +1,7 @@
 #pragma once
 // A7: the base's side of "Nahraj" (RECORD_SONG 0x12 Base -> PC). Pure logic, no hardware: the menu and the router
 // feed events, the machine says what to send and what the state is. The screens that show the state ("Priprava",
-// "Nahravam", "Zaneprazdneno", "PC nema nahravani") are task C3.
+// "Nahravam", "Zaneprazdneno", "PC nema nahravani") are drawn by RecordScreen in src/menu.cpp (C3).
 
 #include "protocol/types.hpp"
 #include "router_core.hpp"
@@ -14,8 +14,8 @@ namespace recording {
 		Starting,	// RECORD_SONG [1] sent, waiting for SIGNAL_RECORDING (the organ warm-up takes seconds)
 		Recording,	// SIGNAL_RECORDING seen
 		Stopping,	// RECORD_SONG [0] sent, waiting for SIGNAL_STOPPED
-		Busy,		// the PC answered NAK BUSY (a recording or song runs, or an update): C3 "Zaneprazdneno"
-		NoSupport,	// the PC answered NAK UNKNOWN_MSG (protocol v1 PC): C3 "PC nema nahravani"
+		Busy,		// the PC answered NAK BUSY (a recording or song runs, or an update): screen "Zaneprazdneno"
+		NoSupport,	// the PC answered NAK UNKNOWN_MSG (protocol v1 PC): screen "PC nema nahravani"
 		Failed		// any other NAK, no answer, not sent
 	};
 	enum class Action : uint8_t { None, SendStart, SendStop };
@@ -29,6 +29,7 @@ namespace recording {
 		void   signalRecording();		// SIGNAL_RECORDING (from the PC, or the copy forwarded to the remote)
 		void   signalStopped();			// SIGNAL_STOPPED: the recording (or the start attempt) ended
 		void   requestFailed(routercore::Failure f, protocol::NakReason reason);	// RECORD_SONG NAKed / unanswered
+		void   dismiss();				// the user closed a refusal/failure message: back to Idle (no effect in the other states)
 		void   pcLost();				// the PC was declared lost
 		State  state() const { return _state; }
 		bool   recordingOrStarting() const { return _state == State::Starting || _state == State::Recording || _state == State::Stopping; }
