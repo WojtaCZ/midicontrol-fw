@@ -3,6 +3,7 @@
 #include "settings.hpp"
 #include "main.hpp"
 #include "display.hpp"
+#include "logic/led_logic.hpp"
 #include "bluetooth.hpp"
 #include <cstring>
 #include <core_cm4.h>
@@ -34,8 +35,8 @@ namespace LED{
 		Pixel(LED::Color(0, 0, 0, 0)),       // USB
 		Pixel(LED::Color(0, 0, 0, 0)),       // Display
 		Pixel(LED::Color(0, 0, 0, 0)),       // Current
-		Pixel(LED::Color(255, 0, 0, 0.1)),   // MIDI A
-		Pixel(LED::Color(0, 255, 0, 0.1)),   // MIDI B
+		Pixel(LED::Color(0, 0, 0, 0)),       // MIDI A
+		Pixel(LED::Color(0, 0, 0, 0)),       // MIDI B
 		Pixel(LED::Color(0, 0, 0, 0)),       // Bluetooth
 	});
 
@@ -116,8 +117,8 @@ namespace LED{
 		stmcpp::reg::set(std::ref(TIM15->CR1), TIM_CR1_CEN); // Enable counter
 		stmcpp::reg::set(std::ref(TIM17->CR1), TIM_CR1_CEN); // Enable counter
 
-		update();
-
+		// Colours come from the settings (already loaded): no flash of the static defaults, master off = all dark (C2)
+		updateStatus();
 	}
 
 	void update() {
@@ -294,16 +295,24 @@ namespace LED{
 			pixels[PIXEL_CURRENT].setColorQuiet(off);
 		}
 
-		// MIDI A (DIN in) — red if roleId, blinks white on received bytes if master
+		// MIDI A (DIN in) — red with Ident. MIDI, blinks white on received bytes; dark with the master LED off
 		{
-			bool blink = master && (now - activityTimestamp[PIXEL_MIDIA]) < BLINK_DURATION;
-			pixels[PIXEL_MIDIA].setColorQuiet(blink ? white : (roleId ? red : off));
+			bool act = (now - activityTimestamp[PIXEL_MIDIA]) < BLINK_DURATION;
+			switch (ledlogic::midiLed(master, roleId, act)) {
+				case ledlogic::MidiLed::Blink: pixels[PIXEL_MIDIA].setColorQuiet(white); break;
+				case ledlogic::MidiLed::Role: pixels[PIXEL_MIDIA].setColorQuiet(red); break;
+				case ledlogic::MidiLed::Off: pixels[PIXEL_MIDIA].setColorQuiet(off); break;
+			}
 		}
 
-		// MIDI B (DIN out) — green if roleId, blinks white on sent packets if master
+		// MIDI B (DIN out) — green with Ident. MIDI, blinks white on sent packets; dark with the master LED off
 		{
-			bool blink = master && (now - activityTimestamp[PIXEL_MIDIB]) < BLINK_DURATION;
-			pixels[PIXEL_MIDIB].setColorQuiet(blink ? white : (roleId ? green : off));
+			bool act = (now - activityTimestamp[PIXEL_MIDIB]) < BLINK_DURATION;
+			switch (ledlogic::midiLed(master, roleId, act)) {
+				case ledlogic::MidiLed::Blink: pixels[PIXEL_MIDIB].setColorQuiet(white); break;
+				case ledlogic::MidiLed::Role: pixels[PIXEL_MIDIB].setColorQuiet(green); break;
+				case ledlogic::MidiLed::Off: pixels[PIXEL_MIDIB].setColorQuiet(off); break;
+			}
 		}
 
 		// Bluetooth
