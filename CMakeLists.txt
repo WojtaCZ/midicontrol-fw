@@ -79,7 +79,6 @@ set(SOURCES
 	${SOURCE_BASE}/led.cpp
 	${SOURCE_BASE}/midi.cpp
 	${SOURCE_BASE}/oled.cpp
-	#${SOURCE_BASE}/oled_fonts.cpp
 	${SOURCE_BASE}/usb.cpp
 	${SOURCE_BASE}/usb_descriptors.c
 	${SOURCE_BASE}/debug.cpp

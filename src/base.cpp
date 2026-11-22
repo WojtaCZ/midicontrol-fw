@@ -106,27 +106,6 @@ namespace base{
 		);
 
 	}
-
-	void dfuCheck(){
-		// If the encoder isn't pressed
-		if(GPIOB->IDR & GPIO_IDR_ID1) return;
-
-		int i = 0;
-
-		while(i < 1000)
-		{
-			i++;
-			if(GPIOB->IDR & GPIO_IDR_ID1) return;
-		}
-		
-		// DFU splash display removed — parent project should set up
-		// a splash screen via ui::Navigator before entering DFU mode.
-
-		#define FW_ADDR    0x1FFF0000
-		SCB->VTOR = FW_ADDR & 0xFFFF;
-		__asm__ volatile("msr msp, %0"::"r"(*(volatile uint32_t *)FW_ADDR));
-		(*(void (**)())(FW_ADDR + 4))();
-	}
 } 
 
 namespace base::current{
@@ -156,12 +135,6 @@ namespace base::current{
 	void disable(){
 		_source.clear();
 		current_enable.clear();
-		LED::notifyActivity(LED::PIXEL_CURRENT);
-	}
-
-	void toggle(void){
-		if (isEnabled()) _source.clear(); else _source.setSource(organsrc::Source::MENU);
-		current_enable.toggle();
 		LED::notifyActivity(LED::PIXEL_CURRENT);
 	}
 

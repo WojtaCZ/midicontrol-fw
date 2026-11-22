@@ -34,8 +34,6 @@ namespace Debug {
 	void banner();
 	// Main loop: sends the ring to CDC 1 if the port is open (DTR); commands "level x", "dump", "help". Never blocks.
 	void process();
-	Level getLevel();
-	void setLevel(Level level);
 
 }
 

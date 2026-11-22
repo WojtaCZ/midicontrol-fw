@@ -358,10 +358,6 @@ namespace display {
         return connected;
     }
 
-    bool wasChanged(){
-        return changed;
-    }
-
     // Converts the internal digit state to a SysEx byte (0x00-0x09 or 0x0F=off)
     static uint8_t stateToSysexDigit(uint8_t state) {
         return (state & 0xF0) == 0xE0 ? 0x0F : (state & 0x0F);

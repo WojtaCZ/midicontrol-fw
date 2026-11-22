@@ -141,7 +141,7 @@ DONE 2026-11-22: RecordScreen (Priprava / Nahravam + Enter = Stop / Zastavuji / 
 - Manual/facts: none visible except SYSTEM.md router/dedup row (VERIFY row id: grep -n "dedup" docs/SYSTEM.md).
 - Risk / open points: VERIFY whether the PC resends signals with the same id on purpose (retries) or reuses ids across different signals. Check midicontrol-sw packet id allocation (`grep -rn packetId` there) before choosing "last id only".
 
-### C6 Remove dead firmware code (Q2-27)
+### C6 Remove dead firmware code (Q2-27) - DONE (C6: removed dfuCheck, current::toggle, isProtocolPacketAvailable, Debug get/setLevel, display::wasChanged, Oled isInverted/getBufferSize, oled_fonts.cpp, empty git.cpp; KEPT signalError/frontStrip pending owner Q, Color::shiftHue chain, set* of display, fault::clear (absent))
 - Goal: delete code with no callers listed in the audit; keep protocol items (RECORD_SONG, SIGNAL_RECORDING) reserved.
 - Current code: list at audit/STEP2-REPORT.md lines 255-290 (dfuCheck and others); STEP4 facts mention `dfuCheck` has no callers; `signalError` (src/main.cpp ~:739-757, declared ~:95) has no callers; led.cpp frontStrip is only used by it.
 - Change: for each entry in that list: re-grep for callers (`grep -rn <name> src inc test tools`), delete the function and declaration, drop includes that became unused, fix CMake lists if a file becomes empty. Decide on `signalError`/frontStrip: it is a fault indicator, not dead by purpose; VERIFY with owner before removing (not clearly covered by Q2-27). Do not touch lib/*.

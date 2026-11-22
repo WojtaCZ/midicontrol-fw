@@ -333,7 +333,6 @@ namespace Bluetooth{
     stmcpp::units::duration getDataReceivedTimestamp();
 
     // Protocol packets — queue of received packets (filled by process())
-    bool isProtocolPacketAvailable();
     bool getProtocolPacket(protocol::Packet &pkt);
 
     // Queues a packet into the TX queue (DMA). Returns false when it cannot be sent (no link / queue full).
