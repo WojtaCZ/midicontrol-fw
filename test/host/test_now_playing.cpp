@@ -93,3 +93,27 @@ TEST(NowPlaying, StopFailedAfterStoppedIsIgnored) {
 	m.stopFailed();
 	EXPECT_EQ(m.state(), State::Stopped);
 }
+
+// C4 (SYS-USE-24): after the first anchor the encoder picks Stop or "Pridat sloku"; before it only Stop exists.
+TEST(NowPlaying, AddVerseOnlyAfterAnchor) {
+	Machine m;
+	m.start();
+	m.toggle();
+	EXPECT_EQ(m.selection(), nowplaying::Selection::Stop) << "no add-verse before the first anchor";
+	m.anchorSeen();
+	EXPECT_TRUE(m.addVerseAvailable());
+	m.toggle();
+	EXPECT_EQ(m.selection(), nowplaying::Selection::AddVerse);
+	EXPECT_EQ(m.press(100), Action::SendAddVerse);
+	EXPECT_EQ(m.state(), State::Playing) << "add-verse does not stop playback";
+	m.toggle();
+	EXPECT_EQ(m.press(200), Action::SendStop);
+}
+
+TEST(NowPlaying, NewSongClearsAnchor) {
+	Machine m;
+	m.start();
+	m.anchorSeen();
+	m.forgetAnchor();
+	EXPECT_FALSE(m.addVerseAvailable());
+}

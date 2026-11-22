@@ -173,7 +173,7 @@ power policy and serves a status web page.
 | SYS-USE-21 | Resume: a resume command from the remote or base continues the paused song at the same spot (same section, same position); SIGNAL_PLAYING sent again (D6) | NOT IMPLEMENTED (gap) | no resume message in PROTOCOL.md, no UI |
 | SYS-USE-22 | Song code rule: 1-4 digits, value at most 1999, plus an optional letter A-D. Every unit checks it: the remote on entry and before PLAY_SONG; the PC at every entry point (PLAY_SONG -> NAK INVALID_PAYLOAD, console/CLI, file lookup, song list, stops editor, songcheck); the base on the indicator path. The song list offers only files whose name is a valid code (Q1-2 a, 2026-11-14) | partial | step 2: PC `songs::validCode` (bab7e84, 5c42931), remote 5ecea01; base indicator path not yet (gap 32). Pending: "012" and "12" are two different codes (Q-W2-8). The frame bound MAX_SONG_CODE_LEN stays 8 |
 | SYS-USE-23 | The base is a full player: add verse from the base (P1-6) and the whole song list (the 32-song cap goes, or the list pages like the remote's). Until then the base shows a message when the list is cut at 32 (P1-7 a) (Q1-11 b, 2026-11-14) | NOT IMPLEMENTED (gap) | base menu.cpp; waits for the bench stack watermark (RAM 95%), gap 39 |
-| SYS-USE-24 | Base NowPlaying screen: a turn of the encoder selects Stop or "Pridat sloku" (add verse); a press runs the selected action (Q-UI2-4, 2026-11-15) | NOT IMPLEMENTED (gap) | base menu.cpp NowPlaying; gap 40 |
+| SYS-USE-24 | Base NowPlaying screen: a turn of the encoder selects Stop or "Pridat sloku" (add verse); a press runs the selected action (Q-UI2-4, 2026-11-15) | IMPLEMENTED (C4; the second button appears after the first SIGNAL_ANCHOR; REPLAY_ANCHOR sent) | base menu.cpp NowPlaying; gap 40 |
 | SYS-USE-25 | Base power-on splash closes by itself after 3 s, unless the user already pressed a key: then it stays until Enter (P1-8) | implemented, not bench-verified | base `splashguard::Guard` (step 2, ee890a6), tests SplashGuard.*. Up/Down alone no longer close it (Q-D-1) |
 
 ### 4.4 Link loss (BLE)
@@ -467,7 +467,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | Bez odpovedi | No answer (retries exhausted) |
 | Chybny kod | Invalid song code |
 | Nejvyse 1999 | At most 1999 (remote, song code above the cap, Q1-2 a) |
-| Pridat sloku | Add verse (base NowPlaying action, SYS-USE-24, not implemented yet) |
+| Pridat sloku | Add verse (base NowPlaying action, SYS-USE-24) |
 | Zadne pisne | No songs |
 | Predehra | Prelude |
 | Sloka n / Sloka n +k | Verse n / verse n replayed k extra times (PC label; the OLEDs show "Sloka: n" / "Sloka: n (xk)", "Predehra (xk)") |

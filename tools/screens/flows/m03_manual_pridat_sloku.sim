@@ -1,11 +1,14 @@
-# Manual postup-pridat-sloku: "the base can only stop while playing" (no add-verse button on the base)
+# Manual postup-pridat-sloku (C4): after the first anchor the knob picks Stop or Pridat sloku
 tick 3000
 event playing 406
-event anchor Sloka 2
 expect screen nowplaying
 key down
-key up
-expect var stops=0
 key enter
+expect var addverses=0
 expect var stops=1
-expect text Zastavuji
+event playing 406
+tick 100
+event anchor Sloka 2
+key down
+key enter
+expect var addverses=1

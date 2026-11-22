@@ -5,7 +5,6 @@ expect screen nowplaying
 expect text Prehravam
 event anchor Sloka 2 +1
 expect text Sloka: 2 (x1)
-key down
 expect screen nowplaying
 key enter
 expect var stops=1

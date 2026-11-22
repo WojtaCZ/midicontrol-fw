@@ -16,7 +16,7 @@
 //   expect text <line> | expect notext <line> exact match of one drawn text line (trimmed; a line wider
 //                                             than the display shows its clipped window, as on the OLED)
 //   expect scrolled <line>                    advances time (<= 12 s) until a scrolling line was seen from start to end
-//   expect var <k>=<v>                        requests lastOffset played stops recstarts recstops power led midi sleeping
+//   expect var <k>=<v>                        requests lastOffset played stops addverses recstarts recstops power led midi sleeping
 // Output: one JSON object per step: step, cmd, screen, text[] (drawn text, top to bottom), frame (FNV-1a of
 // the visible 128x64 pixels), ok.
 
@@ -34,7 +34,7 @@
 namespace GUI {
 using E = ui::InputEvent;
 
-static int		  g_requests = 0, g_lastOffset = -1, g_stops = 0, g_recStarts = 0, g_recStops = 0;
+static int		  g_requests = 0, g_lastOffset = -1, g_stops = 0, g_recStarts = 0, g_recStops = 0, g_addVerses = 0;
 static std::string g_played;
 
 static stmcpp::scheduler::Scheduler splashSched(3000_ms, [] { GUI::splashAutoDismiss(); }, false, false);
@@ -145,6 +145,7 @@ static std::string getVar(const std::string &k) {
 	if (k == "lastOffset") return std::to_string(g_lastOffset);
 	if (k == "played") return g_played;
 	if (k == "stops") return std::to_string(g_stops);
+	if (k == "addverses") return std::to_string(g_addVerses);
 	if (k == "recstarts") return std::to_string(g_recStarts);
 	if (k == "recstops") return std::to_string(g_recStops);
 	if (k == "power") return s.power ? "1" : "0";
@@ -212,6 +213,7 @@ static int runScript(const char *path, const char *outPath) {
 	GUI::setRequestSongListCallback([](uint16_t off) { host::state.requests++; g_requests++; g_lastOffset = off; });
 	GUI::setPlaySongCallback([](const char *n) { g_played = n; });
 	GUI::setStopCallback([] { g_stops++; });
+	GUI::setAddVerseCallback([] { g_addVerses++; });
 	GUI::setRecordCallback([](bool start) { (start ? g_recStarts : g_recStops)++; });
 	splashSched.start();
 	snapshot();

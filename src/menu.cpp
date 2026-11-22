@@ -221,6 +221,7 @@ static void updateBluetoothInfo() {
 // ── Now Playing screen ─────────────────────────────────────────────────
 
 static StopCallback _stopCallback = nullptr;
+static AddVerseCallback _addVerseCallback = nullptr;
 static bool _nowPlayingActive = false;
 
 // ── Song list data ──────────────────────────────────────────────────────
@@ -279,6 +280,7 @@ public:
     static constexpr int INFO_CHARS = 18; // one 7x10 line
 
     void start(const char* code) {
+        if (std::strcmp(code, code_) != 0) machine_.forgetAnchor();
         std::strncpy(code_, code, sizeof(code_) - 1);
         code_[sizeof(code_) - 1] = '\0';
         info_[0] = '\0';
@@ -289,6 +291,7 @@ public:
     // Section label from SIGNAL_ANCHOR
     void setSection(const char* label) {
         formatSection(label, info_, sizeof(info_));
+        machine_.anchorSeen();
         infoScroll_.reset();
         markDirty();
     }
@@ -313,13 +316,23 @@ public:
     bool expired() const { return machine_.expired(stmcpp::systick::getTicks()); }
 
     bool handleInput(ui::InputEvent event) override {
-        if (event != ui::InputEvent::Enter) return true; // the encoder turns nothing here
-        if (machine_.press(stmcpp::systick::getTicks()) == nowplaying::Action::Leave) {
+        if (event == ui::InputEvent::Up || event == ui::InputEvent::Down) {
+            machine_.toggle(); // C4: Stop <-> Pridat sloku (after the first anchor)
+            markDirty();
+            return true;
+        }
+        if (event != ui::InputEvent::Enter) return true;
+        const nowplaying::Action a = machine_.press(stmcpp::systick::getTicks());
+        if (a == nowplaying::Action::Leave) {
             leave();
             return true;
         }
         markDirty();
-        if (_stopCallback) _stopCallback();
+        if (a == nowplaying::Action::SendAddVerse) {
+            if (_addVerseCallback) _addVerseCallback();
+        } else if (_stopCallback) {
+            _stopCallback();
+        }
         return true;
     }
 
@@ -369,11 +382,26 @@ public:
             gfx::text::drawText(fb, *theme.smallFont, buf, theme.leftMargin, infoY, gfx::Anchor::TopLeft, (uint8_t)1);
         }
 
-        // The Stop button, always selected (the only one)
+        // Buttons: Stop alone (selected) until the first anchor; then Stop | Pridat sloku, the encoder picks one
         if (state_ != State::Stopped) {
-            const int x = (theme.displayWidth - (int)btn_stop_selected.width) / 2;
             const int y = theme.displayHeight - (int)btn_stop_selected.height;
-            gfx::drawIcon(fb, btn_stop_selected, x, y, gfx::Anchor::TopLeft, (uint8_t)1);
+            if (!machine_.addVerseAvailable()) {
+                const int x = (theme.displayWidth - (int)btn_stop_selected.width) / 2;
+                gfx::drawIcon(fb, btn_stop_selected, x, y, gfx::Anchor::TopLeft, (uint8_t)1);
+            } else {
+                const bool addSel = machine_.selection() == nowplaying::Selection::AddVerse;
+                const int sw = (int)btn_stop_selected.width;
+                const int x0 = theme.leftMargin + 4;
+                gfx::drawIcon(fb, addSel ? btn_stop_normal : btn_stop_selected, x0, y, gfx::Anchor::TopLeft, (uint8_t)1);
+                const char* lbl = "Pridat sloku";
+                const int lw = 12 * (int)theme.smallFont->width() + 6;
+                const int bx = x0 + sw + 8;
+                const int bh = (int)btn_stop_selected.height;
+                if (addSel) gfx::drawFilledRect(fb, bx, y, lw, bh, (uint8_t)1);
+                else gfx::drawRect(fb, bx, y, lw, bh, (uint8_t)1);
+                gfx::text::drawText(fb, *theme.smallFont, lbl, bx + 3, y + (bh - (int)theme.smallFont->height()) / 2,
+                                    gfx::Anchor::TopLeft, (uint8_t)(addSel ? 0 : 1));
+            }
         }
 
         clearDirty();
@@ -934,6 +962,10 @@ void recordingPcLost() {
 
 void setRecordCallback(RecordCallback cb) {
     _recordCallback = cb;
+}
+
+void setAddVerseCallback(AddVerseCallback cb) {
+    _addVerseCallback = cb;
 }
 
 void setStopCallback(StopCallback cb) {
