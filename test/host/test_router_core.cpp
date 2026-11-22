@@ -662,3 +662,17 @@ TEST(A8, BaseUpdatingFlagValue) {
 	EXPECT_EQ(protocol::SIGNAL_INFO_BASE_UPDATING, 0x02);
 	EXPECT_EQ(protocol::SIGNAL_INFO_BASE_UPDATING | protocol::SIGNAL_INFO_SONG_HAS_SECTIONS, 0x03);
 }
+
+// C5: a signal repeated with the same PacketId is skipped; a new id, a wrap and forget() let it through.
+TEST(SignalDedup, RepeatNewIdForgetAndWrap) {
+	routercore::SignalDedup s;
+	EXPECT_FALSE(s.isRepeat(7));
+	EXPECT_TRUE(s.isRepeat(7));
+	EXPECT_FALSE(s.isRepeat(8));
+	EXPECT_FALSE(s.isRepeat(7)) << "only the last id counts";
+	s.forget();
+	EXPECT_FALSE(s.isRepeat(7)) << "a new PC session numbers from 1 again";
+	EXPECT_FALSE(s.isRepeat(255));
+	EXPECT_FALSE(s.isRepeat(0));
+	EXPECT_TRUE(s.isRepeat(0));
+}
