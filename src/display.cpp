@@ -286,6 +286,8 @@ namespace display {
             currentState[4] = (song / 10 % 10) & 0x0f;
             currentState[5] = (song / 100 % 10) & 0x0f;
             currentState[6] = (song / 1000) & 0x0f;
+            // C11: short numbers are right-aligned, leading zeros are blank (the units digit always shows)
+            for (uint8_t i = 6; i > 3 && currentState[i] == 0; --i) currentState[i] = BLANK;
         }else{
             for (uint8_t i = 3; i <= 6; ++i) currentState[i] = BLANK;
         }
