@@ -45,6 +45,7 @@ static const char *screenId() {
 	if (c == &mainScreen) return "main";
 	if (c == &settingsScreen) return "settings";
 	if (c == &serviceScreen) return "service";
+	if (c == &powerOffConfirm) return "confirm";
 	if (c == &firmwareScreen) return "firmware";
 	if (c == &displayScreen) return "display";
 	if (c == &bluetoothScreen) return "bluetooth";

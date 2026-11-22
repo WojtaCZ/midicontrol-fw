@@ -1,4 +1,5 @@
 #include "menu.hpp"
+#include <ui/confirm_screen.hpp>
 #include <stmcpp/scheduler.hpp>
 #include <stmcpp/units.hpp>
 #include "oled.hpp"
@@ -569,9 +570,28 @@ static void recordCallback(ui::MenuItem* item, void* userData) {
     syncRecordScreen();
 }
 
+// C12 / Q2-29b: switching the organ off while a song plays or a recording runs asks first ("Ano" / "Ne");
+// switching on, or off when idle, never asks. The checkbox follows the real state either way.
+static void powerOffResult(bool confirmed, void* userData);
+static ui::ConfirmScreen powerOffConfirm("Vypnout varhany?", powerOffResult);
+
+static void powerOffResult(bool confirmed, void* userData) {
+    (void)userData;
+    if (nav.current() == &powerOffConfirm) nav.pop();
+    if (confirmed) base::current::disable();
+    settingsItems[1].setChecked(base::current::isEnabled());
+    nav.forceRender();
+}
+
 static void powerCallback(ui::MenuItem* item, void* userData) {
     (void)userData;
     if (base::current::isEnabled()) {
+        const bool busy = _nowPlayingActive || _recording.state() != recording::State::Idle;
+        if (busy) {
+            if (item) item->setChecked(true); // stays on until "Ano"
+            nav.push(&powerOffConfirm);
+            return;
+        }
         base::current::disable();
     } else {
         base::current::setSource(organsrc::Source::MENU);

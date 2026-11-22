@@ -199,7 +199,7 @@ DONE 2026-11-22: RecordScreen (Priprava / Nahravam + Enter = Stop / Zastavuji / 
 - Manual/facts: manual zakladna "Co ukazuje tabule" and tabule chapter; facts/base.md.
 - Risk / open points: "check current code" in the answer means the result may be: already correct. If so, add the tests only and close.
 
-### C12 Confirm before turning the organ off while playing or recording (Q2-29b, moved from remote D6)
+### C12 Confirm before turning the organ off while playing or recording (Q2-29b, moved from remote D6) - DONE (powerCallback in src/menu.cpp pushes ConfirmScreen "Vypnout varhany?" when a song plays or recording is not Idle; sim flow 27 covers the idle path only, because NowPlaying/Recording screens are modal so the Nastaveni checkbox is normally unreachable then; lib/ui ConfirmScreen defaults to Ano, submodule not edited; bench: none reachable by hand, idle toggle only)
 - Goal: owner 2026-11-16: `Napajeni varhan` OFF on the base asks for confirmation when a song plays or a recording runs; otherwise it switches at once.
 - Current code: the SSR checkbox is in Nastaveni (`src/menu.cpp`, `base::current`); `NowPlayingScreen` knows the playing state from `SIGNAL_*`; no recording state on the base yet (A7/C3). VERIFY the exact checkbox callback line before coding.
 - Change: in the checkbox callback, when switching OFF and (playing || recording) push `ui::ConfirmScreen` "Vypnout varhany?" (18 chars max, 7x10 font); `Ano` -> switch off (the PC sees it via STATUS, A5 "by menu"), `Ne` -> checkbox stays on. Switching ON never asks.
