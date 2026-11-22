@@ -217,7 +217,7 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-NOTE-01 | PC sends CC123 on all 16 channels at song end, stop, pause, and before each add-verse replay | partial (pause: SYS-USE-09) | PC playback.cpp:152 |
-| SYS-NOTE-02 | Base after IWDG/WWDG or fault reset: CC120 + CC123 on 16 ch to DIN, SSR off | implemented (DIN path broken on the bench, SYS-NOTE-05) | base logic/recovery.* |
+| SYS-NOTE-02 | Base at EVERY boot (power-on, pin, software, watchdog or fault reset): CC120 + CC123 on 16 ch to DIN, SSR off (C1, Q2-30, 2026-11-22) | implemented, not bench-verified (DIN path broken on the bench, SYS-NOTE-05) | base logic/recovery.* (cleanup messages), main.cpp after `midi::init()` |
 | SYS-NOTE-03 | Base on PC loss / USB unplug mid-note: All Notes Off + SSR off immediately (D1, same as SYS-PC-03) | implemented (2026-11-12) | base router.cpp (see SYS-PC-03) |
 | SYS-NOTE-04 | PC service start/restart: All Notes Off (D14, same as SYS-PWR-07) | implemented (2026-11-12) | PC startup_reset.cpp (see SYS-PWR-07) |
 | SYS-NOTE-05 | MIDI over DIN works in both directions (base -> organ for playback and All Notes Off, organ -> base for recording); the bench fault is found and fixed and the link verified before installation (D31) | NOT IMPLEMENTED (gap) | never worked on the bench; cause not traced (HARDWARE-base open item 9) |

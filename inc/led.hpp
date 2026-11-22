@@ -15,7 +15,7 @@ namespace LED{
     //   MIDIA     DIN in: red with "Ident. MIDI"; blinks on received bytes
     //   MIDIB     DIN out: green with "Ident. MIDI"; blinks on sent packets
     //   BLUETOOTH remote connected; blinks on BLE traffic
-    // The MIDI colours follow "Ident. MIDI" alone, so they stay lit with the LED setting off.
+    // The MIDI colours need "Ident. MIDI" AND the LED setting (logic/led_logic.hpp); the LED setting off darkens every rear LED.
     constexpr uint8_t PIXEL_USB       = 0;
     constexpr uint8_t PIXEL_DISPLAY   = 1;
     constexpr uint8_t PIXEL_CURRENT   = 2;

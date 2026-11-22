@@ -94,6 +94,7 @@ Rule for every entry: user-visible change = update docs/manual (and facts) + doc
 2026-11-16 and may drift. VERIFY: marks anything not confirmed from code.
 
 ### C1 All Notes Off at every boot (Q2-30)
+DONE 2026-11-22: cleanup runs at every boot (needsNoteCleanup removed); bench: DIN capture of 32 messages after a power-on boot, still to do (basetest test_din.py or equivalent).
 - Goal: send the stuck-note cleanup after every reset, not only after IWDG/WWDG or an unannounced soft reset.
 - Current code: src/logic/recovery.cpp `needsNoteCleanup(csr, unannouncedFault)` (IWDG/WWDG always; SFTRST only if unannounced). src/main.cpp:331 computes `noteCleanup`; ~:350-357 `if (noteCleanup) midi::sendStuckNoteCleanup()` after `midi::init()`. src/midi.cpp:55 sends 32 messages (CC123 even i, CC120 odd i, channel i>>1) with the blocking `send()` (watchdog kick per message, about 1 ms each).
 - Change: make the cleanup unconditional in main.cpp (drop `noteCleanup` or make `needsNoteCleanup` return true). Keep `cleanupMessageCount()`/`cleanupMessage()` as they are. Keep the call after `midi::init()` and before the first loop pass. Decide whether `needsNoteCleanup` stays as a pure function (simplest: remove it and its tests).
@@ -103,6 +104,7 @@ Rule for every entry: user-visible change = update docs/manual (and facts) + doc
 - Risk / open points: about 32 ms boot delay, acceptable. A cold boot with an organ on the DIN line sends notes-off before the PC is up: that is intended. VERIFY: no other caller of `needsNoteCleanup`.
 
 ### C2 Master LED off = all LEDs off (B3 / STEP4 B3)
+DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic.*), static colours off and updateStatus() before the first strip update; front error strip kept; bench: rear LEDs with master off (basetest has no LED test).
 - Goal: with "LED" (master) unchecked every rear LED is dark, including MIDI A and MIDI B. Also no colour flash at boot before settings are applied.
 - Current code: src/led.cpp `updateStatus()` computes `master` and `roleId`; MIDI A/B use `blink ? white : (roleId ? red/green : off)` with no master gate. `rearStrip` static initialiser has MIDI A red 0.1 and MIDI B green 0.1, so a flash shows before the first `updateStatus()`. `LED::init()` (main.cpp:359) calls `update()`. frontStrip is used only by `signalError` (main.cpp ~:739-757, no callers). inc/led.hpp has a comment that MIDI colours stay lit with LED off: wrong after this change. Pixel indices: USB 0, DISPLAY 1, CURRENT 2, MIDIA 3, MIDIB 4, BLUETOOTH 5. main.cpp:228-240 ledScheduler: 50 ms.
 - Change: (1) in `updateStatus()` gate the MIDI A/B pixels (and the blink-white activity) by `master`. (2) Set the static initial colours of `rearStrip` to off and call `updateStatus()` before the first `update()` in `LED::init()` (read settings first). (3) Fix the header comment. (4) Decide: `signalError` front strip stays (fault indication) even with master off. VERIFY with owner: expected yes (safety), not stated in OWNER-ANSWERS.
