@@ -492,8 +492,10 @@ namespace display {
             // Disable the DMA channel after transmission
             stmcpp::reg::clear(std::ref(DMA2_Channel4->CCR), DMA_CCR_EN); 
 
-            // RX comes back on at USART TC (USART1_IRQHandler), when the last byte has been shifted out
-            stmcpp::reg::write(std::ref(USART1->ICR), USART_ICR_TCCF);
+            // RX comes back on at USART TC (USART1_IRQHandler), when the last byte has been shifted out.
+            // No TCCF clear here: the DMA writes to TDR already clear TC, and if this ISR runs late (the last stop bit
+            // already out, e.g. the core halted by a debugger) clearing it would lose the only TC and leave txBusy
+            // stuck forever = no more display frames (bench 2026-11-22). A TC that is already set fires at once.
             stmcpp::reg::set(std::ref(USART1->CR1), USART_CR1_TCIE);
         }
 
