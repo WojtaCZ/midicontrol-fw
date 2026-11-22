@@ -30,6 +30,7 @@
 #include "protocol/constants.hpp"
 #include "ram.hpp"
 #include "logic/stale_link.hpp"
+#include "looptime.hpp"
 
 #include <gfx/text.hpp>
 #include <gfx/icon.hpp>
@@ -224,6 +225,16 @@ static void testKeyPoll() {
 	mcTestKeyAck = ok ? word : ((word & 0x00FFFFFFu) | 0xEE000000u);
 }
 
+// Main-loop timing counters (inc/looptime.hpp); read by probe, cleared by writing 1 to mcLoopReset
+namespace looptime {
+	volatile Stats stats = {};
+	volatile uint32_t reset = 0;
+	volatile uint32_t usbIrqStamp = 0;
+}
+extern "C" {
+	[[gnu::used]] volatile uint32_t *const mcLoopStats = reinterpret_cast<volatile uint32_t *>(&looptime::stats);
+}
+
 extern Oled::OledBuffer frameBuffer;
 
 static uint8_t ledSubCounter = 0;
@@ -396,7 +407,12 @@ extern "C" int main(void) {
 
 	uint8_t packet[4];
 
+	looptime::enable();
+	looptime::Pass lt;
+
 	while (1) {
+
+		lt.begin();
 
 		// Loop watchdog + IWDG: one kick per pass
 		wdg::kick();
@@ -413,28 +429,37 @@ extern "C" int main(void) {
 		testKeyPoll();
 
 		tud_task();
+		lt.lap(looptime::S_TUD);
 
 		// USB → DIN (organ)
 		while (tud_midi_available() && tud_midi_packet_read(&packet[0])) {
+			const uint32_t t0 = lt.beforeSend();
 			midi::send(packet);
+			lt.afterSend(t0);
 			LED::notifyActivity(LED::PIXEL_USB);
 			LED::notifyActivity(LED::PIXEL_MIDIB);
 		}
+		lt.lap(looptime::S_USB_DIN);
 
 		// DIN → USB and the SysEx echo of the display (TinyUSB only from the main loop)
 		midi::process();
+		lt.lap(looptime::S_MIDI);
 
 		// Display: at most one frame at a time
 		display::process();
+		lt.lap(looptime::S_DISPLAY);
 
 		// BLE: receive, command mode state machine
 		Bluetooth::process();
+		lt.lap(looptime::S_BLE);
 
 		// Packet routing PC ↔ Remote, ACK/retry, keepalive, CDC sending
 		router::process();
+		lt.lap(looptime::S_ROUTER);
 
 		// Log → CDC 1 (only with the port open), commands from the log port
 		Debug::process();
+		lt.lap(looptime::S_DEBUG);
 
 		keypressScheduler.dispatch();
 		guiRenderScheduler.dispatch();
@@ -444,10 +469,12 @@ extern "C" int main(void) {
 		ledScheduler.dispatch();
 		songListTimeoutScheduler.dispatch();
 		songListDelayScheduler.dispatch();
+		lt.lap(looptime::S_SCHED);
 
 		pairingTimeout();
 
 		bleProcess();
+		lt.lap(looptime::S_BLEPROC);
 
 		// A link without an accepted peer outside pairing: B once more, then K,1
 		secureWatchdog();
@@ -666,6 +693,7 @@ extern "C" int main(void) {
 					break;
 			}
 		}
+		lt.lap(looptime::S_REST);
 	}
 
 }

@@ -248,6 +248,36 @@ class Target:
     def write32(self, addr: int, value: int):
         self.tcl(f"write_memory 0x{addr:08x} 32 {{0x{value:08x}}}")
 
+    # -- main-loop timing counters (base, inc/looptime.hpp): struct of u32, cycles at 144 MHz
+    LOOP_HIST = 8
+    LOOP_SECTIONS = ["tud_task", "usb->din", "midi::process", "display::process", "Bluetooth::process", "router::process",
+                     "Debug::process", "schedulers+Oled", "bleProcess", "rest"]
+    LOOP_EDGES_US = [50, 100, 250, 500, 1000, 2000, 5000]
+
+    def loop_reset(self):
+        """Clears the main-loop counters (the loop does it on its next pass)."""
+        self.write32(self.sym("looptime::reset"), 1)
+
+    def loop_stats(self) -> dict:
+        """Main-loop timing counters in microseconds (see inc/looptime.hpp for what each one measures)."""
+        n = 4 + 8 + 10 + 10 + 1 + 2 + 8 + 8 + 1 + 1
+        raw = self.tcl(f"read_memory 0x{self.sym('looptime::stats'):08x} 32 {n}").split()
+        w = [int(x, 0) for x in raw]
+        i = iter(w)
+        take = lambda k: [next(i) for _ in range(k)]
+        version, passes, max_pass, max_raw = take(4)
+        hist = take(8)
+        sect_max, sect_over = take(10), take(10)
+        msgs, lat_max, lat_first_max = take(3)
+        lat_hist, lat_first_hist = take(8), take(8)
+        send_max, cpu = take(2)
+        assert version == 1 and cpu == 144, f"bad loop stats block: {w[:4]} cpu={cpu}"
+        us = lambda c: c / cpu
+        return dict(passes=passes, max_pass_us=us(max_pass), max_pass_raw_us=us(max_raw), hist=hist,
+                    sect_max_us={k: us(v) for k, v in zip(self.LOOP_SECTIONS, sect_max)},
+                    sect_over_1ms=dict(zip(self.LOOP_SECTIONS, sect_over)), msgs=msgs, lat_max_us=us(lat_max),
+                    lat_first_max_us=us(lat_first_max), lat_hist=lat_hist, lat_first_hist=lat_first_hist, send_max_us=us(send_max))
+
     def cstr(self, name: str, n: int = 64) -> str:
         return self.read(self.sym(name), n).split(b"\0")[0].decode(errors="replace")
 

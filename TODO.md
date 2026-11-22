@@ -1,5 +1,23 @@
 # TODO
 
+## DIN OUT running status (owner, 2026-11-22) - implemented, organ check open
+
+- Done: `midi::send` sends running status (`src/logic/running_status.hpp`, host tests RunningStatus.*). It leaves out a repeated
+  channel status, sends Note Off as Note On velocity 0, and sends the status again after 300 ms and after SysEx or system common.
+  A chord change is about 1/3 shorter on the 31250 Bd wire. Bench: `test_midi.py` and `test_midi_timing.py` (they decode both modes).
+- Open: play a few hymns on the real organ and listen for missing or hanging notes. If it misbehaves, rebuild with
+  `cmake ... -DMIDI_RUNNING_STATUS=OFF` (full 3-byte messages, the old behaviour) and note the organ model here.
+
+## LED setting lost on base reboot (owner, 2026-11-22) - open
+
+- Owner: the base menu "LED" checkbox (settings item 0, `ledMasterCallback` in `src/menu.cpp`) does not survive a base reboot.
+- Not analysed yet. The callback does call `settings::save()`, and the remote address in the same flash page (page 63,
+  `src/settings.cpp`) does survive reboots, so flash writes basically work. Leads: (1) the menu init syncs the checkbox from settings
+  (`menu.cpp:577`), so check whether `settings::init()` actually loads the page (log "set: loaded v2" vs "no valid
+  settings, defaults") and whether the bootloader or a firmware update erases page 63; (2) a later `settings::save()` from
+  another path writing an older RAM copy; (3) the `midiRoleId` checkbox probably has the same problem.
+- Repro: toggle LED off, reset the base, read `settings::ramCopy` over the probe and compare with the checkbox and the LEDs.
+
 ## Stuck base / stuck notes (watchdog) - done 2026-11-07, one check left
 
 - Done: after an IWDG/WWDG reset or a fault reset the base sends All Sound Off + All Notes Off on all 16 DIN channels at boot

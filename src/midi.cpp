@@ -1,5 +1,6 @@
 #include "midi.hpp"
 #include "logic/recovery.hpp"
+#include "logic/running_status.hpp"
 #include "wdg.hpp"
 #include "base.hpp"
 #include "led.hpp"
@@ -51,7 +52,16 @@ namespace midi {
 
 	}
 
+	// DIN OUT running status (src/logic/running_status.hpp). MC_MIDI_RUNNING_STATUS=0 (CMake
+	// -DMIDI_RUNNING_STATUS=OFF) sends every message in full, as before 2026-11-22: use it if the organ
+	// misreads notes.
+#ifndef MC_MIDI_RUNNING_STATUS
+#define MC_MIDI_RUNNING_STATUS 1
+#endif
+	static running_status::Encoder _txStatus(MC_MIDI_RUNNING_STATUS != 0);
+
 	void sendStuckNoteCleanup() {
+		_txStatus.reset(); // the line state after a reset is unknown: start with a full status
 		for (unsigned i = 0; i < recovery::cleanupMessageCount(); ++i) {
 			uint8_t m[3];
 			recovery::cleanupMessage(i, m);
@@ -91,11 +101,13 @@ namespace midi {
 
 	void send(uint8_t (&packet)[4]) {
 		uint8_t size = messageSize(packet[0] & 0x0F); // Upper nibble = cable number
+		uint8_t out[3];
+		uint8_t n = _txStatus.encode(&packet[1], size, stmcpp::systick::getTicks(), out);
 		wdg::kick(); // busy-waiting on the USART (~1 ms per message); a batch from the USB FIFO has several in a row
-		for (uint8_t i = 1; i <= size; ++i) {
+		for (uint8_t i = 0; i < n; ++i) {
 			// Wait until transmit data register is empty
 			while (!(USART3->ISR & USART_ISR_TXE)) {}
-			stmcpp::reg::write(std::ref(USART3->TDR), packet[i]);
+			stmcpp::reg::write(std::ref(USART3->TDR), out[i]);
 		}
 
 		// Wait for transmission complete

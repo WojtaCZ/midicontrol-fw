@@ -17,6 +17,10 @@ CH = {
 	"rem_sda": "D5",
 	"rem_ble_tx": "D7",
 	"rem_ble_rx": "D6",
+	# base DIN MIDI (USART3), bench wiring 2026-11-21 (verified 2026-11-22 by sending notes): D5 = base DIN OUT (MCU TX -> Otraki IN),
+	# D4 = base DIN IN (Otraki OUT -> MCU RX). They share D4/D5 with the old rem_scl/rem_sda names, which have no leads in this wiring.
+	"din_in": "D4",
+	"din_out": "D5",
 }
 # A rewired bench overrides single entries without editing this file, e.g. BASETEST_LA_CH="disp_tx=D2,disp_rx=D3".
 # Tests take their capture channels from chans(), never literal "Dn" lists, so the override covers them.

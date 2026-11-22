@@ -19,8 +19,14 @@ def pr():
     return midi.ports()
 
 
+def is_cleanup(m: bytes) -> bool:
+    """CC 123/120 (All Notes Off / All Sound Off): the base sends them on all 16 channels on its own when the PC goes
+    away (SYS-PC-03, router.cpp logChanges), e.g. right after the daemon container is stopped for the bench."""
+    return len(m) == 3 and (m[0] & 0xF0) == 0xB0 and m[1] in (120, 123) and m[2] == 0
+
+
 def msgs(data: bytes) -> list:
-    return [m for m in midi.decode(data) if not m.startswith(ECHO_PREFIX)]
+    return [m for m in midi.decode(data) if not m.startswith(ECHO_PREFIX) and not is_cleanup(m)]
 
 
 def exchange(src, dst, hexstr, wait=0.5):
@@ -37,8 +43,10 @@ NOTES = [bytes([0x90, 0x3C, 0x64]), bytes([0x80, 0x3C, 0x00])]
 
 def test_usb_to_din_notes(pr):
     got = exchange(pr["base"], pr["otraki"], "90 3C 64 80 3C 00")
-    # The base DIN output sends full status bytes; running status (90 3C 64 3C 00) would also be valid
-    assert msgs(got) == [bytes([0x90, 0x3C, 0x64]), bytes([0x80, 0x3C, 0x00])], got.hex()
+    # Firmware built with MIDI_RUNNING_STATUS (default) sends Note Off as Note On velocity 0 (90 3C 64 3C 00 on the
+    # wire, the Otraki restores the status); with -DMIDI_RUNNING_STATUS=OFF it goes out as 80 3C 00.
+    assert msgs(got) in ([bytes([0x90, 0x3C, 0x64]), bytes([0x90, 0x3C, 0x00])],
+                         [bytes([0x90, 0x3C, 0x64]), bytes([0x80, 0x3C, 0x00])]), got.hex()
 
 
 def test_din_to_usb_notes(pr):

@@ -1,3 +1,4 @@
+#include "looptime.hpp"
 #include "usb.hpp"
 #include <tusb.h>
 #include <tinyusb/src/class/midi/midi_device.h>
@@ -28,10 +29,12 @@ namespace usb {
 }
 
 extern "C" void USB_HP_IRQHandler(void) {
+	looptime::onUsbIrq();
 	tud_int_handler(0);
 }
 
 extern "C" void USB_LP_IRQHandler(void) {
+	looptime::onUsbIrq();
 	tud_int_handler(0);
 }
 
