@@ -40,6 +40,15 @@
 - Closed: the PA4 pull-down question is answered by D28 (docs/HARDWARE.md section 7 item 5: no pull-down, analysis says the
   PC817 stays off while the pin floats).
 
+## Intermittent: remote OTA staging_abort loses the base CDC (seen 2026-11-21 and 2026-11-22)
+`tools/basetest` `test_boot_remote.py::test_remote_staging_abort[stop_50]` (and once `base_reset_50`) sometimes fails in a
+full `-m hw` run: fwclient reports "END NAK status None", then usblink raises SerialException ("device reports readiness to
+read but returned no data") because the base USB CDC disappears, and the run hangs. Alone it passes; paired with
+`test_base_glitch_erase_trailer_page` it failed 1 of 2. It failed before the phase C/D merges too (bench run 5.1,
+2026-11-21), so it is not a regression. Not a field issue so far (host stop at 50 % is a test-only path), but the base
+dropping off USB is worth a root cause: next step is a run with base fault/reset-cause readout (`fault::` / RCC_CSR) right
+after the CDC disappears.
+
 ## RNBD350 migration: checks still to run on a full bench (open since 2026-11-05)
 
 Verified by hand on 2026-11-05: pairing (F, X, C, bond, settings saved), reconnect after a base reset with the stored
