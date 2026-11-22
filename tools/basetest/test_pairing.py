@@ -53,7 +53,7 @@ def write_log(sr, title):
 
 def test_pairing_finds_remote_and_bonds(base, remote):
     disconnect_and_forget(base)
-    proc, sr = la.start(25, channels="D2,D3,D6,D7", samplerate="1M")
+    proc, sr = la.start(25, channels=la.chans("base_ble_rx", "base_ble_tx", "rem_ble_rx", "rem_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     try:
         state = pair(base)
@@ -71,7 +71,7 @@ def test_pairing_finds_remote_and_bonds(base, remote):
     assert "STREAM_OPEN" in base_rx, base_rx
     assert "SECURED" in base_rx or "BONDED" in base_rx, base_rx
     assert "ERR_SEC" not in base_rx, base_rx
-    assert f"C,0,{REMOTE_ADDR}".encode() in base_tx
+    assert re.search(rf"CE?,0,{REMOTE_ADDR}[,\r]".encode(), base_tx), base_tx  # "CE,..." since 6a68acc
     # the controller address stored permanently (settings v2 at 0x0801F800: magic, version, LED, MIDI, pad, remoteAddr[13])
     assert base.read(SETTINGS_ADDR + 8, 13).split(b"\0")[0] == REMOTE_ADDR.encode()
     # remote: the same from the other side
@@ -109,7 +109,7 @@ def test_pairing_timeout_no_remote(base, remote_probe):
         remote.hold_ble_reset(False)
     # restore the bond for the other tests (after the reset is released the remote starts advertising again)
     time.sleep(3)
-    proc, sr = la.start(25, channels="D2,D3,D6,D7", samplerate="1M")
+    proc, sr = la.start(25, channels=la.chans("base_ble_rx", "base_ble_tx", "rem_ble_rx", "rem_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     try:
         state = pair(base, timeout=20)

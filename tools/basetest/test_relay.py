@@ -78,7 +78,7 @@ def test_status_ble_connected(paired, link):
 
 def test_base_keepalive_to_remote(paired):
     base = paired
-    sr = la.capture(11, channels="D2,D3", samplerate="1M")
+    sr = la.capture(11, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     data, _ = la.uart_timed(sr, la.CH["base_ble_tx"], BAUD, 1e6)
     # frames with the time of the first byte (SOH)
     times, parser = [], proto.FrameParser()
@@ -158,7 +158,7 @@ def test_song_list_to_remote(player):
 def test_pc_to_remote_unreachable(paired, link, remote_probe):
     base, remote = paired, remote_probe
     link.drain()
-    proc, sr = la.start(30, channels="D2,D3,D6,D7", samplerate="1M")
+    proc, sr = la.start(30, channels=la.chans("base_ble_rx", "base_ble_tx", "rem_ble_rx", "rem_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     nak_pid = None
     try:

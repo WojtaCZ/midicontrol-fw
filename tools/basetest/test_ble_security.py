@@ -6,6 +6,7 @@ drops the link right away, so %STREAM_OPEN% never arrives. Therefore the module 
 Bluetooth::_statusQueue (dbg.inject_status) - the firmware reacts to them the same as to real ones; the base's replies really
 go to the RN4870 and are visible on D3."""
 
+import re
 import time
 
 import pytest
@@ -41,7 +42,7 @@ def remote_away(base, remote_probe):
 
 def test_inbound_stranger_dropped_not_secured(remote_away):
     base = remote_away
-    proc, sr = la.start(7, channels="D2,D3", samplerate="1M")
+    proc, sr = la.start(7, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     try:
         base.inject_status(f"CONNECT,0,{STRANGER}")
@@ -80,7 +81,7 @@ def test_frames_need_secured_remote(remote_away):
     address the same injected frame is executed (the injection path works)."""
     base = remote_away
     ssr0 = base.gpio("A", 4)
-    proc, sr = la.start(9, channels="D2,D3", samplerate="1M")
+    proc, sr = la.start(9, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     accepted_before = accepted_after = None
     ssr_unsecured = ssr_secured = None
@@ -125,7 +126,7 @@ def test_unsecured_remote_link_kicked(remote_away):
     """Re-review I-1: a link with the controller's address, %STREAM_OPEN%, but no %SECURED%/%ERR_SEC% -> after ~3 s the base sends
     B again and after another ~3 s K,1 (then auto-reconnect after 5 s). A link without an accepted peer must not hang forever."""
     base = remote_away
-    proc, sr = la.start(12, channels="D2,D3", samplerate="1M")
+    proc, sr = la.start(12, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     try:
         base.inject_status(f"CONNECT,0,{REMOTE}")
@@ -147,7 +148,7 @@ def test_unsecured_remote_link_kicked(remote_away):
 def test_connect_while_scanning_kicked(remote_away):
     """%CONNECT% during the pairing scan (nobody is supposed to connect to us) -> K,1, the scan keeps running."""
     base = remote_away
-    proc, sr = la.start(8, channels="D2,D3", samplerate="1M")
+    proc, sr = la.start(8, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     try:
         assert base.call("Bluetooth::startPairing()") == 0
@@ -163,7 +164,7 @@ def test_connect_while_scanning_kicked(remote_away):
         # pairing runs out by timeout (15 s), so that the fixture can restore the link to the controller
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") not in (1, 2, 3), 20, interval=0.5, what="pairing ended")
     tx = tx_text(sr)
-    after_f = tx[tx.index(b"F\r"):]
+    after_f = tx[tx.index(b"FE,"):]  # scan: "FE,<interval>,<window>,..." (Coded PHY, 6a68acc)
     assert b"K,1\r" in after_f, f"connect during SCANNING not kicked: {tx!r}"
     assert state == dbg.PAIR_SCANNING, f"pairing state {state}"
     assert not accepted
@@ -180,7 +181,7 @@ def test_no_reconnect_without_stored_remote(remote_away):
     addr = base.sym("settings::ramCopy") + SETTINGS_REMOTE_ADDR_OFFSET
     saved = base.read(addr, 13)
     assert saved[:12].decode(errors="replace") == REMOTE, f"stored remote {saved!r}"
-    proc, sr = la.start(20, channels="D2,D3", samplerate="1M")
+    proc, sr = la.start(20, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     time.sleep(1.0)  # the capture runs ~1 s before the erase
     try:
         base.write(addr, b"\0")
@@ -199,19 +200,22 @@ def test_no_reconnect_without_stored_remote(remote_away):
     # The address is restored at ~13.0 s of Python time, but the capture (sigrok) starts later than the Python clock, so
     # the immediate reconnect after the restore lands at around 12.98 s of capture time. The negative window therefore ends 1 s earlier
     # (12.0) and the positive window starts from there; the negative window (9.5 s) still covers more than one 5 s connection interval.
-    assert b"C\r" not in text(2.5, 12.0), f"reconnect attempt while no remote was stored: {text(2.5, 12.0)!r}"
-    assert b"C\r" in text(12.0, 21.0), f"no reconnect after the address was restored: {text(12.0, 21.0)!r}"
+    # A connection attempt is "CE,<type>,<addr>,..." (both PHYs, 6a68acc); the old "C\r" / "C,<type>,<addr>" are counted too
+    def connects(b):
+        return re.search(rb"(^|\r)C(E?,|\r)", b) is not None
+    assert not connects(text(2.5, 12.0)), f"reconnect attempt while no remote was stored: {text(2.5, 12.0)!r}"
+    assert connects(text(12.0, 21.0)), f"no reconnect after the address was restored: {text(12.0, 21.0)!r}"
 
 
 def test_pairing_ignores_foreign_connect(remote_away):
     base = remote_away
-    proc, sr = la.start(8, channels="D2,D3", samplerate="1M")
+    proc, sr = la.start(8, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     try:
         assert base.call("Bluetooth::startPairing()") == 0
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") == dbg.PAIR_SCANNING, 2, what="SCANNING")
         time.sleep(0.5)
-        base.inject_status(f"{REMOTE},0,MIDIControlRemote,,F5")  # remote advertisement -> X, C,0,<remote>
+        base.inject_status(f"{REMOTE},0,MIDIControlRemote,,F5")  # remote advertisement -> X, CE,0,<remote>,...
         wait_until(lambda: base.read_u8("Bluetooth::_pairingState") == dbg.PAIR_CONNECTING, 2, what="CONNECTING")
         time.sleep(0.5)
         base.inject_status(f"CONNECT,0,{STRANGER}")  # somebody else connects
@@ -221,8 +225,9 @@ def test_pairing_ignores_foreign_connect(remote_away):
         la.finish(proc, sr, 30)
         base.inject_status("DISCONNECT")
     tx = tx_text(sr)
-    assert f"C,0,{REMOTE}\r".encode() in tx, tx
-    after_connect = tx[tx.index(f"C,0,{REMOTE}\r".encode()):]
+    m = re.search(rf"CE?,0,{REMOTE}[,\r]".encode(), tx)  # "CE,0,<remote>,<params>" since 6a68acc
+    assert m, tx
+    after_connect = tx[m.start():]
     assert b"B\r" not in after_connect, f"foreign %CONNECT% treated as the remote: {tx!r}"
     assert b"K,1\r" in after_connect, tx
     assert state == dbg.PAIR_FAILED, f"pairing state {state}"
@@ -235,7 +240,7 @@ def test_command_queued_during_exit_survives(base):
     The state machine's timestamp is old, so EXIT_TIMEOUT expires right after resuming."""
     jobs, count, index = base.sym("Bluetooth::_jobCommands"), base.sym("Bluetooth::_jobCount"), base.sym("Bluetooth::_jobIndex")
     state, saw_end = base.sym("Bluetooth::_engineState"), base.sym("Bluetooth::_sawEnd")
-    proc, sr = la.start(5, channels="D2,D3", samplerate="1M")
+    proc, sr = la.start(5, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
     time.sleep(1.0)
     try:
         with base.safe_halt():

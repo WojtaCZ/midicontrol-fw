@@ -74,8 +74,9 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
         assert sum(bool(re.search(BANNER_RE, l)) for l in lines) == 1, "second boot (reset loop)"
         ble_e = [l for l in lines if re.search(r" E ble:", l)]
         assert len(ble_e) == 1, ble_e
-        assert "RN4870 init failed" in ble_e[0]
-        assert any("RN4870 init failed again" in l for l in lines), "no 60 s retry seen"
+        # main.cpp logs "RN4870 <init|configure> failed": a dead module fails the configure job since the Coded PHY work
+        assert re.search(r"RN4870 (init|configure) failed, running without BLE", ble_e[0]), ble_e[0]
+        assert any(re.search(r"RN4870 (init|configure) failed again", l) for l in lines), "no 60 s retry seen"
 
         # An ERROR/ERR_BLE_INIT record, once, already announced (the next banner does not report it as an error of the previous run)
         rec = base.fault_record()

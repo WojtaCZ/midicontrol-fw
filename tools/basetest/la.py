@@ -18,7 +18,10 @@ CH = {
 	"rem_ble_tx": "D7",
 	"rem_ble_rx": "D6",
 }
-# A rewired bench overrides single entries without editing this file, e.g. BASETEST_LA_CH="disp_tx=D2,disp_rx=D3"
+# A rewired bench overrides single entries without editing this file, e.g. BASETEST_LA_CH="disp_tx=D2,disp_rx=D3".
+# Tests take their capture channels from chans(), never literal "Dn" lists, so the override covers them.
+# Bench wiring 2026-11-21 (no remote BLE leads; D4/D5 base MIDI, D6/D7 remote OLED I2C):
+#   BASETEST_LA_CH="base_ble_rx=D0,base_ble_tx=D1,disp_rx=D2,disp_tx=D3,rem_sda=D6,rem_scl=D7"
 for _kv in filter(None, os.environ.get("BASETEST_LA_CH", "").split(",")):
 	_name, _ch = _kv.split("=")
 	assert _name.strip() in CH, f"BASETEST_LA_CH: unknown signal {_name!r} (known: {sorted(CH)})"
@@ -29,6 +32,11 @@ _DIR = Path(tempfile.mkdtemp(prefix="basetest-la-"))
 
 class CaptureError(RuntimeError):
 	pass
+
+
+def chans(*names: str) -> str:
+	"""sigrok channel list for the named signals, e.g. chans("base_ble_rx", "base_ble_tx") -> "D2,D3" (honours BASETEST_LA_CH)."""
+	return ",".join(CH[n] for n in names)
 
 
 def start(seconds: float, channels: str = "D0,D1,D2,D3", samplerate: str = "1M", driver: str = "fx2lafw") -> tuple[subprocess.Popen, Path]:
