@@ -17,14 +17,12 @@ namespace base{
     static string FW_VERSION = "2.0.0";
 
     void initClock(void);
-	void dfuCheck();
 
     namespace current{
 		
         bool isEnabled();
         void enable();
         void disable();
-        void toggle(void);
         void set(bool value);
         // Who switched the power on (A5, INFO ORGAN_SRC): call BEFORE enable()/set(true); disable() forgets it
         void setSource(organsrc::Source src);

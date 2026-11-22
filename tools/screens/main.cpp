@@ -160,6 +160,25 @@ int main(int argc, char **argv) {
 	stmcpp::systick::ticks_ += 2000;
 	GUI::render();
 
+	// C3: Nahraj
+	GUI::setRecordCallback([](bool) {});
+	key(E::Down);
+	key(E::Enter);
+	snap("record_starting", "Nahraj: RECORD_SONG sent, the PC warms the organ up (Priprava)");
+	GUI::recordingSignal(true);
+	snap("record_recording", "Recording: Enter = Stop");
+	key(E::Enter);
+	snap("record_stopping", "Enter pressed: RECORD_SONG [0] sent, waiting for the PC");
+	GUI::recordingSignal(false);
+	key(E::Enter);
+	GUI::recordingFailed(routercore::Failure::Nak, protocol::NakReason::BUSY);
+	snap("record_busy", "The PC refused: a song plays or an update runs");
+	key(E::Enter);
+	key(E::Enter);
+	GUI::recordingFailed(routercore::Failure::Nak, protocol::NakReason::UNKNOWN_MSG);
+	snap("record_nosupport", "The PC is protocol v1 and cannot record");
+	key(E::Enter);
+
 	GUI::showFwProgress("Prenos do ovladace", 42);
 	snap("fw_remote_update", "Remote firmware update relayed");
 	GUI::hideFwProgress();

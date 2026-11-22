@@ -5,7 +5,6 @@ key down
 key enter
 key down
 key down
-key down
 key enter
 expect screen firmware
 expect text Revize: a1b2c3d

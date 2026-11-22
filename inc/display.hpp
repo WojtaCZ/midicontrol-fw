@@ -42,7 +42,6 @@ namespace display{
     char getLetter(); // 'A'-'D' or ' '
     ledColor getLed();
     bool isConnected();
-    bool wasChanged();
     bool sendToMIDI();
 
 }

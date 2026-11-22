@@ -290,6 +290,15 @@ static void onUserStopPlayback() {
 	router::sendReliable(stopPkt);
 }
 
+// Callback: "Pridat sloku" on "Now Playing" (C4) -> REPLAY_ANCHOR to the PC (no payload). A NAK (NOT_PLAYING, BUSY) is ignored.
+static void onAddVerse() {
+	protocol::Packet pkt = {};
+	pkt.dest = protocol::ADDR_PC;
+	pkt.msgType = protocol::MsgType::REPLAY_ANCHOR;
+	pkt.payloadLen = 0;
+	router::sendReliable(pkt);
+}
+
 // Callback: the "Nahraj" item (A7) -> RECORD_SONG to the PC, [0x01] start / [0x00] stop. Only the base starts recordings.
 static void onRecordRequest(bool start) {
 	protocol::Packet pkt = {};
@@ -363,6 +372,7 @@ extern "C" int main(void) {
 	Oled::init();
 	GUI::init();
 	GUI::setStopCallback(onUserStopPlayback);
+	GUI::setAddVerseCallback(onAddVerse);
 	GUI::setRecordCallback(onRecordRequest);
 	GUI::setRequestSongListCallback(onRequestSongList);
 	GUI::setPlaySongCallback(onPlaySongSelected);

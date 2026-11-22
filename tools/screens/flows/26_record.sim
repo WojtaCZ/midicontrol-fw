@@ -1,0 +1,19 @@
+# C3: Nahraj starts a recording on the PC, Enter stops it
+tick 3000
+key down
+expect text Nahraj
+key enter
+expect screen recording
+expect var recstarts=1
+expect text Priprava
+key enter
+expect var recstarts=1
+expect var recstops=0
+event recording on
+expect text Nahravam
+expect text Enter = Stop
+key enter
+expect var recstops=1
+expect text Zastavuji
+event recording off
+expect screen main

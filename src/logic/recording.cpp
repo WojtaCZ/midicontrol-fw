@@ -38,6 +38,10 @@ namespace recording {
 		else if (_state == State::Stopping) _state = State::Recording; // the stop did not arrive: still recording
 	}
 
+	void Machine::dismiss() {
+		if (_state == State::Busy || _state == State::NoSupport || _state == State::Failed) _state = State::Idle;
+	}
+
 	void Machine::pcLost() {
 		_state = State::Idle;
 	}

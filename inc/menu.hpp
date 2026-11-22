@@ -76,6 +76,9 @@ namespace GUI {
     // Registers the callback for stopping playback (called on dismiss from the OLED)
     using StopCallback = void (*)();
     void setStopCallback(StopCallback cb);
+    // C4: "Pridat sloku" on the now-playing screen (selected with the encoder after the first SIGNAL_ANCHOR): REPLAY_ANCHOR to the PC
+    using AddVerseCallback = void (*)();
+    void setAddVerseCallback(AddVerseCallback cb);
 
     // Callbacks for the song list and playback
     using RequestSongListCallback = void (*)(uint16_t offset); // absolute index in the PC's list (A9)

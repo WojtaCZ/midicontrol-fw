@@ -222,8 +222,6 @@ namespace Debug {
 		}
 	}
 
-	Level getLevel() { return _level; }
-	void setLevel(Level level) { _level = level; }
 
 	// ── Commands from the log CDC ─────────────────────────────────────────
 

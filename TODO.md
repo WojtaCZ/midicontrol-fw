@@ -114,6 +114,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Risk / open points: owner wants rear LED labels checked on the box; colours on the panel may be swapped (bench item).
 
 ### C3 Nahraj starts / stops recording (M-recording-start, Q2-22, with A7)
+DONE 2026-11-22: RecordScreen (Priprava / Nahravam + Enter = Stop / Zastavuji / refusals) driven by recording::Machine; flows 26_record, 26b_record_refused; bench: Nahraj against the real PC (B11), NAK reasons shown as expected.
 - Goal: the base menu entry "Nahraj" starts a recording on the PC and stops it; recording is started only from the base. One recording at a time.
 - Current code: src/menu.cpp:111 `ui::MenuItem("Nahraj", recordCallback)`; :461 `recordCallback` is empty (STEP4 B1: does nothing). Protocol: `RECORD_SONG` 0x12 and `SIGNAL_RECORDING` 0x31 are reserved (lib/protocol inc/protocol/types.hpp; PROTOCOL.md lines 76, 105, 157). Router: src/router.cpp:416 already routes `SIGNAL_RECORDING` to `observeSignal` (no case there yet; it falls to `default`).
 - Change: (1) After A7 defines the payload, `recordCallback` sends `RECORD_SONG` base -> PC through the same send path as `onPlaySongSelected` (main.cpp ~:340 callbacks; copy that pattern: callback registration in GUI, send in main.cpp). (2) New screen state "Nahravam" (a RecordingScreen or a mode of NowPlayingScreen; keep a state machine in src/logic like now_playing.* so it is host-testable): Enter = stop. (3) `observeSignal` handles `SIGNAL_RECORDING` (started/stopped) so the OLED follows the PC. (4) Unpaired / no PC: show the existing "Cekam na PC" overlay, do not send. (5) While playing: Nahraj refused (one at a time). Czech strings (no diacritics): "Nahravam", "Enter = Stop", "Nahravani nelze: hraje". VERIFY wording with owner.
@@ -122,7 +123,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: manual zakladna (menu Nahraj), postupy (new "Nahrani sloky"), SYSTEM.md SYS-REC-01 (E2: base only); facts/base.md bug "Nahraj dead".
 - Risk / open points: VERIFY how the PC reports "recording refused" (NAK reason); NakReason list has no "busy recording" code except BUSY 0x04. VERIFY what the Remote displays (D10).
 
-### C4 Knob while playing: Stop / Pridat sloku (SYS-USE-24)
+### C4 Knob while playing: Stop / Pridat sloku (SYS-USE-24) - DONE (C4, host tests + sim flow m03; bench: play a song, wait for the anchor line, turn the knob -> "Pridat sloku", press -> REPLAY_ANCHOR (0x14) on the wire, playback continues)
 - Goal: on the now-playing screen the encoder Up/Down toggles between "Stop" and "Pridat sloku"; Enter runs the selected action. Add verse sends REPLAY_ANCHOR (0x14) to the PC.
 - Current code: src/menu.cpp `NowPlayingScreen::handleInput` handles only Enter (stop). State machine src/logic/now_playing.* (Playing/Stopping/Stopped). Stop callback `GUI::setStopCallback(onUserStopPlayback)` registered at main.cpp ~:340. No base code sends REPLAY_ANCHOR today (grep finds it only in the protocol). SIGNAL_ANCHOR label is shown via `GUI::setNowPlayingAnchor` (router.cpp:289 `observeSignal`).
 - Change: (1) add a selection state (Stop | Pridat sloku) to the now-playing logic; Up/Down toggle, default Stop. (2) New callback `GUI::setAddVerseCallback(onAddVerse)`; main.cpp builds `Packet{src=ADDR_BASE, dest=ADDR_PC, msgType=REPLAY_ANCHOR, payloadLen=0}` and sends it with ACK/retry like STOP_SONG (VERIFY: which helper main.cpp/router.cpp uses for the stop packet; copy it). (3) Show "Pridat sloku" only after the first SIGNAL_ANCHOR (as on the remote) and only if the song has sections (A6; until A6 exists, show it after the first anchor). (4) NAK NOT_PLAYING (0x05) -> ignore or short message; NAK BUSY -> retry once. (5) Newer add-verse supersedes older pending one is PC side (B5).
@@ -131,7 +132,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: SYSTEM.md SYS-USE-24; manual zakladna (Prave hraje), postupy "Pridat sloku", facts/base.md open Q "add verse by encoder not implemented".
 - Risk / open points: NowPlayingScreen is drawn with the `lib/ui` / `lib/menu` widgets: do NOT edit submodules; draw with what menu.cpp already uses (VERIFY it can show two selectable rows; otherwise draw text lines manually like the current screen).
 
-### C5 observeSignal skips repeated PacketId (Q2-21b)
+### C5 observeSignal skips repeated PacketId (Q2-21b) - DONE (C5; bench: none needed beyond a normal play/stop; symbol _signalDedup in router.cpp)
 - Goal: a retransmitted signal packet must not re-run its OLED action (today a repeated SIGNAL_STOPPED/PLAYING wakes the OLED again for 5 s).
 - Current code: src/router.cpp:289 `observeSignal`; callers :418 (signals addressed to the Base) and :501 (PC -> Remote forward path, "observe only"). Dedup exists only for ACKed packets: :355 `_dedup.isRepeat(pkt.source, pkt.packetId)` inside `handleLocal`, state `static routercore::RxDedup _dedup` at :93, class in src/logic/router_core.hpp:39. Signals are not ACKed, so they bypass the dedup. :528 `_dedup.forget(ADDR_PC)` on PC loss.
 - Change: add a second small filter for signals: remember the last PacketId per source (PC only) in router_core (for example `class SignalDedup { bool isRepeat(src, id); void forget(src); }`) and call it first in `observeSignal`; the forward path still forwards the packet unchanged (the Remote does its own dedup). Reset it together with `_dedup.forget(ADDR_PC)` at :528 and on A1 session reset. Compare only the last id (a signal with the same id as the last one is a repeat); PacketId wraps 8-bit, a new PC process starts from 1 again (Q1-8 b), hence the reset.
@@ -140,7 +141,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: none visible except SYSTEM.md router/dedup row (VERIFY row id: grep -n "dedup" docs/SYSTEM.md).
 - Risk / open points: VERIFY whether the PC resends signals with the same id on purpose (retries) or reuses ids across different signals. Check midicontrol-sw packet id allocation (`grep -rn packetId` there) before choosing "last id only".
 
-### C6 Remove dead firmware code (Q2-27)
+### C6 Remove dead firmware code (Q2-27) - DONE (C6: removed dfuCheck, current::toggle, isProtocolPacketAvailable, Debug get/setLevel, display::wasChanged, Oled isInverted/getBufferSize, oled_fonts.cpp, empty git.cpp; KEPT signalError/frontStrip pending owner Q, Color::shiftHue chain, set* of display, fault::clear (absent))
 - Goal: delete code with no callers listed in the audit; keep protocol items (RECORD_SONG, SIGNAL_RECORDING) reserved.
 - Current code: list at audit/STEP2-REPORT.md lines 255-290 (dfuCheck and others); STEP4 facts mention `dfuCheck` has no callers; `signalError` (src/main.cpp ~:739-757, declared ~:95) has no callers; led.cpp frontStrip is only used by it.
 - Change: for each entry in that list: re-grep for callers (`grep -rn <name> src inc test tools`), delete the function and declaration, drop includes that became unused, fix CMake lists if a file becomes empty. Decide on `signalError`/frontStrip: it is a fault indicator, not dead by purpose; VERIFY with owner before removing (not clearly covered by Q2-27). Do not touch lib/*.
@@ -149,7 +150,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: only if a removed item was documented (VERIFY: grep the manual facts for each name).
 - Risk / open points: check hardware tests in tools/basetest do not call a removed feature.
 
-### C7 Move "Ident. MIDI" to a service area (Q2-29c)
+### C7 Move "Ident. MIDI" to a service area (Q2-29c) - DONE (C7: Nastaveni > Servis holds Ident. MIDI; flows 04,05,07,25,m01 re-indexed; manual Nastaveni table + screenshots NOT updated here: sw docs hand-off)
 - **Owner answer 2026-11-16 (follow-up):** the submenu name `Servis` is approved (resolves VERIFY (1) below).
 - Goal: the Ident. MIDI checkbox leaves the normal Nastaveni list and moves to a service area (hidden from the normal user).
 - Current code: src/menu.cpp `settingsItems` = LED, Ident. MIDI, Napajeni varhan, Verze FW, Displej, Bluetooth, Sparovat ovladac, Zpet (indices 0..7; `checkboxPower` is index 2; :570-571 set checked state; :499-505 callbacks). Accessors in inc/menu.hpp: `navigator()`, `checkboxPower()`, `checkboxLedMaster()`, `checkboxMidiRole()`. Settings field `midiRoleId` in src/settings.cpp / inc/settings.hpp.
@@ -159,7 +160,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: manual zakladna Nastaveni table; re-export screenshots with the command in docs/manual/README.md; SYSTEM.md settings row (VERIFY id).
 - Risk / open points: owner's exact wording of "service area" must be read; do not invent a PIN or key combination.
 
-### C8 Full P2-4 settings storage (Q2-9)
+### C8 Full P2-4 settings storage (Q2-9) - DONE (C8: 32-byte CRC32 slots appended in page 63, erase only when 64 slots are full, SR error check + read-back, v1/v2 migration; src/logic/settings_store.*, 7 host tests. Bench: save LED toggle, reset, value kept; pair, reset, remote kept; gdb: settings::ramCopy and flash 0x0801F800 slots; the single erase when full is the only power-cut window; a torn double-word may raise an ECC error on read (C9 scope, bootloader))
 - Goal: power-cut-safe settings: flash status check, read-back verify, and a layout that survives a power cut during save.
 - Current code: src/settings.cpp `save()`: erase last page (0x0801F800), program 64-bit words, clear SR, lock, log "saved"; no SR error check, no verify. Struct: magic u32 (0xBEEFCAFE), version u8 (2), ledMasterEnable, midiRoleId, _pad, remoteAddr[13]. A power cut between erase and program loses all settings (including the paired remote address).
 - Change: (1) after erase and each program wait for BSY and check `FLASH->SR` error bits (PGSERR, PROGERR, WRPERR, PGAERR, SIZERR, MISERR, FASTERR, FASTERR; VERIFY the G431 bit list in the SVD); clear them, return false. (2) read back and compare; on mismatch retry once, then log ERROR and keep RAM copy. (3) layout: use two records alternating inside the page is impossible with a page erase; use two pages (the previous page 0x0801F000 if unused; VERIFY layout in CLAUDE.md "flash layout" and the linker script so the app does not overlap) with a sequence number and CRC; load = newest valid. Or rotating 32-byte slots in one page (append; erase only when full): fewer erases, power-cut safe, preferred. (4) bump `version` to 3 with a migration from v2 (copy fields). (5) `save()` returns bool; the menu shows nothing new unless it fails (VERIFY: owner does not want a new error screen).
@@ -189,7 +190,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: SYSTEM.md copy in lib/bootloader is synced from the main copy (tools/sync-system-doc.sh); manual problemy for "aktualizace selhala".
 - Risk / open points: not bench-verified. Do not commit inside the submodule from this repo; bootloader changes are made in midicontrol-bootloader and then pinned.
 
-### C11 Indicator: short song numbers right-aligned with blanks (check current code)
+### C11 Indicator: short song numbers right-aligned with blanks (check current code) - DONE (C11: the live path applyNowPlaying already shows digits exactly as sent, "  12" right-aligned, verse "1 " left-aligned; the base-local setSong/setVerse have no callers, setSong now blanks leading zeros; no new host tests possible: display.cpp is hardware-bound; bench: send NOW_PLAYING_INFO FF 12 -> board shows "  12")
 - Goal: a short song code shows right-aligned with blank leading digits on the church indicator and the OLED (for example "  12", "401 " style per PROTOCOL.md blank-digit rule).
 - Current code: src/display.cpp:311 `digitChar(state)` returns ' ' for a nibble with the 0xF high/blank pattern; :312 `formatSong` reads currentState[6..3] (thousands..units) and :320 `formatVerse` currentState[2..1]; :211 `applyNowPlaying` applies NOW_PLAYING_INFO bytes (BCD, nibble 0xF = blank). :264 `setSong(uint16_t, bool visible)` and :278 `setVerse` build the digits for the base-local writes (VERIFY how leading zeros are handled: read lines 258-310). So alignment is decided by the sender: with NOW_PLAYING_INFO "0xFF 0x12" the PC already gives right-aligned blanks.
 - Change: (1) read `setSong`/`setVerse` and `applyNowPlaying`; test with a short code (12, 401, 1999, 3). (2) if leading zeros appear, replace them with blanks (0xF) in `setSong`, keeping the last digit always shown. (3) verse "1 " per PROTOCOL.md (`0x1F`): the protocol example shows verse LEFT-aligned ("1 "): do not right-align verses; VERIFY with the indicator bus doc (midicontrol-protocol/INDICATOR-BUS.md) before changing `setVerse`. (4) STEP4 base facts say "thousands digit not capped": cap song at 1999 in `setSong` (Q1-2 rule).
@@ -198,7 +199,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: manual zakladna "Co ukazuje tabule" and tabule chapter; facts/base.md.
 - Risk / open points: "check current code" in the answer means the result may be: already correct. If so, add the tests only and close.
 
-### C12 Confirm before turning the organ off while playing or recording (Q2-29b, moved from remote D6)
+### C12 Confirm before turning the organ off while playing or recording (Q2-29b, moved from remote D6) - DONE (powerCallback in src/menu.cpp pushes ConfirmScreen "Vypnout varhany?" when a song plays or recording is not Idle; sim flow 27 covers the idle path only, because NowPlaying/Recording screens are modal so the Nastaveni checkbox is normally unreachable then; lib/ui ConfirmScreen defaults to Ano, submodule not edited; bench: none reachable by hand, idle toggle only)
 - Goal: owner 2026-11-16: `Napajeni varhan` OFF on the base asks for confirmation when a song plays or a recording runs; otherwise it switches at once.
 - Current code: the SSR checkbox is in Nastaveni (`src/menu.cpp`, `base::current`); `NowPlayingScreen` knows the playing state from `SIGNAL_*`; no recording state on the base yet (A7/C3). VERIFY the exact checkbox callback line before coding.
 - Change: in the checkbox callback, when switching OFF and (playing || recording) push `ui::ConfirmScreen` "Vypnout varhany?" (18 chars max, 7x10 font); `Ano` -> switch off (the PC sees it via STATUS, A5 "by menu"), `Ne` -> checkbox stays on. Switching ON never asks.
@@ -207,7 +208,7 @@ DONE 2026-11-22: MIDI A/B gated by the master LED (logic/led_logic.hpp, LedLogic
 - Manual/facts: `zakladna.md` (Napajeni varhan), `facts/base.md`; SYSTEM.md if a SYS row covers it.
 - Risk / open points: none beyond the VERIFY above.
 
-### E3 (base) Per-screen timing checks in sim flows (Q3-9)
+### E3 (base) Per-screen timing checks in sim flows (Q3-9) - DONE (t01_timing_songs, t02_timing_stopped added next to 02, 09, 13, 20; flows are globbed by run-sim.sh)
 - Goal: sim flows assert the real per-screen timeouts, not only the screen ids.
 - Current code: tools/screens/sim.cpp supports `tick <ms>` (30 ms steps, one-shot schedulers, splash auto-dismiss at 3 s, OLED sleep at 30 s idle), `expect screen|text|notext|scrolled|var`. Existing timing flows: 02_splash_autodismiss, 09_songs_timeout_empty (events `songs_delay`, `songs_timeout` fired by hand, not by time), 20_oled_sleep, 21_sleep_first_key_main. Base timers: song list delay 500 ms and timeout 3 s (menu.cpp), splash 3 s, OLED sleep 30 s, signal-driven 5 s OLED wake (C5), "Zastaveno" display after stop (VERIFY duration in now_playing.*), pairing screen timeouts (VERIFY), FW update screen over nopc (flows 23).
 - Change: (1) collect the timeouts per screen from src/menu.cpp and src/logic/now_playing.* (grep `_ms\|Ms\|kTimeout`); (2) for each, add flow steps `tick <T-100>`, `expect screen <before>`, `tick 200`, `expect screen <after>`; (3) change 09 so the songs timeout fires by time (`tick 3500`) instead of `event songs_timeout` (keep one flow with the manual event); (4) new flows 26.. named `t01_timing_*.sim`; (5) add a flow-level name list to run-sim.sh if flows are enumerated (VERIFY: run-sim.sh globbing). (6) the exact timeouts also go into docs/manual/facts/base.md timing table.
@@ -236,7 +237,7 @@ Owner present. Each item: what to do, what to record.
 - ECC repair (C9): no on-demand method; bench only the normal boot path unchanged.
 - Battery items, ProgramOffset -1: not base (remote and organ/PC side).
 
-### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13)
+### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13) - DONE (already implemented as SYS-PC-03: keepalive loss 6 s -> midi::sendStuckNoteCleanup + organ off in router.cpp logChanges; fits the 10 s budget; remote emergency-off from D14 stays LATER; bench: stop the PC process during playback, DIN OUT silent and SSR off within 6 s)
 - Goal: second safety layer for hung notes: if the PC keepalive or MIDI stream stops during playback, the base sends All Notes Off on DIN OUT (and, if the owner agrees, switches the organ off) within the 10 s budget. Also handles the remote emergency-off message from midicontroller-fw D14 (LATER).
 - Open: a playing song can legitimately send no MIDI for seconds (long held notes), so key the trigger on the PC keepalive, not on MIDI silence. VERIFY the keepalive period fits 10 s.
 

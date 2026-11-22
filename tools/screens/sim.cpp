@@ -10,13 +10,13 @@
 //                                             letter, sleeping, power, led, midi
 //   event <name> [args]                       playing <song> | stopped | anchor <label> | songs <a;b;c|-> [more]
 //                                             | songs_delay | songs_timeout | pairing <text> | fw <transfer|install|error> <pct>
-//                                             | fw_end | fail <GET_SONG_LIST|PLAY_SONG|STOP_SONG> <text> | sync_power
-//   expect screen <id>                        id: splash main settings firmware display bluetooth pairing
-//                                             songs_loading songs nowplaying fwupdate nopc
+//                                             | fw_end | recording <on|off> | recfail <busy|nosupport|other|none> | pclost | fail <GET_SONG_LIST|PLAY_SONG|STOP_SONG> <text> | sync_power
+//   expect screen <id>                        id: splash main settings service firmware display bluetooth pairing
+//                                             songs_loading songs nowplaying fwupdate nopc recording
 //   expect text <line> | expect notext <line> exact match of one drawn text line (trimmed; a line wider
 //                                             than the display shows its clipped window, as on the OLED)
 //   expect scrolled <line>                    advances time (<= 12 s) until a scrolling line was seen from start to end
-//   expect var <k>=<v>                        requests lastOffset played stops power led midi sleeping
+//   expect var <k>=<v>                        requests lastOffset played stops addverses recstarts recstops power led midi sleeping
 // Output: one JSON object per step: step, cmd, screen, text[] (drawn text, top to bottom), frame (FNV-1a of
 // the visible 128x64 pixels), ok.
 
@@ -34,7 +34,7 @@
 namespace GUI {
 using E = ui::InputEvent;
 
-static int		  g_requests = 0, g_lastOffset = -1, g_stops = 0;
+static int		  g_requests = 0, g_lastOffset = -1, g_stops = 0, g_recStarts = 0, g_recStops = 0, g_addVerses = 0;
 static std::string g_played;
 
 static stmcpp::scheduler::Scheduler splashSched(3000_ms, [] { GUI::splashAutoDismiss(); }, false, false);
@@ -44,6 +44,8 @@ static const char *screenId() {
 	if (c == &splashScreen) return "splash";
 	if (c == &mainScreen) return "main";
 	if (c == &settingsScreen) return "settings";
+	if (c == &serviceScreen) return "service";
+	if (c == &powerOffConfirm) return "confirm";
 	if (c == &firmwareScreen) return "firmware";
 	if (c == &displayScreen) return "display";
 	if (c == &bluetoothScreen) return "bluetooth";
@@ -52,6 +54,7 @@ static const char *screenId() {
 	if (c == &songListScreen) return "songs";
 	if (c == &nowPlayingScreen) return "nowplaying";
 	if (c == &fwProgressScreen) return "fwupdate";
+	if (c == &recordScreen) return "recording";
 	if (c == &noPcScreen) return "nopc";
 	return "unknown";
 }
@@ -144,6 +147,9 @@ static std::string getVar(const std::string &k) {
 	if (k == "lastOffset") return std::to_string(g_lastOffset);
 	if (k == "played") return g_played;
 	if (k == "stops") return std::to_string(g_stops);
+	if (k == "addverses") return std::to_string(g_addVerses);
+	if (k == "recstarts") return std::to_string(g_recStarts);
+	if (k == "recstops") return std::to_string(g_recStops);
 	if (k == "power") return s.power ? "1" : "0";
 	if (k == "led") return s.ledMaster ? "1" : "0";
 	if (k == "midi") return s.midiRole ? "1" : "0";
@@ -182,6 +188,16 @@ static std::string event(const std::string &name, const std::string &rest) {
 		else return "fail: GET_SONG_LIST|PLAY_SONG|STOP_SONG";
 		GUI::requestFailed(t, (keep[3] = b).c_str());
 	}
+	else if (name == "recording") GUI::recordingSignal(a == "on");
+	else if (name == "pclost") GUI::recordingPcLost();
+	else if (name == "recfail") {
+		using R = protocol::NakReason;
+		if (a == "busy") GUI::recordingFailed(routercore::Failure::Nak, R::BUSY);
+		else if (a == "nosupport") GUI::recordingFailed(routercore::Failure::Nak, R::UNKNOWN_MSG);
+		else if (a == "other") GUI::recordingFailed(routercore::Failure::Nak, R::NOT_PLAYING);
+		else if (a == "none") GUI::recordingFailed(routercore::Failure::NoAnswer, R::BUSY);
+		else return "recfail: busy|nosupport|other|none";
+	}
 	else if (name == "sync_power") GUI::syncPowerCheckbox();
 	else return "unknown event " + name;
 	return "";
@@ -199,6 +215,8 @@ static int runScript(const char *path, const char *outPath) {
 	GUI::setRequestSongListCallback([](uint16_t off) { host::state.requests++; g_requests++; g_lastOffset = off; });
 	GUI::setPlaySongCallback([](const char *n) { g_played = n; });
 	GUI::setStopCallback([] { g_stops++; });
+	GUI::setAddVerseCallback([] { g_addVerses++; });
+	GUI::setRecordCallback([](bool start) { (start ? g_recStarts : g_recStops)++; });
 	splashSched.start();
 	snapshot();
 

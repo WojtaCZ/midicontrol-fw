@@ -1,0 +1,11 @@
+# E3: "Zastaveno" stays 1.5 s (not shorter, not longer)
+tick 3000
+event playing 406A
+expect screen nowplaying
+key enter
+event stopped
+tick 1300
+expect screen nowplaying
+expect text Zastaveno
+tick 300
+expect screen main

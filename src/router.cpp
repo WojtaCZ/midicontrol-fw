@@ -91,6 +91,7 @@ namespace router {
 
 	// Deduplication: the last PacketId processed locally from each node
 	static routercore::RxDedup _dedup;
+	static routercore::SignalDedup _signalDedup; // C5
 	static routercore::NonceRelay _nonceRelay; // the nonce the remote was last told
 	static routercore::RemoteBoot _remoteBoot; // boot id from the remote's KEEPALIVE_ACK (protocol v2), cleared on loss
 	static routercore::PcSession _pcSession; // KEEPALIVE nonce of the PC process (protocol v2)
@@ -308,6 +309,7 @@ namespace router {
 
 	// Signals PC → Remote; the Base observes them so the OLED matches the playback state
 	static void observeSignal(const Packet &pkt) {
+		if (pkt.source == protocol::ADDR_PC && _signalDedup.isRepeat(pkt.packetId)) return; // C5: a retransmitted signal does not re-run its OLED action
 		switch (pkt.msgType) {
 			case MsgType::SIGNAL_PLAYING: {
 				char code[protocol::MAX_SONG_CODE_LEN + 1];
@@ -451,6 +453,7 @@ namespace router {
 				if (pkt.source == protocol::ADDR_PC && routercore::onPcKeepalive(_pcSession, _dedup, pkt.payload, pkt.payloadLen)) {
 					Debug::log(Debug::Level::INFO, "router", "new PC session (nonce 0x%04x)", _pcSession.nonce());
 					GUI::recordingPcLost(); // a new PC process has no recording (I1)
+					_signalDedup.forget();
 					sendKeepaliveToRemote(true); // before any later frame of this pass is forwarded
 				}
 				sendSimple(pkt.source, MsgType::KEEPALIVE_ACK, nullptr, 0, via);
@@ -567,6 +570,7 @@ namespace router {
 			GUI::recordingPcLost(); // I1: no SIGNAL_STOPPED will come
 			// Q1-8 b: a restarted PC process numbers its packets from 1 again; do not ACK-and-drop its first ones
 			_dedup.forget(protocol::ADDR_PC);
+			_signalDedup.forget();
 			_pcSession.forget();
 			Debug::log(Debug::Level::WARNING, "router", "PC lost: all notes off, organ power off");
 		}

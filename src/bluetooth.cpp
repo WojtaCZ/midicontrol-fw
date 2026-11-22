@@ -759,10 +759,6 @@ namespace Bluetooth{
 		return _build_command_from_string(line.text);
 	}
 
-	bool isProtocolPacketAvailable() {
-		return !_rxPackets.empty();
-	}
-
 	bool getProtocolPacket(protocol::Packet &pkt) {
 		// Safeguard: without an accepted peer do not execute anything from the queue
 		if (!_peerAccepted) {

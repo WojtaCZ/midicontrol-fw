@@ -1,4 +1,5 @@
 #include "menu.hpp"
+#include <ui/confirm_screen.hpp>
 #include <stmcpp/scheduler.hpp>
 #include <stmcpp/units.hpp>
 #include "oled.hpp"
@@ -92,14 +93,22 @@ static void pairCallback(ui::MenuItem* item, void* userData);
 
 // ── Settings menu items & screen (defined first so mainItems can reference it) ─
 
+// C7 (Q2-29c): the service area; "Ident. MIDI" lives here, out of the normal user's way.
+static ui::MenuItem serviceItems[] = {
+    ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
+    ui::MenuItem::back("Zpet"),
+};
+
+static ui::MenuScreen serviceScreen("Servis", serviceItems, 2);
+
 static ui::MenuItem settingsItems[] = {
     ui::MenuItem::checkbox("LED",  true,  ledMasterCallback),
-    ui::MenuItem::checkbox("Ident. MIDI", true, midiRoleCallback),
     ui::MenuItem::checkbox("Napajeni varhan", false, powerCallback),
     ui::MenuItem("Verze FW", firmwareCallback),
     ui::MenuItem("Displej",  displayCallback),
     ui::MenuItem("Bluetooth", bluetoothCallback),
     ui::MenuItem("Sparovat ovladac", pairCallback),
+    ui::MenuItem("Servis", static_cast<ui::Screen*>(&serviceScreen)),
     ui::MenuItem::back("Zpet"),
 };
 
@@ -221,6 +230,7 @@ static void updateBluetoothInfo() {
 // ── Now Playing screen ─────────────────────────────────────────────────
 
 static StopCallback _stopCallback = nullptr;
+static AddVerseCallback _addVerseCallback = nullptr;
 static bool _nowPlayingActive = false;
 
 // ── Song list data ──────────────────────────────────────────────────────
@@ -279,6 +289,7 @@ public:
     static constexpr int INFO_CHARS = 18; // one 7x10 line
 
     void start(const char* code) {
+        if (std::strcmp(code, code_) != 0) machine_.forgetAnchor();
         std::strncpy(code_, code, sizeof(code_) - 1);
         code_[sizeof(code_) - 1] = '\0';
         info_[0] = '\0';
@@ -289,6 +300,7 @@ public:
     // Section label from SIGNAL_ANCHOR
     void setSection(const char* label) {
         formatSection(label, info_, sizeof(info_));
+        machine_.anchorSeen();
         infoScroll_.reset();
         markDirty();
     }
@@ -313,13 +325,23 @@ public:
     bool expired() const { return machine_.expired(stmcpp::systick::getTicks()); }
 
     bool handleInput(ui::InputEvent event) override {
-        if (event != ui::InputEvent::Enter) return true; // the encoder turns nothing here
-        if (machine_.press(stmcpp::systick::getTicks()) == nowplaying::Action::Leave) {
+        if (event == ui::InputEvent::Up || event == ui::InputEvent::Down) {
+            machine_.toggle(); // C4: Stop <-> Pridat sloku (after the first anchor)
+            markDirty();
+            return true;
+        }
+        if (event != ui::InputEvent::Enter) return true;
+        const nowplaying::Action a = machine_.press(stmcpp::systick::getTicks());
+        if (a == nowplaying::Action::Leave) {
             leave();
             return true;
         }
         markDirty();
-        if (_stopCallback) _stopCallback();
+        if (a == nowplaying::Action::SendAddVerse) {
+            if (_addVerseCallback) _addVerseCallback();
+        } else if (_stopCallback) {
+            _stopCallback();
+        }
         return true;
     }
 
@@ -369,11 +391,26 @@ public:
             gfx::text::drawText(fb, *theme.smallFont, buf, theme.leftMargin, infoY, gfx::Anchor::TopLeft, (uint8_t)1);
         }
 
-        // The Stop button, always selected (the only one)
+        // Buttons: Stop alone (selected) until the first anchor; then Stop | Pridat sloku, the encoder picks one
         if (state_ != State::Stopped) {
-            const int x = (theme.displayWidth - (int)btn_stop_selected.width) / 2;
             const int y = theme.displayHeight - (int)btn_stop_selected.height;
-            gfx::drawIcon(fb, btn_stop_selected, x, y, gfx::Anchor::TopLeft, (uint8_t)1);
+            if (!machine_.addVerseAvailable()) {
+                const int x = (theme.displayWidth - (int)btn_stop_selected.width) / 2;
+                gfx::drawIcon(fb, btn_stop_selected, x, y, gfx::Anchor::TopLeft, (uint8_t)1);
+            } else {
+                const bool addSel = machine_.selection() == nowplaying::Selection::AddVerse;
+                const int sw = (int)btn_stop_selected.width;
+                const int x0 = theme.leftMargin + 4;
+                gfx::drawIcon(fb, addSel ? btn_stop_normal : btn_stop_selected, x0, y, gfx::Anchor::TopLeft, (uint8_t)1);
+                const char* lbl = "Pridat sloku";
+                const int lw = 12 * (int)theme.smallFont->width() + 6;
+                const int bx = x0 + sw + 8;
+                const int bh = (int)btn_stop_selected.height;
+                if (addSel) gfx::drawFilledRect(fb, bx, y, lw, bh, (uint8_t)1);
+                else gfx::drawRect(fb, bx, y, lw, bh, (uint8_t)1);
+                gfx::text::drawText(fb, *theme.smallFont, lbl, bx + 3, y + (bh - (int)theme.smallFont->height()) / 2,
+                                    gfx::Anchor::TopLeft, (uint8_t)(addSel ? 0 : 1));
+            }
         }
 
         clearDirty();
@@ -460,17 +497,101 @@ static void playCallback(ui::MenuItem* item, void* userData) {
 static recording::Machine _recording;
 static GUI::RecordCallback _recordCallback = nullptr;
 
+// C3: the recording screen follows recording::Machine. "Priprava" while the PC warms the organ up, "Nahravam"
+// with Enter = Stop, "Zastavuji" until SIGNAL_STOPPED; a refusal (BUSY, protocol v1 PC, any other failure) stays
+// until Enter. "Nahravani nelze: hraje" is the base's own refusal while a song plays (one at a time).
+static bool _recordShown = false;     // the screen is in the navigator stack
+static bool _recordRefused = false;   // the base refused (playing): not a machine state
+
+static void onRecordEnter(void* userData);
+static ui::SplashScreen recordScreen("Nahravani", "", "", onRecordEnter);
+
+static void syncRecordScreen() {
+    const recording::State st = _recording.state();
+    const char* sub = "";
+    const char* com = "";
+    if (_recordRefused) {
+        sub = "Nahravani nelze: hraje";
+    } else {
+        switch (st) {
+            case recording::State::Starting:   sub = "Priprava"; break;
+            case recording::State::Recording:  sub = "Nahravam"; com = "Enter = Stop"; break;
+            case recording::State::Stopping:   sub = "Zastavuji"; break;
+            case recording::State::Busy:       sub = "Zaneprazdneno"; break;
+            case recording::State::NoSupport:  sub = "PC nema nahravani"; break;
+            case recording::State::Failed:     sub = "Nahravani selhalo"; break;
+            case recording::State::Idle:       break;
+        }
+    }
+    const bool want = _recordRefused || st != recording::State::Idle;
+    if (want) {
+        if (fwPushed) return; // the update screen owns the display
+        recordScreen.setSubtitle(sub);
+        recordScreen.setComment(com);
+        if (!_recordShown) {
+            nav.push(&recordScreen);
+            _recordShown = true;
+        }
+        Oled::wakeupCallback();
+    } else if (_recordShown) {
+        _recordShown = false;
+        if (nav.current() == &recordScreen) nav.pop();
+    }
+    nav.forceRender();
+}
+
+static void onRecordEnter(void* userData) {
+    (void)userData;
+    if (_recordRefused) {
+        _recordRefused = false;
+    } else {
+        switch (_recording.state()) {
+            case recording::State::Recording:
+            case recording::State::Stopping:
+                if (_recording.press() != recording::Action::None && _recordCallback) _recordCallback(false);
+                break;
+            case recording::State::Starting: return; // wait for the PC (the organ warms up)
+            default: _recording.dismiss(); break;
+        }
+    }
+    syncRecordScreen();
+}
+
 // The base is the only place a recording starts (A7). The menu item starts it, or stops a running one.
 static void recordCallback(ui::MenuItem* item, void* userData) {
     (void)item; (void)userData;
+    if (_nowPlayingActive) { // one at a time: a song plays
+        _recordRefused = true;
+        syncRecordScreen();
+        return;
+    }
     const recording::Action a = _recording.press();
-    if (!_recordCallback || a == recording::Action::None) return;
-    _recordCallback(a == recording::Action::SendStart); // TODO(C3): show the state ("Priprava"/"Nahravam"/...)
+    if (_recordCallback && a != recording::Action::None) _recordCallback(a == recording::Action::SendStart);
+    syncRecordScreen();
+}
+
+// C12 / Q2-29b: switching the organ off while a song plays or a recording runs asks first ("Ano" / "Ne");
+// switching on, or off when idle, never asks. The checkbox follows the real state either way.
+static void powerOffResult(bool confirmed, void* userData);
+static ui::ConfirmScreen powerOffConfirm("Vypnout varhany?", powerOffResult);
+
+static void powerOffResult(bool confirmed, void* userData) {
+    (void)userData;
+    if (nav.current() == &powerOffConfirm) nav.pop();
+    if (confirmed) base::current::disable();
+    settingsItems[1].setChecked(base::current::isEnabled());
+    nav.forceRender();
 }
 
 static void powerCallback(ui::MenuItem* item, void* userData) {
     (void)userData;
     if (base::current::isEnabled()) {
+        const bool busy = _nowPlayingActive || _recording.state() != recording::State::Idle;
+        if (busy) {
+            if (item) item->setChecked(true); // stays on until "Ano"
+            nav.push(&powerOffConfirm);
+            return;
+        }
         base::current::disable();
     } else {
         base::current::setSource(organsrc::Source::MENU);
@@ -575,7 +696,7 @@ void init() {
 
     // Synchronize the checkboxes from the saved settings
     settingsItems[0].setChecked(settings::ledMasterEnable());
-    settingsItems[1].setChecked(settings::midiRoleIdentifier());
+    serviceItems[0].setChecked(settings::midiRoleIdentifier());
 
     nav.push(&splashScreen);
 }
@@ -602,7 +723,7 @@ void render() {
     // Status icons on the menu screens and on the now playing screen (not on SplashScreen, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
 
-    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen || cur == &nowPlayingScreen);
+    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen || cur == &nowPlayingScreen);
 
     if (showStatusIcons && Bluetooth::isConnected()) {
         int iconX = theme.displayOffsetX + theme.displayWidth - 14;
@@ -669,7 +790,7 @@ static void handleKey(ui::InputEvent event) {
     // because the navigator doesn't have RTTI to auto-detect MenuScreen
     ui::Screen* cur = nav.current();
     if (event == ui::InputEvent::Enter && cur) {
-        if (cur == &mainScreen || cur == &settingsScreen || cur == &songListScreen) {
+        if (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen) {
             auto* menu = static_cast<ui::MenuScreen*>(cur);
             ui::MenuItem* sel = menu->selectedItem();
 
@@ -718,7 +839,7 @@ ui::Navigator& navigator() {
 }
 
 ui::MenuItem& checkboxPower() {
-    return settingsItems[2];
+    return settingsItems[1];
 }
 
 ui::MenuItem& checkboxLedMaster() {
@@ -726,7 +847,7 @@ ui::MenuItem& checkboxLedMaster() {
 }
 
 ui::MenuItem& checkboxMidiRole() {
-    return settingsItems[1];
+    return serviceItems[0];
 }
 
 void showPairingResult(const char* text) {
@@ -772,6 +893,7 @@ void showFwProgress(const char* hint, uint8_t percent) {
         songListDelayScheduler.stop();
         _pairStatusShown = false;
         _nowPlayingActive = false;
+        _recordShown = false;
         // Stack = main menu + update screen (no splash/submenu below it)
         nav.reset(&mainScreen);
         nav.push(&fwProgressScreen);
@@ -841,17 +963,19 @@ void requestFailed(protocol::MsgType type, const char* text) {
 }
 
 void syncPowerCheckbox() {
-    settingsItems[2].setChecked(base::current::isEnabled());
+    settingsItems[1].setChecked(base::current::isEnabled());
     nav.forceRender();
 }
 
 void recordingSignal(bool recording) {
     if (recording) _recording.signalRecording();
     else _recording.signalStopped();
+    syncRecordScreen();
 }
 
 void recordingFailed(routercore::Failure f, protocol::NakReason reason) {
     _recording.requestFailed(f, reason);
+    syncRecordScreen();
 }
 
 recording::State recordingState() {
@@ -860,10 +984,16 @@ recording::State recordingState() {
 
 void recordingPcLost() {
     _recording.pcLost();
+    _recordRefused = false;
+    syncRecordScreen();
 }
 
 void setRecordCallback(RecordCallback cb) {
     _recordCallback = cb;
+}
+
+void setAddVerseCallback(AddVerseCallback cb) {
+    _addVerseCallback = cb;
 }
 
 void setStopCallback(StopCallback cb) {

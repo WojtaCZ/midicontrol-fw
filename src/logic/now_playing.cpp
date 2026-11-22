@@ -3,11 +3,22 @@
 namespace nowplaying {
 
 	void Machine::start() {
+		if (_state != State::Playing && _state != State::Stopping) { _anchor = false; _sel = Selection::Stop; }
 		_state = State::Playing;
+	}
+
+	void Machine::anchorSeen() {
+		_anchor = true;
+	}
+
+	void Machine::toggle() {
+		if (!addVerseAvailable()) return;
+		_sel = (_sel == Selection::Stop) ? Selection::AddVerse : Selection::Stop;
 	}
 
 	Action Machine::press(uint32_t now) {
 		if (_state == State::Stopped) return Action::Leave;
+		if (_state == State::Playing && _anchor && _sel == Selection::AddVerse) return Action::SendAddVerse; // stays Playing
 		// Stop (again while stopping: the PC may have missed it)
 		_state = State::Stopping;
 		_since = now;
@@ -20,7 +31,7 @@ namespace nowplaying {
 	}
 
 	void Machine::stopFailed() {
-		if (_state == State::Stopping) _state = State::Playing;
+		if (_state == State::Stopping) { _state = State::Playing; _sel = Selection::Stop; }
 	}
 
 	bool Machine::expired(uint32_t now) const {

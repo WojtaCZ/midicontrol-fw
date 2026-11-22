@@ -80,6 +80,22 @@ namespace routercore {
 		Ring _ring[NODES] = {};
 	};
 
+	// C5 (Q2-21b): signals are not ACKed, so the RxDedup never sees them. A retransmitted signal carries the same
+	// PacketId as the one just observed; remember only the last id per signal stream (the PC) and skip a repeat.
+	class SignalDedup {
+	public:
+		bool isRepeat(uint8_t packetId) {
+			if (_have && _last == packetId) return true;
+			_last = packetId;
+			_have = true;
+			return false;
+		}
+		void forget() { _have = false; } // PC lost or new PC session: it numbers from 1 again
+	private:
+		uint8_t _last = 0;
+		bool	_have = false;
+	};
+
 	// PC session nonce (KEEPALIVE payload [nonce u16 LE], protocol v2): changes when the PC process restarts.
 	// 0 means "no nonce" (v1 PC) and never counts.
 	class PcSession {

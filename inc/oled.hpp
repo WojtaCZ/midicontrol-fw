@@ -41,7 +41,6 @@ namespace Oled{
             int getWidth() const override;
             int getHeight() const override;
             uint8_t * getBufferAddress(int offset);
-            int getBufferSize() const;
 
             // Dimensions
             static constexpr int WIDTH = 130;
@@ -76,7 +75,6 @@ namespace Oled{
     void wakeup();
     bool isSleeping();
     bool isInitialized();
-    bool isInverted();
     void setInitialized(bool state);
 
     void update();

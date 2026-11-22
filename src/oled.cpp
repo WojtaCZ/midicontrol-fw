@@ -199,10 +199,6 @@ namespace Oled{
         initialized = state;
     }
 
-    bool isInverted(){
-        return inverted;
-    }
-
     void startChunk(uint8_t idx){
         stmcpp::reg::write(std::ref(DMA1_Channel3->CMAR), reinterpret_cast<uint32_t>(chunkPtr[idx]));
         stmcpp::reg::write(std::ref(DMA1_Channel3->CNDTR), chunkLen[idx]);
@@ -361,7 +357,4 @@ namespace Oled{
         return &buffer[offset];
     }
 
-    int OledBuffer::getBufferSize() const {
-        return BUFFER_SIZE;
-    }
 }

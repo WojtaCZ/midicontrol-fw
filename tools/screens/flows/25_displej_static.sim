@@ -6,7 +6,6 @@ key enter
 key down
 key down
 key down
-key down
 key enter
 expect screen display
 expect text Pripojen: Ano

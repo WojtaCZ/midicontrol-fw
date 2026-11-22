@@ -1,0 +1,26 @@
+# C3: refusals stay until Enter; a second try is possible
+tick 3000
+key down
+key enter
+event recfail busy
+expect scrolled Zaneprazdneno
+key enter
+expect screen main
+key enter
+expect var recstarts=2
+event recfail nosupport
+expect scrolled PC nema nahravani
+key enter
+expect screen main
+key enter
+event recfail none
+expect scrolled Nahravani selhalo
+key enter
+expect screen main
+# the PC restarts while recording: the screen goes away
+key enter
+event recording on
+expect screen recording
+state pc=0
+event pclost
+expect screen nopc

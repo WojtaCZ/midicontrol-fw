@@ -1,0 +1,12 @@
+# C12: idle (no song, no recording): organ off needs no confirmation (the confirm only guards playing/recording)
+tick 3000
+key down
+key down
+key down
+key enter
+expect screen settings
+key down
+key enter
+expect screen settings
+key enter
+expect screen settings
