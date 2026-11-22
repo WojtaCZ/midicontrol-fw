@@ -208,7 +208,7 @@ DONE 2026-11-22: RecordScreen (Priprava / Nahravam + Enter = Stop / Zastavuji / 
 - Manual/facts: `zakladna.md` (Napajeni varhan), `facts/base.md`; SYSTEM.md if a SYS row covers it.
 - Risk / open points: none beyond the VERIFY above.
 
-### E3 (base) Per-screen timing checks in sim flows (Q3-9)
+### E3 (base) Per-screen timing checks in sim flows (Q3-9) - DONE (t01_timing_songs, t02_timing_stopped added next to 02, 09, 13, 20; flows are globbed by run-sim.sh)
 - Goal: sim flows assert the real per-screen timeouts, not only the screen ids.
 - Current code: tools/screens/sim.cpp supports `tick <ms>` (30 ms steps, one-shot schedulers, splash auto-dismiss at 3 s, OLED sleep at 30 s idle), `expect screen|text|notext|scrolled|var`. Existing timing flows: 02_splash_autodismiss, 09_songs_timeout_empty (events `songs_delay`, `songs_timeout` fired by hand, not by time), 20_oled_sleep, 21_sleep_first_key_main. Base timers: song list delay 500 ms and timeout 3 s (menu.cpp), splash 3 s, OLED sleep 30 s, signal-driven 5 s OLED wake (C5), "Zastaveno" display after stop (VERIFY duration in now_playing.*), pairing screen timeouts (VERIFY), FW update screen over nopc (flows 23).
 - Change: (1) collect the timeouts per screen from src/menu.cpp and src/logic/now_playing.* (grep `_ms\|Ms\|kTimeout`); (2) for each, add flow steps `tick <T-100>`, `expect screen <before>`, `tick 200`, `expect screen <after>`; (3) change 09 so the songs timeout fires by time (`tick 3500`) instead of `event songs_timeout` (keep one flow with the manual event); (4) new flows 26.. named `t01_timing_*.sim`; (5) add a flow-level name list to run-sim.sh if flows are enumerated (VERIFY: run-sim.sh globbing). (6) the exact timeouts also go into docs/manual/facts/base.md timing table.
@@ -237,7 +237,7 @@ Owner present. Each item: what to do, what to record.
 - ECC repair (C9): no on-demand method; bench only the normal boot path unchanged.
 - Battery items, ProgramOffset -1: not base (remote and organ/PC side).
 
-### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13)
+### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13) - DONE (already implemented as SYS-PC-03: keepalive loss 6 s -> midi::sendStuckNoteCleanup + organ off in router.cpp logChanges; fits the 10 s budget; remote emergency-off from D14 stays LATER; bench: stop the PC process during playback, DIN OUT silent and SSR off within 6 s)
 - Goal: second safety layer for hung notes: if the PC keepalive or MIDI stream stops during playback, the base sends All Notes Off on DIN OUT (and, if the owner agrees, switches the organ off) within the 10 s budget. Also handles the remote emergency-off message from midicontroller-fw D14 (LATER).
 - Open: a playing song can legitimately send no MIDI for seconds (long held notes), so key the trigger on the PC keepalive, not on MIDI silence. VERIFY the keepalive period fits 10 s.
 

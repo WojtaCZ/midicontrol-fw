@@ -1,0 +1,12 @@
+# E3: the song list timers run by time: loading screen after 500 ms, "PC neodpovida" after 3 s
+tick 3000
+key enter
+tick 400
+expect screen main
+tick 200
+expect screen songs_loading
+tick 2300
+expect screen songs_loading
+expect notext PC neodpovi
+tick 600
+expect text PC neodpovi
