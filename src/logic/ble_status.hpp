@@ -31,6 +31,17 @@ namespace blestatus {
 	// One display line (at most 18 characters, 7x10 font)
 	const char *healthText(Health h);
 
+	// Scan command: "F" or "FE[,<interval>,<window>,<PHYs>,<filter>]" (extended scan, 1M + Coded).
+	constexpr bool isScanCommand(const char *cmd) {
+		return cmd[0] == 'F' && (cmd[1] == '\0' || (cmd[1] == 'E' && (cmd[2] == '\0' || cmd[2] == ',')));
+	}
+	// After a job that ends with a scan which answered "Scanning" (and no Err), the RNBD350 stays in command mode: it answers
+	// neither "---" nor "$$$" while scanning (bench 2026-11-05). The engine must not send "---", so the X and CE queued
+	// after "remote found" go out in the same command session. Pairing bug 2026-11-22: the check matched "F" only.
+	constexpr bool staysInCommandMode(const char *lastCmd, bool sawProgress, bool sawErr) {
+		return isScanCommand(lastCmd) && sawProgress && !sawErr;
+	}
+
 	// ── Scan results (F) ──
 	// A field of a status line: points into the parsed text, not NUL-terminated
 	struct ScanField {

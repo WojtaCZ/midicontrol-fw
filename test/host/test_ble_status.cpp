@@ -186,3 +186,28 @@ TEST(BleLinkUsable, OnlyWhenConnectedStreamOpenAndAccepted) {
 	EXPECT_FALSE(blestatus::linkUsable(false, true, true));   // stale flags after a loss
 	EXPECT_FALSE(blestatus::linkUsable(false, false, false));
 }
+
+// Pairing bug 2026-11-22: since 6a68acc the scan job ends with "FE,01E0,0190,03,00", not "F". The engine compared the last
+// command with "F" only, sent "---" into the running scan and every later "$$$" was ignored (pairing timeout).
+TEST(BleScanCommand, PlainAndExtendedScan) {
+	EXPECT_TRUE(isScanCommand("F"));
+	EXPECT_TRUE(isScanCommand("FE,01E0,0190,03,00"));
+	EXPECT_TRUE(isScanCommand("FE"));
+}
+
+TEST(BleScanCommand, OtherCommandsAreNotScans) {
+	EXPECT_FALSE(isScanCommand("X"));
+	EXPECT_FALSE(isScanCommand("Z"));
+	EXPECT_FALSE(isScanCommand("K,1"));
+	EXPECT_FALSE(isScanCommand("FX"));
+	EXPECT_FALSE(isScanCommand(""));
+	EXPECT_FALSE(isScanCommand("@CE"));
+}
+
+TEST(BleScanCommand, StayInCommandModeOnlyWhileTheScanRuns) {
+	EXPECT_TRUE(staysInCommandMode("FE,01E0,0190,03,00", true, false));
+	EXPECT_TRUE(staysInCommandMode("F", true, false));
+	EXPECT_FALSE(staysInCommandMode("FE,01E0,0190,03,00", false, false)); // no "Scanning": the scan did not start
+	EXPECT_FALSE(staysInCommandMode("FE,01E0,0190,03,00", true, true));   // Err
+	EXPECT_FALSE(staysInCommandMode("Z", true, false));
+}

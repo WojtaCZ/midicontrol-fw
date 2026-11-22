@@ -446,7 +446,7 @@ class Target:
 
     def screen_name(self) -> str:
         cur = self.current_screen()
-        for name in ("playerScreen", "mainScreen", "songListScreen", "pairingScreen", "splashScreen", "messageScreen", "settingsScreen"):
+        for name in ("playerScreen", "mainScreen", "songListScreen", "pairingScreen", "splashScreen", "messageScreen", "settingsScreen", "noBaseScreen"):
             try:
                 if cur == self.sym(f"GUI::{name}"):
                     return name

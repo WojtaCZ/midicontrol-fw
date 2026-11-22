@@ -313,7 +313,7 @@ namespace Bluetooth{
 					_jobIndex++;
 					if (_jobIndex < _jobCount) {
 						_engineState = EngineState::SEND;
-					} else if (strcmp(_jobCommands[_jobIndex - 1], "F") == 0 && _sawProgress && !_sawErr) {
+					} else if (blestatus::staysInCommandMode(_jobCommands[_jobIndex - 1], _sawProgress, _sawErr)) {
 						// A running scan keeps the RNBD350 in command mode: it answers neither "---" (no END, bench 2026-11-05)
 						// nor "$$$". Stay in command mode so the X and C queued after "remote found" go straight out.
 						_finishJobKeepQueued(_jobIndex);
