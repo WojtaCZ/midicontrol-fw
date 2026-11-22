@@ -18,15 +18,17 @@
 - Still open (5.3 edge cases): pairing while connected (covered by disconnect_and_forget + K,1), old stored address after an
   upgrade; scan timeout stops cleanly is covered by test_pairing_timeout_no_remote.
 
-## LED setting lost on base reboot (owner, 2026-11-22) - open
+## LED setting lost on base reboot (owner, 2026-11-22) - not reproduced, needs owner repro
 
 - Owner: the base menu "LED" checkbox (settings item 0, `ledMasterCallback` in `src/menu.cpp`) does not survive a base reboot.
-- Not analysed yet. The callback does call `settings::save()`, and the remote address in the same flash page (page 63,
-  `src/settings.cpp`) does survive reboots, so flash writes basically work. Leads: (1) the menu init syncs the checkbox from settings
-  (`menu.cpp:577`), so check whether `settings::init()` actually loads the page (log "set: loaded v2" vs "no valid
-  settings, defaults") and whether the bootloader or a firmware update erases page 63; (2) a later `settings::save()` from
-  another path writing an older RAM copy; (3) the `midiRoleId` checkbox probably has the same problem.
-- Repro: toggle LED off, reset the base, read `settings::ramCopy` over the probe and compare with the checkbox and the LEDs.
+- Checked 2026-11-22 on the bench (release base ELF, probe): writing ledMasterEnable 1 and 0 into `settings::ramCopy` and
+  calling `settings::save()`, then resetting, reloads the value both times; FLASH SR stays 0; the flash page and RAM agree
+  (LED=0, midiRole=0). `settings::init()` (main.cpp) runs before the OLED/GUI/LED init, and the menu syncs the checkbox from it.
+- Flash page 63 (0x0801F800) is never erased by an update: the bootloader apply erases [0x08008000, 0x0801F800) and the
+  full/update hex images end exactly at 0x0801F800. A full chip erase (mass erase, STM32CubeProgrammer "erase all") does
+  wipe it, and then the defaults come back (LED on).
+- Open: the owner's exact steps (menu toggle -> power cycle? after an OTA? after `mcu flash` with a mass erase?). Without
+  a repro there is no code change.
 
 ## Stuck base / stuck notes (watchdog) - done 2026-11-07, one check left
 
@@ -44,10 +46,10 @@ Verified by hand on 2026-11-05: pairing (F, X, C, bond, settings saved), reconne
 bond, `diag`/`status` round trip through the remote. NOT run, because the bench lacked the base ST-Link
 (AP access fails, only IDCODE reads) and the fx2lafw logic analyzer:
 
-- `tools/basetest` `pytest -m hw`: ran 2026-11-07 (96 passed, 21 failed). Failures are not BLE regressions: no logic analyzer attached (test_display, test_relay LA tests, test_pairing/test_ble_security UART parts), remote DWARF ELF missing (`BASETEST_REMOTE_ELF`, KeyError `&GUI::mainScreen`, test_relay), `BASETEST_UPDATE_*` unset (test_ota), DIN dead (test_midi; gap 28), `test_log::test_positions_survive_uint32_wrap` gets a stray partial line `ype 0x01 len 1` in the `level d` reply (not analysed). Re-run with the analyzer and the -g remote ELF. Passing now: test_ble_down (window widened to 95 s), test_link_loss (new), test_fault, test_lifecycle, test_cdc_robust.
+- `tools/basetest` `pytest -m hw`: ran 2026-11-07 (96 passed, 21 failed). Failures are not BLE regressions: no logic analyzer attached (test_display, test_relay, test_pairing/test_ble_security UART parts; since 2026-11-22 those tests read MCU state instead), remote DWARF ELF missing (`BASETEST_REMOTE_ELF`, KeyError `&GUI::mainScreen`, test_relay), `BASETEST_UPDATE_*` unset (test_ota), DIN dead (test_midi; gap 28), `test_log::test_positions_survive_uint32_wrap` gets a stray partial line `ype 0x01 len 1` in the `level d` reply (not analysed). Re-run with the -g remote ELF. Passing now: test_ble_down (window widened to 95 s), test_link_loss (new), test_fault, test_lifecycle, test_cdc_robust.
 - `test_pairing.py` and `test_ble_security.py`: the remote address is already the RNBD350 remote `40843204625F` (done;
   the old RN4870 address `D88039FE5996` remains only as the RN4870 scan-format example in `src/logic/ble_status.hpp` and its
-  host tests). The UART-level assertions (`$$$`, `A`, `%CONNECT%` text) may still need RNBD350 formats. The firmware log text
+  host tests). They assert the firmware's own `ble: cmd` log lines (DEBUG), not the UART. The firmware log text
   "RN4870 init failed" is matched by `test_ble_down.py`; renaming it is an owner question (audit Q-BD-4), leave both alone.
 - `midicontroller-fw/tools/bletest` (remote over BLE): `test_inbound`, `test_robust`, `test_outbound`,
   `test_lifecycle`, `test_ota`, `SOAK_SECONDS=600 test_soak`; needs the PC BLE adapter (the remote is now bonded to the
@@ -75,7 +77,7 @@ Applied and verified on the bench: `SGA/SGC,0F` (module caps at +14 dBm), `ST` +
 - Base side has no diag ring: an unexpected module `%REBOOT%` is a WARNING log line plus the counter (the remote writes diag records `BLE_MODULE_REBOOT` / `BLE_ERR_CONN`).
 - The base's first connection attempt after every boot ends in `%ERR_CONN%` and a retry ~0.2 s later (older behaviour); it now counts as one link loss in `link_losses` / `link_err_conn`, so those counters start at 1 after each boot.
 - Basetest conftest turns the RSSI polls off (`Bluetooth::_rssiPollDisabled`, remote `Bluetooth::rssiPollDisabled`); a base reset clears the flag, `test_link_stats.py` turns them on itself. Packet ids restart at 1 in every process and the base drops a request with the id of the last one it executed: a second script/pytest run whose first reliable request is pid 1 gets only an ACK (`test_link_stats.info()` retries).
-- The base BLE UART analyzer channels (D2/D3) showed no transitions on 2026-11-07 (only D6 was active), so the analyzer-based suites (test_ble_security etc.) cannot pass until the leads are checked. `test_ble_down::test_dead_rn4870_no_reset_loop_and_retry` passes alone (211 s) but failed once after other tests in the same run (timing).
+- `test_ble_down::test_dead_rn4870_no_reset_loop_and_retry` passes alone (211 s) but failed once after other tests in the same run (timing).
 - DONE 2026-11-07 (3): reconnect and pairing on the Coded PHY. The remote advertises extended, connectable, on a Coded primary + secondary PHY (`IPE,0001,0200,07,0F,03,03` + `IAE` flags/name + `A,0200,0000,01,01`; legacy and extended sets cannot both be connectable, so legacy advertising is off; `Bluetooth::extAdvMode` = 0 restores it). The base scans with `FE,01E0,0190,03,00` (1M + Coded) and connects with `CE,<type>,<addr>,05,<1M set>,<Coded set>` (reconnect and pairing; plain `C` never connects to a Coded advertiser, bench-verified). The extended set uses the same public address, the existing bond works, `B` follows `%STREAM_OPEN%` as before. Bench: fresh pairing against a remote with a stale bond 3/3, base reset and remote reset reconnect, `test_link_loss.py` + `test_link_stats.py` 8/8. Finding: a link created together with a NEW bond over Coded advertising goes silent after ~4 s (module link up, no frames; legacy advertising and later reconnects are fine), so `pairingFinished(true)` drops the link once (`K,1`) and the auto-reconnect picks the bond up ~5 s later. Cause not found. Still unverified: real range (church walk), phones/old bases cannot see the remote any more (legacy advertising off), CE job slots stay 32 B (the CE line is built into `_ceLine` at send time, token `@CE`).
 
 ## Indicator bus: check on a real display (2026-11-12)
@@ -228,7 +230,7 @@ Owner present. Each item: what to do, what to record.
 - Q2-17: remote connected while the base updates (FW update over USB): check the remote shows "Zakladna: aktualizace" (D11) and Play is refused BUSY (A8).
 - Rear LED labels and order: compare the six rear LEDs (USB, DISPLAY, CURRENT, MIDI A, MIDI B, BLUETOOTH; pixel order 0..5) with the printed labels; check colours with master LED on and off (C2).
 - Q3-11: capture the RNBD350 module UART after a connect (the "stuck command mode" problem, memory note "remote stuck cmd mode"); and run an old-set long batch (the long-run tools in tools/basetest; VERIFY which test).
-- DIN probe (postponed since 2026-11-13): check U14.17, DIN pin 4 voltage (V), and the logic analyser D5 clip.
+- DIN probe (postponed since 2026-11-13): check U14.17, DIN pin 4 voltage (V).
 - ECC repair (C9): no on-demand method; bench only the normal boot path unchanged.
 - Battery items, ProgramOffset -1: not base (remote and organ/PC side).
 

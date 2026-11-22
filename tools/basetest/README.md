@@ -2,7 +2,7 @@
 
 The PC talks to the base over USB-CDC (`abcd:1234`, interface 00, frames only); a second CDC ("MIDIControl log",
 interface 04) carries the human-readable log. Two ST-Links read firmware state and inject
-actions; the fx2lafw logic analyzer (`la.py`) checks the UARTs. Everything here is opt-in: hardware tests carry the
+actions. There is no logic analyzer: tests assert what the STM reads (variables, counters, the firmware log in `Debug::_log`). Everything here is opt-in: hardware tests carry the
 `hw` marker (`pytest.ini` runs `-m "not hw"` by default).
 
 ## Bench
@@ -11,7 +11,6 @@ actions; the fx2lafw logic analyzer (`la.py`) checks the UARTs. Everything here 
 - Remote on ST-Link serial `37FF70064E59313840161343` (gdb 3333, tcl 6666, telnet 6665), ON/OFF held.
 - Never run `st-info --probe` (resets and halts the core). Before a gdb `detach` send `monitor resume` (dbg.py does).
 - Only one openocd per probe; `dbg.Target` starts and stops its own - no other server may be running.
-- Logic analyzer: D0/D1 display UART, D2/D3 base BLE UART, D4/D5 remote I2C, D6/D7 remote BLE UART (see `la.py`).
 
 ## Setup
 
@@ -69,7 +68,6 @@ cd tools/basetest
   `command("level d")` returns the reply lines (lines without the log prefix). `loglink.is_log_line` = the exact
   format `[ssssss.mmm] L tag: text`; `is_marker` = `--- log before reset ---`, `--- end of log before reset ---`,
   `[dropped N]`.
-- `la.uart_timed` - like `la.uart` but returns `[(time, byte)]` plus decoder warnings (frame errors).
 - `proto.py` - copy of the remote harness codec.
 
 ## Remote symbols (DWARF)
@@ -95,7 +93,6 @@ export BASETEST_REMOTE_ELF=$S/build/midicontroller-fw.elf
   (`U,Z`), pairs, resets the base, holds the remote's RN4870 in reset for the timeout test and re-pairs at the end.
   `PAIRING_LOG` (default `/tmp/basetest-pairing.log`) collects the status lines of both modules.
 - `test_relay.py` expects a paired, connected remote and its probe free (`remote_probe`).
-- LA: remote BLE D7 = MCU -> RN4870, D6 = RN4870 -> MCU (the module's `%CONNECT%` etc. are on D6).
 
 ## Things to know
 

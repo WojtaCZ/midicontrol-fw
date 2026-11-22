@@ -31,6 +31,7 @@ class MT(IntEnum):
     SIGNAL_RECORDING = 0x31
     SIGNAL_STOPPED = 0x32
     SIGNAL_ANCHOR = 0x33
+    SIGNAL_INFO = 0x34  # v2 (A6/A8): [flags u8], bit0 song has sections
     SET_CURRENT = 0x40
     GET_STATUS = 0x50
     STATUS_RESP = 0x51

@@ -1,19 +1,16 @@
 """Relay PC <-> Remote via the base (USB-CDC <-> BLE) with a paired remote. The PC is played by the harness (link), the remote is real
 (keys and state via its ST-Link, `remote_probe`). Precondition: the base and the remote are paired (test_pairing.py)."""
 
-import re
 import time
 
 import pytest
 
 import dbg
-import la
 import proto
 from conftest import remote_alive, wait_until
 from proto import MT, NAK, Packet
 
 ADDR_PC, ADDR_BASE, ADDR_REMOTE = proto.ADDR_PC, proto.ADDR_BASE, proto.ADDR_REMOTE
-BAUD = 115200
 MAX_RETRIES = 3  # PROTOCOL.md: 3 retries at 500 ms, same PacketId
 
 
@@ -39,10 +36,6 @@ def pc_signal(link, mtype, payload=b""):
 
 def pc_ack(link, pkt):
     link.send(Packet(ADDR_PC, ADDR_REMOTE, 0, MT.ACK, bytes([pkt.pid])))
-
-
-def frames(data: bytes) -> list:
-    return proto.FrameParser().feed(data)
 
 
 @pytest.fixture(scope="module")
@@ -77,16 +70,18 @@ def test_status_ble_connected(paired, link):
 
 
 def test_base_keepalive_to_remote(paired):
+    """router::_lastKeepalive is set each time the base sends a keepalive to the remote; sample it for 11 s and check the cadence."""
     base = paired
-    sr = la.capture(11, channels=la.chans("base_ble_rx", "base_ble_tx"), samplerate="1M")
-    data, _ = la.uart_timed(sr, la.CH["base_ble_tx"], BAUD, 1e6)
-    # frames with the time of the first byte (SOH)
-    times, parser = [], proto.FrameParser()
-    for t, b in data:
-        for p in parser.feed(bytes([b])):
-            if p.src == ADDR_BASE and p.dst == ADDR_REMOTE and p.mtype == MT.KEEPALIVE:
-                times.append(t)
-    gaps = [round(b - a, 3) for a, b in zip(times, times[1:])]
+    res = base.u("stmcpp::systick::resolution_")
+    seen = []
+    end = time.monotonic() + 11
+    while time.monotonic() < end:
+        v = base.u("router::_lastKeepalive")
+        if not seen or v != seen[-1]:
+            seen.append(v)
+        time.sleep(0.1)
+    times = [v / res / 1000 for v in seen]  # s
+    gaps = [round(b - a, 2) for a, b in zip(times, times[1:])]
     assert len(times) >= 5, f"{len(times)} keepalives in 11 s, gaps {gaps}"
     assert all(1.8 <= g <= 2.2 for g in gaps), gaps
     assert remote_alive(base)
@@ -135,9 +130,11 @@ def test_remote_retry_without_pc_ack(player):
 def test_signal_anchor_and_replay(player):
     link, remote = player
     pc_signal(link, MT.SIGNAL_PLAYING, b"401")
+    pc_signal(link, MT.SIGNAL_INFO, b"\x01")  # A6: the song has sections, else the remote hides Repeat
     pc_signal(link, MT.SIGNAL_ANCHOR, b"Sloka 2\0")
-    assert remote.cstr("GUI::playerScreen.anchorName_", 24) == "Sloka 2"
-    remote.key(dbg.RIGHT)
+    # the remote formats "Sloka 2" as "Sloka: 2" (player_screen.cpp formatSection)
+    assert remote.cstr("GUI::playerScreen.anchorName_", 24) == "Sloka: 2"
+    remote.key(dbg.RIGHT, dbg.ENTER)  # > selects Repeat, OK sends REPLAY_ANCHOR
     p = link.recv(2.0, from_remote(MT.REPLAY_ANCHOR))
     assert p is not None and p.src == ADDR_REMOTE, p
     pc_ack(link, p)
@@ -158,9 +155,6 @@ def test_song_list_to_remote(player):
 def test_pc_to_remote_unreachable(paired, link, remote_probe):
     base, remote = paired, remote_probe
     link.drain()
-    proc, sr = la.start(30, channels=la.chans("base_ble_rx", "base_ble_tx", "rem_ble_rx", "rem_ble_tx"), samplerate="1M")
-    time.sleep(1.0)
-    nak_pid = None
     try:
         try:
             remote.hold_ble_reset(True)
@@ -189,10 +183,5 @@ def test_pc_to_remote_unreachable(paired, link, remote_probe):
         st = link.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.STATUS_RESP)
         assert st is not None and st.payload[0] == 1, st
     finally:
-        la.finish(proc, sr, 60)
-        status = {k: re.findall(r"%([^%\r\n]{1,60})%", la.uart(sr, la.CH[k], BAUD).decode("latin1")) for k in ("base_ble_rx", "rem_ble_rx")}
-        print("status lines:", status)
-    # nothing stale: a packet rejected with a NAK must not reach the remote even after the link is restored
-    to_rem = [p for p in frames(la.uart(sr, la.CH["rem_ble_rx"], BAUD)) if p.src == ADDR_PC]
-    assert not [p for p in to_rem if p.pid == nak_pid and p.mtype == MT.SIGNAL_STOPPED], to_rem
-    print(f"reconnect {reconnect_s:.1f} s after release; PC frames at remote: {[(p.pid, MT(p.mtype).name) for p in to_rem]}")
+        remote.hold_ble_reset(False)
+    print(f"reconnect {reconnect_s:.1f} s after release")
