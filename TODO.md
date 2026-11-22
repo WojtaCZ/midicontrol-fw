@@ -94,6 +94,7 @@ Rule for every entry: user-visible change = update docs/manual (and facts) + doc
 2026-11-16 and may drift. VERIFY: marks anything not confirmed from code.
 
 ### C1 All Notes Off at every boot (Q2-30)
+DONE 2026-11-22: cleanup runs at every boot (needsNoteCleanup removed); bench: DIN capture of 32 messages after a power-on boot, still to do (basetest test_din.py or equivalent).
 - Goal: send the stuck-note cleanup after every reset, not only after IWDG/WWDG or an unannounced soft reset.
 - Current code: src/logic/recovery.cpp `needsNoteCleanup(csr, unannouncedFault)` (IWDG/WWDG always; SFTRST only if unannounced). src/main.cpp:331 computes `noteCleanup`; ~:350-357 `if (noteCleanup) midi::sendStuckNoteCleanup()` after `midi::init()`. src/midi.cpp:55 sends 32 messages (CC123 even i, CC120 odd i, channel i>>1) with the blocking `send()` (watchdog kick per message, about 1 ms each).
 - Change: make the cleanup unconditional in main.cpp (drop `noteCleanup` or make `needsNoteCleanup` return true). Keep `cleanupMessageCount()`/`cleanupMessage()` as they are. Keep the call after `midi::init()` and before the first loop pass. Decide whether `needsNoteCleanup` stays as a pure function (simplest: remove it and its tests).

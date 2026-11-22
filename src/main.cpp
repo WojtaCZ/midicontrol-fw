@@ -352,9 +352,6 @@ extern "C" int main(void) {
 	// IWDG (~2 s) + loop watchdog (1000 ms) right after the clocks, before the blocking peripheral initialization
 	wdg::start();
 
-	// Stuck-note recovery (TODO): decided before the banner clears RCC->CSR and marks the fault record announced
-	const bool noteCleanup = recovery::needsNoteCleanup(RCC->CSR, fault::saved() != nullptr && !fault::announced());
-
 	// Initial log lines: firmware, revision, reset cause (this clears RCC->CSR), saved fault record.
 	// Before peripheral initialization: an initialization failure (signalError) is thus logged and recorded.
 	Debug::banner();
@@ -376,11 +373,9 @@ extern "C" int main(void) {
 	splashDismissScheduler.start();
 	midi::init();
 	// The SSR (organ power) pin is an output driven low from the static initialisation, so the organ's current source is off
-	// after every reset; on a watchdog/fault reset also silence notes the organ may still hold (before the PC can send anything)
-	if (noteCleanup) {
-		Debug::log(Debug::Level::WARNING, "sys", "reset after hang/fault: SSR off, All Notes Off sent");
-		midi::sendStuckNoteCleanup();
-	}
+	// after every reset; every boot also silences notes the organ may still hold (C1, Q2-30; before the PC can send anything)
+	Debug::log(Debug::Level::INFO, "sys", "boot: All Notes Off sent");
+	midi::sendStuckNoteCleanup();
 
 	LED::init();
 	ledScheduler.start(); // Start the LED scheduler
