@@ -8,6 +8,28 @@
 - Open: play a few hymns on the real organ and listen for missing or hanging notes. If it misbehaves, rebuild with
   `cmake ... -DMIDI_RUNNING_STATUS=OFF` (full 3-byte messages, the old behaviour) and note the organ model here.
 
+## Pairing from the base fails: `$$$` not answered during the FE scan (bench 2026-11-22) - open, NO SUPERVISION NEEDED
+- OWNER 2026-11-22: Claude may fix, flash and bench-test this alone (base + remote on the bench, SWD + LA; no hands needed).
+  Stop the player container during hw tests, `docker start midicontrol` after.
+- Reproduce: `cd tools/basetest; BASETEST_LA_CH="base_ble_rx=D0,base_ble_tx=D1,disp_rx=D2,disp_tx=D3,rem_sda=D6,rem_scl=D7"
+  ../../.venv/bin/python -m pytest -m hw test_pairing.py::test_pairing_finds_remote_and_bonds`; log in /tmp/basetest-pairing.log.
+  Base debug log: loglink.LogLink() (CDC 1), `level d`, then dbg.Target("base").call("Bluetooth::startPairing()").
+- LA trace (base MCU->module): `$$$K,1\rZ\rFE,01E0,0190,03,00\r---\r` then `$$$\r---\r` x4 with no commands between.
+  Module->MCU: `%40843204625F,00,MIDIControlRemote,,-25,03,03%` arrives (parser OK, firmware logs "remote found").
+- Debug log, first failure: `pairing: remote found` -> `$$$ timeout` (1 s) -> `pairing timeout (state 2)` -> `$$$ timeout` x2 ->
+  `RN4870 not responding failed again`. Next attempt: `$$$ timeout`, reply "Err" x2 (Z, FE), `exit cmd: timeout`.
+- Code: src/main.cpp ADV_CONNECTABLE (SCANNING -> stopScan() + connectTo() -> CONNECTING), pairingTimeout(); src/bluetooth.cpp
+  startPairing() (job {K,1,} Z, FE), _queueJob / the $$$ engine. Also "cmd failed: Z" on every reconnect (Z -> Err when nothing
+  to cancel): harmless but noisy, consider dropping Z when no connect is pending.
+- Done when: test_pairing.py 3/3, then 5.3 edge cases (old bond, old stored address, pairing while connected) in BENCH-CHECKLIST.md.
+- Bench 5.3: `test_pairing.py` 0/3. Base log: `pairing started`, `pairing: remote found 40843204625F`, `$$$ timeout` -> X + CE job dropped
+  -> `pairing timeout (state 2)`. The module then keeps scanning or stays in cmd mode (next `$$$ timeout`, `Z`/`FE` Err).
+- The FE job ends with `---` while the scan keeps running; the next `$$$` arrives while scan results stream in. Either the module
+  ignores `$$$` while scanning, or the `CMD>` prompt is lost among the `%...%` lines. Check with the LA on base_ble_rx.
+- Fix ideas: keep the FE job in cmd mode until the remote is found (X + CE in the same cmd session, no `---`), or treat a `$$$`
+  timeout as "maybe already in cmd mode" and send the commands anyway. Same family as the remote "stuck cmd mode" issue.
+- Regression candidate 6a68acc (FE scan). A base reset restores the link. Re-run test_pairing.py + 5.3 edge cases after the fix.
+
 ## LED setting lost on base reboot (owner, 2026-11-22) - open
 
 - Owner: the base menu "LED" checkbox (settings item 0, `ledMasterCallback` in `src/menu.cpp`) does not survive a base reboot.

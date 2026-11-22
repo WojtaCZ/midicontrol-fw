@@ -370,7 +370,10 @@ class Target:
         r = self._gdb(cmds, timeout)
         out = r.stdout + r.stderr
         errors = [l for l in out.splitlines() if re.search(r"No symbol|Cannot access|cannot be|^Error|error:|not defined|Too few|Invalid", l)
-                  and "Python" not in l]
+                  and "Python" not in l
+                  # detach after "monitor resume": gdb writes cached registers back to a running core and openocd refuses;
+                  # the call has already returned (value printed), nothing is lost (bench 2026-11-22, gdb 17.2/18.1)
+                  and not l.startswith("Error setting register")]
         val = re.search(r"^\$\d+ = (-?\d+)$", r.stdout, re.M)
         if r.returncode != 0 or errors or not val:
             raise RuntimeError(f"gdb call {expr} failed:\n" + out)
