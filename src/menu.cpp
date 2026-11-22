@@ -895,7 +895,8 @@ void handleSongListResponse(const char* payload, uint8_t len, bool hasMore) {
     }
 
     const int oldCount = _win.count();
-    const songwin::Window::Plan plan = _win.onResponse(received, hasMore);
+    // live cursor: Down/Up presses made while the page was loading are kept (bench 2.12)
+    const songwin::Window::Plan plan = _win.onResponse(received, hasMore, isFirstPage ? -1 : songListScreen.selectedIndex());
     if (!plan.ok) return;
 
     // Keep the old entries that stay (shift them to the front), then store the first keepNew codes of the page

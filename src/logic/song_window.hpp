@@ -65,15 +65,18 @@ namespace songwin {
 			return true;
 		}
 
-		// A response with `codes` entries arrived (counted by the caller, empty entries excluded).
-		Plan onResponse(int codes, bool pcHasMore) {
+		// A response with `codes` entries arrived (counted by the caller, empty entries excluded). `selNow` is the
+		// menu's current selection (may be the "Zpet" item = count): keys pressed while the page was loading move the
+		// cursor on from where the request left it, so quick presses are not undone (bench 2.12). -1 = no live cursor
+		// (the cursor goes back to the entry it was on when the request went out).
+		Plan onResponse(int codes, bool pcHasMore, int selNow = -1) {
 			Plan p;
 			if (_state == State::Idle) return p;
 			p.ok = true;
 			const bool first = _state == State::WaitingFirst;
 			_state = State::Idle;
-			const int kept = codes < CAP ? codes : CAP;
-			const bool truncated = codes > kept;
+			int kept = codes < CAP ? codes : CAP;
+			bool truncated = codes > kept;
 
 			if (first) {
 				p.dropFront = _count;
@@ -93,13 +96,30 @@ namespace songwin {
 				return p;
 			}
 			if (_dir == Dir::Down) {
+				// Live cursor: absolute entry start + selNow (selNow == count lands on the first new entry).
+				if (selNow >= 0) _cursorAbs = static_cast<uint16_t>(_start + (selNow < _count + kept ? selNow : _count + kept - 1));
+				// Never drop the entry the cursor is on nor the one above it (bench 2.12: a page of >= CAP codes used to
+				// drop the whole old window and push the cursor forward to the first new entry, +2 per page). Store
+				// fewer new codes instead; the offset follows the kept ones (RF-18), so nothing is skipped.
+				const int curIdx = static_cast<int>(_cursorAbs) - static_cast<int>(_start);
+				const int maxDrop = curIdx > 1 ? (curIdx - 1 < _count ? curIdx - 1 : _count) : 0;
 				int total = _count + kept;
 				int drop = total > CAP ? total - CAP : 0;
+				if (drop > maxDrop) {
+					drop = maxDrop;
+					const int room = CAP - (_count - drop);
+					if (kept > room) {
+						kept = room;
+						truncated = true;
+					}
+					total = _count + kept;
+				}
 				p.dropFront = drop;
 				p.keepNew = kept;
 				_start = static_cast<uint16_t>(_start + drop);
 				_count = total - drop;
 			} else {
+				if (selNow >= 0) _cursorAbs = static_cast<uint16_t>(_cursorAbs + selNow);  // Up: selNow counts from start-1
 				p.dropFront = _count;
 				p.keepNew = kept;
 				_start = _reqStart;
