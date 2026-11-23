@@ -22,6 +22,7 @@
 #include "boot/wdg.hpp"
 #include "boot/oled.hpp"
 #include "boot/ecc_guard.hpp"
+#include "boot/persist.hpp"
 
 // Base USB bootloader. Stays resident when
 //   * the application set the backup-register magic before resetting (update
@@ -110,7 +111,7 @@ namespace {
 
 	// Clocks and pins for the OLED (I2C1 on APB1, source PCLK1 = HSI16 - matches TIMINGR below).
 	// Waiting for the panel power-up is done by boot::oled::init itself.
-	void displayInit() {
+	void displayInit(bool noFirmware) {
 		using namespace stmcpp;
 		reg::set(std::ref(RCC->AHB2ENR), RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN);
 		reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_I2C1EN);
@@ -120,7 +121,10 @@ namespace {
 		gpio::pin<gpio::port::portb, 7> sda(gpio::mode::af4, gpio::otype::openDrain, gpio::speed::veryHigh, gpio::pull::pullUp);
 
 		boot::oled::init(0x10320309); // 400 kHz @ 16 MHz (RM0440)
-		boot::oled::show("Aktualizace", "Cekam na PC", 0);
+		// BP-12: no bootable firmware (blank, damaged, ECC safe mode): say so; waiting for the PC is the recovery
+		// path and has no timeout. Same title/hint layout and 7x10 font as the update screens.
+		if (noFirmware) boot::oled::show("Chybi firmware", "Pripojte PC", 0);
+		else boot::oled::show("Aktualizace", "Cekam na PC", 0);
 	}
 
 	// PC dropout timer: SysTick does not run in the bootloader, so DWT->CYCCNT is used (the core stays on HSI16 = 16 MHz,
@@ -261,12 +265,14 @@ extern "C" int main(void) {
 	stay = stay || forcedEntry();
 
 	boot::wdg::kick();
-	if (!stay && boot::appBootable(boot::image::kBoardBase)) {
-		boot::jumpToApp(boot::kAppBase);
+	bool noFirmware = false;
+	if (!stay) {
+		if (boot::appBootable(boot::image::kBoardBase)) boot::jumpToApp(boot::kAppBase);
+		noFirmware = true;
 	}
 
 	cycleCounterInit();
-	displayInit(); // only on the resident path; a jump to a valid app stays fast and dark
+	displayInit(noFirmware); // only on the resident path; a jump to a valid app stays fast and dark
 
 	// USB data pins (PA11 = D-, PA12 = D+).
 	stmcpp::gpio::pin<stmcpp::gpio::port::porta, 11> usb_dm(stmcpp::gpio::mode::input, stmcpp::gpio::otype::pushPull, stmcpp::gpio::speed::veryHigh, stmcpp::gpio::pull::noPull);
@@ -300,6 +306,8 @@ extern "C" int main(void) {
 				boot::wdg::kick();
 				serviceUsb();
 			}
+			// A verified new image replaces whatever the ECC repair budget was spent on (C9)
+			boot::persist::clearRepairs();
 			// Flush the final ACK, then reset into the freshly programmed app.
 			for (volatile uint32_t i = 0; i < 400000; ++i) {
 				boot::wdg::kick();

@@ -349,6 +349,8 @@ extern "C" [[gnu::naked]] void SysTick_Handler(void) {
 }
 
 
+#include "boot/persist.hpp"
+
 extern "C" int main(void) {
 	// Stack high-water mark (TL-1): paint the free RAM first, while the stack is shallow
 	ram::paintStack();
@@ -414,6 +416,7 @@ extern "C" int main(void) {
 
 	looptime::enable();
 	looptime::Pass lt;
+	bool repairBudgetCleared = false;
 
 	while (1) {
 
@@ -428,6 +431,12 @@ extern "C" int main(void) {
 			if (inject == 1) (void)*reinterpret_cast<volatile uint32_t *>(0xFFFFFFF0); // BusFault (precise, BFAR)
 			else if (inject == 2) fault::testSpin();                                    // loop stall
 			else if (inject == 3) fault::testSpinNoIrq();                               // IWDG
+		}
+
+		// ECC repair budget (C9): 10 s of healthy loop passes forgive the earlier repairs (one-shot, then never again)
+		if (!repairBudgetCleared && stmcpp::systick::getTicks() >= 10000) {
+			repairBudgetCleared = true;
+			boot::persist::clearRepairs();
 		}
 
 		// Test key mailbox: one read and compare per pass
