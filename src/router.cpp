@@ -340,8 +340,10 @@ namespace router {
 	static size_t buildInfo(uint8_t *buf, size_t cap) {
 		using namespace protocol::info;
 		Writer w(buf, cap);
-		char built[24];
-		snprintf(built, sizeof(built), "%s %s UTC", git::build_date, git::build_time);
+		// UTC (cmake/git.cmake uses date -u), no " UTC" suffix: with FAULT_LAST present those 4 bytes pushed LINK_COUNTERS past
+		// the 128-byte payload limit (bench 2026-11-23, test_link_stats: 131 B)
+		char built[20];
+		snprintf(built, sizeof(built), "%s %s", git::build_date, git::build_time);
 		w.str(Tag::REVISION, git::revision, 12);
 		w.str(Tag::BRANCH, git::branch, 24);
 		w.str(Tag::BUILT, built);
