@@ -1,0 +1,12 @@
+# C12: the same hold screen guards a running recording
+tick 3000
+state power=1
+key down
+key enter
+event recording on
+expect text Nahravam
+event poweroff
+expect screen hold
+hold 3000
+expect screen recording
+expect var power=0

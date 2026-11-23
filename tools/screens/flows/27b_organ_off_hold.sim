@@ -1,0 +1,30 @@
+# C12 (2026-11-23): organ off while a song plays asks with the hold screen (3 s of the encoder button), not Ano/Ne
+tick 3000
+state power=1
+event playing 406A
+expect screen nowplaying
+event poweroff
+expect screen hold
+expect text Vypnuti varhan
+expect text Drzte 3 s
+expect var power=1
+# a short press does nothing; releasing early starts the bar over
+key enter
+expect screen hold
+hold 1500
+release
+expect screen hold
+expect var power=1
+# turning the encoder cancels
+key down
+expect screen nowplaying
+expect var power=1
+# holding 3 s switches the organ off
+event poweroff
+expect screen hold
+hold 2900
+expect screen hold
+expect var power=1
+hold 100
+expect screen nowplaying
+expect var power=0

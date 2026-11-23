@@ -1,6 +1,7 @@
 #include "base.hpp"
 #include "menu.hpp"
 #include "led.hpp"
+#include "logic/hold_timer.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -150,6 +151,9 @@ namespace base::Encoder{
 
 	
 
+	static constexpr uint32_t PERIOD_MS = 10; // keypressScheduler
+	holdtimer::PressTracker tracker;
+
 	uint8_t btnPress, btnPressOld = 0xff;
 
 	uint8_t readCode = 0, storedCode = 0;
@@ -161,23 +165,24 @@ namespace base::Encoder{
 
 	void process(){
 
-		// Read the state of encoder switch gpio
+		// Read the state of encoder switch gpio (high = pressed)
 		btnPress = encoder_btn.read();
 
-		// Don't actually generate any event when turned on for the first time
+		// A button that is down at power-up does not count until it is released
 		if(btnPressOld == 0xff){
 			btnPressOld = btnPress;
-		} else if(btnPress != btnPressOld){
-			// Update the old state
-			btnPressOld = btnPress;
-
-			// Update the status according to the gpio state
-			if(btnPress){
-				GUI::keypress(ui::InputEvent::Enter);
-			}
+			if(btnPress) tracker.ignoreUntilRelease();
 		}
-		
 
+		// A short press is Enter, reported on RELEASE; a long press (800 ms) is its own event, so that it can leave
+		// a list without selecting an item first. While the hold screen is up the raw state feeds its timer.
+		const bool pressed = btnPress != 0;
+		GUI::buttonHold(pressed, PERIOD_MS);
+		switch(tracker.tick(pressed, PERIOD_MS)){
+			case holdtimer::Press::Short: GUI::keypress(ui::InputEvent::Enter); break;
+			case holdtimer::Press::Long:  GUI::buttonLong(); break;
+			case holdtimer::Press::None:  break;
+		}
 
 		// Read A and B states into code variable
 		readCode <<= 2;

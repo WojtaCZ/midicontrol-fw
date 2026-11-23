@@ -10,6 +10,8 @@
 #include "logic/ble_status.hpp"
 #include "logic/now_playing.hpp"
 #include "logic/splash_guard.hpp"
+#include "logic/hold_timer.hpp"
+#include "hold_screen.hpp"
 #include "logic/song_window.hpp"
 #include "settings.hpp"
 #include "router.hpp"
@@ -610,17 +612,12 @@ static void recordCallback(ui::MenuItem* item, void* userData) {
     syncRecordScreen();
 }
 
-// C12 / Q2-29b: switching the organ off while a song plays or a recording runs asks first ("Ano" / "Ne");
-// switching on, or off when idle, never asks. The checkbox follows the real state either way.
-static void powerOffResult(bool confirmed, void* userData);
-static ui::ConfirmScreen powerOffConfirm("Vypnout varhany?", powerOffResult);
-
-static void powerOffResult(bool confirmed, void* userData) {
-    (void)userData;
-    if (nav.current() == &powerOffConfirm) nav.pop();
-    if (confirmed) base::current::disable();
+// C12 / Q2-29b (owner 2026-11-23): switching the organ off while a song plays or a recording runs needs a 3 s hold of
+// the encoder button on the same hold screen as the remote's power off (inc/hold_screen.hpp); switching on, or off when
+// idle, never asks. The checkbox follows the real state either way.
+static void powerOffHeld() {
+    base::current::disable();
     settingsItems[1].setChecked(base::current::isEnabled());
-    nav.forceRender();
 }
 
 static void powerCallback(ui::MenuItem* item, void* userData) {
@@ -628,8 +625,8 @@ static void powerCallback(ui::MenuItem* item, void* userData) {
     if (base::current::isEnabled()) {
         const bool busy = _nowPlayingActive || _recording.state() != recording::State::Idle;
         if (busy) {
-            if (item) item->setChecked(true); // stays on until "Ano"
-            nav.push(&powerOffConfirm);
+            if (item) item->setChecked(true); // stays on until the hold completes
+            GUI::showHold("Vypnuti varhan", "Drzte 3 s", powerOffHeld);
             return;
         }
         base::current::disable();
@@ -813,6 +810,64 @@ void keypress(ui::InputEvent event) {
     handleKey(event);
 }
 
+// Hold-to-confirm: one screen, one timer; the owner passes the action that runs at 100 %
+static HoldScreen holdScreen("", "");
+static holdtimer::Timer _holdTimer;
+static GUI::HoldCallback _holdDone = nullptr;
+static bool _holdShown = false;
+
+void showHold(const char* title, const char* hint, HoldCallback done) {
+    holdScreen.set(title, hint);
+    holdScreen.setPercent(0);
+    _holdTimer.reset();
+    _holdDone = done;
+    if (!_holdShown && !fwPushed) {
+        nav.push(&holdScreen);
+        _holdShown = true;
+    }
+    Oled::wakeupCallback();
+    nav.forceRender();
+}
+
+void hideHold() {
+    if (!_holdShown) return;
+    _holdShown = false;
+    _holdDone = nullptr;
+    if (nav.current() == &holdScreen) nav.pop();
+    nav.forceRender();
+}
+
+bool holdActive() {
+    return _holdShown;
+}
+
+void buttonHold(bool pressed, uint32_t dtMs) {
+    if (!_holdShown) return;
+    const bool done = _holdTimer.tick(pressed, dtMs);
+    const uint8_t before = holdScreen.percent();
+    holdScreen.setPercent(_holdTimer.percent());
+    if (pressed) Oled::wakeupCallback();
+    if (done) {
+        const HoldCallback cb = _holdDone;
+        hideHold();
+        if (cb) cb();
+        nav.forceRender();
+    } else if (holdScreen.percent() != before) {
+        nav.forceRender();
+    }
+}
+
+void buttonLong() {
+    if (Oled::isSleeping()) return;
+    if (_holdShown) return; // the hold screen owns the button
+    // Item 18: a long press leaves the song list (a short one selects)
+    if (nav.current() == &songListScreen && nav.depth() > 1) {
+        Oled::wakeupCallback();
+        nav.pop();
+        nav.forceRender();
+    }
+}
+
 void splashAutoDismiss() {
     if (splashGuard.allowAutoDismiss()) handleKey(ui::InputEvent::Enter);
 }
@@ -825,6 +880,12 @@ static void handleKey(ui::InputEvent event) {
     }
 
     Oled::wakeupCallback();
+
+    // The hold screen: turning the encoder cancels; the button belongs to buttonHold()
+    if (_holdShown) {
+        if (event == ui::InputEvent::Up || event == ui::InputEvent::Down) hideHold();
+        return;
+    }
 
     // For MenuScreen Enter: handle Back and Submenu item types manually
     // because the navigator doesn't have RTTI to auto-detect MenuScreen
@@ -934,6 +995,8 @@ void showFwProgress(const char* hint, uint8_t percent) {
         _pairStatusShown = false;
         _nowPlayingActive = false;
         _recordShown = false;
+        _holdShown = false;
+        _holdDone = nullptr;
         // Stack = main menu + update screen (no splash/submenu below it)
         nav.reset(&mainScreen);
         nav.push(&fwProgressScreen);

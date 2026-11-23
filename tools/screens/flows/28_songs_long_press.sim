@@ -1,0 +1,24 @@
+# Item 18 (2026-11-23): the song list ends with Zpet; a long press of the encoder button leaves the list
+tick 3000
+key enter
+tick 700
+event songs 401;403;406A
+expect screen songs
+key down
+key down
+key down
+expect text Zpet
+long
+expect screen main
+# a long press elsewhere is ignored
+long
+expect screen main
+# Zpet still works
+key enter
+tick 700
+event songs 401;403;406A
+key down
+key down
+key down
+key enter
+expect screen main

@@ -6,13 +6,15 @@
 //   key <up|down|enter|back|left|right|0-9>   one key event (the encoder only produces up/down/enter)
 //   tick <ms>                                 time passes: 30 ms render steps, one-shot schedulers fire,
 //                                             the splash auto-dismisses at 3 s, the OLED sleeps after 30 s idle
+//   hold <ms>                                 the encoder button is held down for ms (GUI::buttonHold every 10 ms; a long press
+//                                             fires at 800 ms as on the device); release = button up; long = GUI::buttonLong
 //   state <k>=<v>                             pc, connected, ble, remote ("-" = none), display, song, verse,
 //                                             letter, sleeping, power, led, midi
 //   event <name> [args]                       playing <song> | stopped | anchor <label> | songs <a;b;c|-> [more]
 //                                             | songs_delay | songs_timeout | pairing <text> | fw <transfer|install|error> <pct>
-//                                             | fw_end | recording <on|off> | recfail <busy|nosupport|other|none> | pclost | fail <GET_SONG_LIST|PLAY_SONG|STOP_SONG> <text> | sync_power
+//                                             | fw_end | recording <on|off> | recfail <busy|nosupport|other|none> | pclost | fail <GET_SONG_LIST|PLAY_SONG|STOP_SONG> <text> | sync_power | poweroff
 //   expect screen <id>                        id: splash main settings service firmware display bluetooth pairing
-//                                             songs_loading songs nowplaying fwupdate nopc recording
+//                                             songs_loading songs nowplaying fwupdate nopc recording hold
 //   expect text <line> | expect notext <line> exact match of one drawn text line (trimmed; a line wider
 //                                             than the display shows its clipped window, as on the OLED)
 //   expect scrolled <line>                    advances time (<= 12 s) until a scrolling line was seen from start to end
@@ -45,7 +47,6 @@ static const char *screenId() {
 	if (c == &mainScreen) return "main";
 	if (c == &settingsScreen) return "settings";
 	if (c == &serviceScreen) return "service";
-	if (c == &powerOffConfirm) return "confirm";
 	if (c == &firmwareScreen) return "firmware";
 	if (c == &displayScreen) return "display";
 	if (c == &bluetoothScreen) return "bluetooth";
@@ -55,6 +56,7 @@ static const char *screenId() {
 	if (c == &nowPlayingScreen) return "nowplaying";
 	if (c == &fwProgressScreen) return "fwupdate";
 	if (c == &recordScreen) return "recording";
+	if (c == &holdScreen) return "hold";
 	if (c == &noPcScreen) return "nopc";
 	return "unknown";
 }
@@ -199,6 +201,7 @@ static std::string event(const std::string &name, const std::string &rest) {
 		else return "recfail: busy|nosupport|other|none";
 	}
 	else if (name == "sync_power") GUI::syncPowerCheckbox();
+	else if (name == "poweroff") GUI::checkboxPower().invoke(); // the Napajeni checkbox pressed (modal screens hide it on the real device)
 	else return "unknown event " + name;
 	return "";
 }
@@ -240,6 +243,19 @@ static int runScript(const char *path, const char *outPath) {
 			E e;
 			if (!parseKey(rest, e)) err = "unknown key " + rest;
 			else { GUI::keypress(e); GUI::render(); }
+		} else if (cmd == "hold") {
+			holdtimer::PressTracker tracker; // one hold command = one press
+			for (int ms = std::atoi(rest.c_str()); ms > 0; ms -= 10) {
+				GUI::buttonHold(true, 10);
+				if (tracker.tick(true, 10) == holdtimer::Press::Long) GUI::buttonLong();
+				GUI::render();
+			}
+		} else if (cmd == "release") {
+			GUI::buttonHold(false, 10);
+			GUI::render();
+		} else if (cmd == "long") {
+			GUI::buttonLong();
+			GUI::render();
 		} else if (cmd == "tick") {
 			tick(static_cast<uint32_t>(std::atoi(rest.c_str())));
 		} else if (cmd == "state") {

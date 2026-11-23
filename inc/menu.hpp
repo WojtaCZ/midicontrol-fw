@@ -1,6 +1,7 @@
 #ifndef MENU_H
 #define MENU_H
 
+#include <cstdint>
 #include <ui/navigator.hpp>
 #include <ui/menu_screen.hpp>
 #include <ui/splash_screen.hpp>
@@ -21,6 +22,19 @@ namespace GUI {
 
     // Input routing
     void keypress(ui::InputEvent event);
+
+    // Long press of the encoder button (src/logic/hold_timer.hpp PressTracker): in the song list it leaves the list.
+    // A short press arrives as keypress(Enter) on RELEASE.
+    void buttonLong();
+
+    // Hold-to-confirm (the same HoldScreen as the remote's power off, inc/hold_screen.hpp). showHold pushes the screen;
+    // while it is up the encoder button is held for 3 s (buttonHold, fed every 10 ms with the raw button state);
+    // `done` runs when the bar is full, Up/Down cancels, a short press does nothing. hideHold removes it.
+    using HoldCallback = void (*)();
+    void showHold(const char* title, const char* hint, HoldCallback done);
+    void hideHold();
+    bool holdActive();
+    void buttonHold(bool pressed, uint32_t dtMs);
 
     // The splash timer's Enter: ignored once a real key has been pressed (P1-8)
     void splashAutoDismiss();

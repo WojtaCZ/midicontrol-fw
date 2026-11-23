@@ -182,6 +182,13 @@ int main(int argc, char **argv) {
 	snap("record_nosupport", "The PC is protocol v1 and cannot record");
 	key(E::Enter);
 
+	// C12: hold-to-confirm screen (organ off while playing/recording), same look as the remote power-off hold
+	GUI::checkboxPower().invoke();
+	GUI::showHold("Vypnuti varhan", "Drzte 3 s", []() {});
+	GUI::buttonHold(true, 1500);
+	snap("organ_off_hold", "Hold the encoder button 3 s to switch the organ off (bar at 50 %)");
+	GUI::hideHold();
+
 	GUI::showFwProgress("Prenos do ovladace", 42);
 	snap("fw_remote_update", "Remote firmware update relayed");
 	GUI::hideFwProgress();
