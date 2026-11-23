@@ -27,10 +27,12 @@ OP_ERASE, OP_PROGRAM, OP_MEASURE_ERASE, OP_MEASURE_PROGRAM, OP_ERASE_THEN_PROGRA
 
 BOARDS = {
     "base": dict(cpu="stm32g4x.cpu", app=0x08008000, app_end=0x0801F800, page=2048,
+                 rcc_apbenr=0x40021058, bkp3r=0x4000250C,  # RCC_APB1ENR1, TAMP_BKP3R (G431)
                  bl_elf=os.path.join(FW, "build", "bootloader", "base-bootloader.elf"),
                  update_hex=os.path.join(FW, "build", "midicontrol-fw-update.hex"),
                  update_bin=os.path.join(FW, "build", "midicontrol-fw-update.bin")),
     "remote": dict(cpu="stm32g0x.cpu", app=0x08004000, app_end=0x0801F800, page=2048,
+                   rcc_apbenr=0x4002103C, bkp3r=0x4000B10C,  # RCC_APBENR1, TAMP_BKP3R (G071)
                    bl_elf=os.path.join(REMOTE_FW, "build", "bootloader", "remote-bootloader.elf"),
                    update_hex=os.path.join(REMOTE_FW, "build", "midicontroller-fw-update.hex"),
                    update_bin=os.path.join(REMOTE_FW, "build", "midicontroller-fw-update.bin")),
@@ -316,6 +318,7 @@ class Board:
         """Flashes -update.hex (the whole application region, 0xFF up to APP_END) and runs it; the last resort."""
         hexfile = hexfile or self.b["update_hex"]
         self.halt()
+        self.clear_persist()
         for attempt in range(2):
             out = self.tcl(f"flash write_image erase {{{hexfile}}}; verify_image {{{hexfile}}}", timeout=180)
             self.tcl("reset run")
@@ -326,6 +329,12 @@ class Board:
                 break
             self.halt()
         return out
+
+    def clear_persist(self):
+        """Resets the bootloader's persistent word (TAMP BKP3R: ECC repair counter + flags, lib/bootloader persist.hpp) to a valid empty one.
+        It survives resets and SWD flashing: a sweep whose restores come faster than the app's 10 s "ran stably" clear reaches
+        kMaxRepairs (3) and the bootloader parks in ECC safe mode (C9), which no reflash leaves. Core must be halted."""
+        self.tcl(f"mmw {self.b['rcc_apbenr']:#x} 0x10000400 0; mmw 0x40007000 0x100 0; mww {self.b['bkp3r']:#x} 0xB0CE0000")
 
     def app_matches(self, image=None) -> bool:
         """The application region in flash = the update file (including the trailer); `image` = path or bytes, default the build."""
