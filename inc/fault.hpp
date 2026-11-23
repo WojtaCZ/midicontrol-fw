@@ -10,7 +10,7 @@
 // NVIC_SystemReset(). The next boot prints the record in the banner (Debug::banner), the "dump" command on the log CDC repeats it.
 namespace fault {
 
-	enum class Kind : uint8_t { HARDFAULT = 1, MEMMANAGE, BUSFAULT, USAGEFAULT, ERROR, LOOP_STALL };
+	enum class Kind : uint8_t { HARDFAULT = 1, MEMMANAGE, BUSFAULT, USAGEFAULT, ERROR, LOOP_STALL, NMI, STACK_OVERFLOW };
 
 	// Codes for Kind::ERROR (errorCode); stmcpp::error → 0x8000 | module error code
 	enum ErrorCode : uint16_t {
@@ -45,7 +45,8 @@ namespace fault {
 	// Enables the separate MemManage/BusFault/UsageFault (otherwise everything ends up as a HardFault FORCED)
 	void init();
 	// Writes the record (stackedFrame = 8 words r0..xpsr, or nullptr) and a log line; nothing else
-	void record(Kind kind, const uint32_t *stackedFrame, uint32_t excReturn, uint16_t errorCode = 0);
+	// origSp: address of the real stacked frame when stackedFrame is a copy (fault_fresh), else 0
+	void record(Kind kind, const uint32_t *stackedFrame, uint32_t excReturn, uint16_t errorCode = 0, uint32_t origSp = 0);
 	// Non-terminating runtime error (e.g. RN4870, spec R21): ERROR record + log line, no finish()/reset, immediately
 	// marked as announced (the next boot does not report it as an error of the previous run). An older record that has not yet been
 	// announced or is a real fault (not ERROR) is not overwritten.
@@ -53,7 +54,9 @@ namespace fault {
 	// Probe attached → bkpt (reset after continuing), otherwise NVIC_SystemReset()
 	[[noreturn]] void finish();
 	// record + finish
-	[[noreturn]] void capture(Kind kind, const uint32_t *stackedFrame, uint32_t excReturn, uint16_t errorCode = 0);
+	[[noreturn]] void capture(Kind kind, const uint32_t *stackedFrame, uint32_t excReturn, uint16_t errorCode = 0, uint32_t origSp = 0);
+	// Same, on a fresh stack (naked, MSP moved to the top of RAM stack first): for a stack that may have overflowed
+	[[noreturn]] void captureFresh(Kind kind, const uint32_t *stackedFrame, uint32_t excReturn);
 
 	const Record *saved(); // nullptr when none / invalid
 	void		  clear();

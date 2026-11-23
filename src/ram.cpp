@@ -47,6 +47,10 @@ namespace ram {
 		while (p < hi) *p++ = ramguard::PAINT;
 	}
 
+	bool stackOverflowed(uint32_t sp) {
+		return ramguard::stackBreached(sp, reinterpret_cast<uintptr_t>(_brk), *breakWord());
+	}
+
 	size_t stackUntouched() {
 		return ramguard::untouchedBytes(breakWord(), reinterpret_cast<const uint32_t *>(reinterpret_cast<uintptr_t>(&_estack)));
 	}

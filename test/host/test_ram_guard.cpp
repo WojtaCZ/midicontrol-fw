@@ -40,3 +40,22 @@ TEST(RamGuard, EmptyOrInvertedRangeIsZero) {
 	EXPECT_EQ(untouchedBytes(area, area), 0u);
 	EXPECT_EQ(untouchedBytes(area + 2, area), 0u);
 }
+
+TEST(RamGuardStack, BreachedBySpBelowBreakOrOverwrittenPaint) {
+	using namespace ramguard;
+	EXPECT_FALSE(stackBreached(0x20007000, 0x20003000, PAINT));
+	EXPECT_TRUE(stackBreached(0x20002FFC, 0x20003000, PAINT)); // sp below the heap break
+	EXPECT_TRUE(stackBreached(0x20007000, 0x20003000, 0));	  // paint word at the break overwritten: the stack got there
+	EXPECT_FALSE(stackBreached(0x20003000, 0x20003000, PAINT));
+}
+
+TEST(RamGuardStack, FrameInRam) {
+	using namespace ramguard;
+	EXPECT_TRUE(frameInRam(0x20007000, 0x20000000, 0x20008000));
+	EXPECT_TRUE(frameInRam(0x20007FE0, 0x20000000, 0x20008000)); // last frame that fits
+	EXPECT_FALSE(frameInRam(0x20007FE4, 0x20000000, 0x20008000));
+	EXPECT_FALSE(frameInRam(0x20007001, 0x20000000, 0x20008000)); // misaligned
+	EXPECT_FALSE(frameInRam(0, 0x20000000, 0x20008000));
+	EXPECT_FALSE(frameInRam(0x1FFFFFE0, 0x20000000, 0x20008000));
+	EXPECT_FALSE(frameInRam(0xFFFFFFF0, 0x20000000, 0x20008000)); // frame wrap-around
+}

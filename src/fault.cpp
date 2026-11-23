@@ -2,6 +2,7 @@
 #include "crc32.hpp"
 #include "debug.hpp"
 #include "git.hpp"
+#include "logic/ram_guard.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -11,6 +12,8 @@
 #include <cmsis_compiler.h>
 
 #include "stmcpp/systick.hpp"
+
+extern "C" [[noreturn]] void fault_fresh(const uint32_t *frame, uint32_t excReturn, uint32_t kind);
 
 namespace fault {
 
@@ -57,17 +60,16 @@ namespace fault {
 			case Kind::USAGEFAULT: return "USAGEFAULT";
 			case Kind::ERROR: return "ERROR";
 			case Kind::LOOP_STALL: return "LOOP_STALL";
+			case Kind::NMI: return "NMI";
+			case Kind::STACK_OVERFLOW: return "STACK_OVERFLOW";
 		}
 		return "UNKNOWN";
 	}
 
 	// The frame must lie in RAM (r0..xpsr = 8 words), otherwise reading it in a HardFault would end in a lockup
-	static bool frameValid(const uint32_t *f) {
-		uint32_t a = reinterpret_cast<uint32_t>(f);
-		return f && (a & 3) == 0 && a >= 0x20000000 && a + 32 <= 0x20008000;
-	}
+	static bool frameValid(const uint32_t *f) { return ramguard::frameInRam(reinterpret_cast<uintptr_t>(f), 0x20000000, 0x20008000); }
 
-	[[gnu::noinline]] void record(Kind kind, const uint32_t *frame, uint32_t excReturn, uint16_t errorCode) {
+	[[gnu::noinline]] void record(Kind kind, const uint32_t *frame, uint32_t excReturn, uint16_t errorCode, uint32_t origSp) {
 		uint32_t primask = __get_PRIMASK();
 		__disable_irq();
 		const Record *prev	= saved();
@@ -91,8 +93,9 @@ namespace fault {
 		r.excReturn = excReturn;
 		// Stack pointer at the moment of the exception = address of the saved frame on the stack according to EXC_RETURN bit 2
 		bool onPsp = excReturn & 4u;
-		r.msp	   = (frame && !onPsp) ? reinterpret_cast<uint32_t>(frame) : __get_MSP();
-		r.psp	   = (frame && onPsp) ? reinterpret_cast<uint32_t>(frame) : __get_PSP();
+		uint32_t sp = origSp ? origSp : reinterpret_cast<uint32_t>(frame);
+		r.msp		= (sp && !onPsp) ? sp : __get_MSP();
+		r.psp		= (sp && onPsp) ? sp : __get_PSP();
 		r.ipsr	   = __get_IPSR();
 		r.cfsr	   = SCB->CFSR;
 		r.hfsr	   = SCB->HFSR;
@@ -125,9 +128,13 @@ namespace fault {
 		NVIC_SystemReset();
 	}
 
-	[[gnu::noinline]] void capture(Kind kind, const uint32_t *frame, uint32_t excReturn, uint16_t errorCode) {
-		record(kind, frame, excReturn, errorCode);
+	[[gnu::noinline]] void capture(Kind kind, const uint32_t *frame, uint32_t excReturn, uint16_t errorCode, uint32_t origSp) {
+		record(kind, frame, excReturn, errorCode, origSp);
 		finish();
+	}
+
+	[[gnu::noinline]] void captureFresh(Kind kind, const uint32_t *frame, uint32_t excReturn) {
+		fault_fresh(frame, excReturn, static_cast<uint32_t>(kind));
 	}
 
 	[[gnu::noinline]] void testSpin() {
@@ -223,8 +230,35 @@ namespace fault {
 // Naked stub: active stack according to EXC_RETURN bit 2 (0 = MSP, 1 = PSP) → r0 = saved frame, r1 = EXC_RETURN,
 // r2 = kind; then a jump into C++ (does not return). A frame with FPU (EXC_RETURN bit 4 = 0) starts with the same 8 words.
 
-extern "C" [[gnu::used, gnu::externally_visible, noreturn]] void fault_entry(const uint32_t *frame, uint32_t excReturn, uint32_t kind) {
-	fault::capture(static_cast<fault::Kind>(kind), frame, excReturn);
+extern "C" char _estack;
+
+extern "C" [[gnu::used, gnu::externally_visible, noreturn]] void fault_entry(const uint32_t *frame, uint32_t excReturn, uint32_t kind, uint32_t origSp) {
+	fault::capture(static_cast<fault::Kind>(kind), frame, excReturn, 0, origSp);
+}
+
+// fault_fresh(r0 = stacked frame, r1 = EXC_RETURN, r2 = kind): the handler must not run on the faulting stack, which may have
+// overflowed into the heap/.bss (then the handler's own frames would trample the data it reads, and a garbage MSP lets it fault
+// again = lockup, no record). MSP moves to the top of the stack (below the no-init block); the 8-word frame, when it lies in RAM
+// and is aligned, is copied there first (registers r4-r11, so the copy cannot overlap itself) and r0 points at the copy. The
+// original frame address goes in r3 so the record still shows the real MSP/PSP.
+extern "C" [[gnu::naked, gnu::used, gnu::externally_visible]] void fault_fresh(const uint32_t *, uint32_t, uint32_t) {
+	__asm volatile(
+		"ldr r12, =_estack\n\t"
+		"mov r3, r0\n\t"
+		"sub r0, r0, #0x20000000\n\t"
+		"cmp r0, #0x7F00\n\t"
+		"bhi 1f\n\t"
+		"tst r3, #3\n\t"
+		"bne 1f\n\t"
+		"ldmia r3, {r4-r11}\n\t"
+		"mov sp, r12\n\t"
+		"stmdb sp!, {r4-r11}\n\t"
+		"mov r0, sp\n\t"
+		"b fault_entry\n\t"
+		"1:\n\t"
+		"mov sp, r12\n\t"
+		"mov r0, r3\n\t"
+		"b fault_entry\n\t");
 }
 
 #define FAULT_STUB(handler, kind) \
@@ -237,12 +271,12 @@ extern "C" [[gnu::used, gnu::externally_visible, noreturn]] void fault_entry(con
 			"mov r1, lr\n\t" \
 			"movs r2, #" #kind \
 			"\n\t" \
-			"b fault_entry\n\t"); \
+			"b fault_fresh\n\t"); \
 	}
 
 FAULT_STUB(HardFault_Handler, 1)
 FAULT_STUB(MemManage_Handler, 2)
 FAULT_STUB(BusFault_Handler, 3)
 FAULT_STUB(UsageFault_Handler, 4)
-// NMI (e.g. CSS on HSE): same as HARDFAULT, distinguished by ipsr = 2
-FAULT_STUB(NMI_Handler, 1)
+// NMI (e.g. CSS on HSE, flash ECC double error)
+FAULT_STUB(NMI_Handler, 7)

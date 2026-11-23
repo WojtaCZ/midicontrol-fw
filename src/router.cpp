@@ -350,6 +350,11 @@ namespace router {
 		w.u8(Tag::RESET_CAUSE, static_cast<uint8_t>((resetcause::last() >> 24) & 0xFEU));
 		const fault::Record *f = fault::saved();
 		w.u8(Tag::FAULT_COUNT, f ? f->count : 0);
+		if (f) {
+			const uint8_t last[5] = {f->kind, static_cast<uint8_t>(f->pc), static_cast<uint8_t>(f->pc >> 8), static_cast<uint8_t>(f->pc >> 16),
+				static_cast<uint8_t>(f->pc >> 24)};
+			w.bytes(Tag::FAULT_LAST, last, sizeof(last));
+		}
 		uint8_t ble = 0;
 		if (Bluetooth::isConnected()) ble |= BLE_CONNECTED;
 		if (Bluetooth::isStreamOpen()) ble |= BLE_STREAM_OPEN;
