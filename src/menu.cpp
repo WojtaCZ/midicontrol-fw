@@ -140,7 +140,9 @@ static void onNoPcEnter(void* userData) {
     nav.push(&settingsScreen);
 }
 
-static ui::SplashScreen noPcScreen("Odpojeno", "", "Cekam na PC", onNoPcEnter);
+// D4/item 16: the big word is the SUBTITLE and the title row stays empty, so the BLE icon (top right) does not collide with a centered
+// 11x18 title. Same layout as the remote noBaseScreen.
+static ui::SplashScreen noPcScreen("", "Odpojeno", "Cekam na PC", onNoPcEnter);
 
 // Pushes the overlay when the main menu is on top without a PC, removes it when it is on top and the PC is back
 static void syncNoPcScreen() {
@@ -757,10 +759,10 @@ void render() {
 
     bool dirty = nav.render(frameBuffer);
 
-    // Status icons on the menu screens and on the now playing screen (not on SplashScreen, ParagraphScreen, ConfirmScreen)
+    // Status icons on the menu screens and on the now playing screen (and on the noPcScreen overlay; not on other SplashScreens, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
 
-    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen || cur == &nowPlayingScreen);
+    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen || cur == &nowPlayingScreen || cur == &noPcScreen);
 
     if (showStatusIcons && Bluetooth::isConnected()) {
         int iconX = theme.displayOffsetX + theme.displayWidth - 14;
@@ -789,7 +791,7 @@ void render() {
 
     // PC connection icon (to the left of the BLE icon)
     if (showStatusIcons && isPcAlive()) {
-        int pcIconX = theme.displayOffsetX + theme.displayWidth - 14 - 2 - 10; // 14=BLE width, 2=gap, 10=PC width
+        int pcIconX = theme.displayOffsetX + theme.displayWidth - 14 - 1 - 10; // 14=BLE width, 1=gap (as the remote battery icon), 10=PC width
         int pcIconY = 1;
         gfx::drawFilledRect(frameBuffer, pcIconX, pcIconY, 10, 8, (uint8_t)0);
         gfx::drawIcon(frameBuffer, pc_monitor, pcIconX, pcIconY, gfx::Anchor::TopLeft, (uint8_t)1);
