@@ -150,6 +150,10 @@ DONE 2026-11-22: RecordScreen (Priprava / Nahravam + Enter = Stop / Zastavuji / 
 - Manual/facts: none visible except SYSTEM.md router/dedup row (VERIFY row id: grep -n "dedup" docs/SYSTEM.md).
 - Risk / open points: VERIFY whether the PC resends signals with the same id on purpose (retries) or reuses ids across different signals. Check midicontrol-sw packet id allocation (`grep -rn packetId` there) before choosing "last id only".
 
+### Item 8 fault audit - DONE 2026-11-23 (backlog/sys-1123: fresh-stack capture, NMI + STACK_OVERFLOW kinds, INFO FAULT_LAST; remote d0efa06). Bench: (1) force a stack overflow (deep recursion test hook) on base and remote, expect banner/DIAG kind STACK_OVERFLOW; (2) trigger NMI on each, kind NMI; (3) read base INFO FAULT_LAST from the PC after a fault (kind + pc); (4) remote fault_fresh stub: provoke a HardFault, DIAG record present after reboot.
+
+### Item 9 unused clocks - DONE 2026-11-23: TIM1/TIM2/TIM4/TIM7/RTCAPB off in initClock (RTCAPB enabled locally in requestBootloader for TAMP). Bench: Servis > update via bootloader still enters the bootloader.
+
 ### C6 Remove dead firmware code (Q2-27) - DONE (C6: removed dfuCheck, current::toggle, isProtocolPacketAvailable, Debug get/setLevel, display::wasChanged, Oled isInverted/getBufferSize, oled_fonts.cpp, empty git.cpp; KEPT signalError/frontStrip pending owner Q, Color::shiftHue chain, set* of display, fault::clear (absent))
 - Goal: delete code with no callers listed in the audit; keep protocol items (RECORD_SONG, SIGNAL_RECORDING) reserved.
 - Current code: list at audit/STEP2-REPORT.md lines 255-290 (dfuCheck and others); STEP4 facts mention `dfuCheck` has no callers; `signalError` (src/main.cpp ~:739-757, declared ~:95) has no callers; led.cpp frontStrip is only used by it.

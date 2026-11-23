@@ -294,7 +294,8 @@ namespace router {
 	static void requestBootloader() {
 		// Set the backup-register flag the bootloader checks on reset, so it stays
 		// resident (USB-CDC firmware update) instead of jumping back to the app.
-		stmcpp::reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_PWREN);
+		// TAMP (backup registers) sits behind the RTCAPB clock, which initClock leaves off
+		stmcpp::reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_PWREN | RCC_APB1ENR1_RTCAPBEN);
 		PWR->CR1 |= PWR_CR1_DBP; // unlock backup domain write protection
 		TAMP->BKP0R = kEnterBootMagic;
 	}
