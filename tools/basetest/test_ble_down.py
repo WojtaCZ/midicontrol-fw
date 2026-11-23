@@ -17,6 +17,7 @@ from test_fault import boot, reboot
 from test_log import BANNER_RE, keepalive_rtt, log  # noqa: F401 - fixture log
 
 ERR_BLE_INIT = 1
+ERR_BLE_CONFIGURE = 2  # main.cpp: a dead module can also fail the configure job (Coded PHY work)
 
 
 class Holder(threading.Thread):
@@ -80,7 +81,7 @@ def test_dead_rn4870_no_reset_loop_and_retry(base, link, log):  # noqa: F811
 
         # An ERROR/ERR_BLE_INIT record, once, already announced (the next banner does not report it as an error of the previous run)
         rec = base.fault_record()
-        assert rec and rec["kind"] == 5 and rec["code"] == ERR_BLE_INIT and rec["count"] == 1, rec
+        assert rec and rec["kind"] == 5 and rec["code"] in (ERR_BLE_INIT, ERR_BLE_CONFIGURE) and rec["count"] == 1, rec
         raw = base.read(base.sym("fault::_record"), dbg.FAULT_RECORD_SIZE)
         assert struct.unpack_from("<I", raw, 88)[0] == zlib.crc32(raw[:88]) & 0xFFFFFFFF
         assert base.u("fault::_announcedCrc") == struct.unpack_from("<I", raw, 88)[0], "record not marked announced"
