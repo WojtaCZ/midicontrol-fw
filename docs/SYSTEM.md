@@ -164,7 +164,7 @@ power policy and serves a status web page.
 | SYS-USE-12 | New PLAY while playing (or paused) replaces the current song | implemented (paused case depends on SYS-USE-09) | PC comm.cpp:1086 `doPlay` |
 | SYS-USE-13 | No tempo change and no transposition, anywhere (D6) | implemented | none present; do not add |
 | SYS-USE-14 | Recording is a required feature; see sec. 4.13 SYS-REC (D6, D9) | partial | see SYS-REC |
-| SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | partial | base menu.cpp; "Nahraj" starts/stops a recording and shows the state (C3, RecordScreen in menu.cpp: Priprava / Nahravam + Enter = Stop / Zastavuji / Zaneprazdneno / PC nema nahravani / Nahravani selhalo / Nahravani nelze: hraje). Pending (step 2): NowPlaying is dismissed on PC loss; "Zastavuji" times out after 5 s to the main menu (SM-1, Q-D-12); a failed song list, play or stop shows why: "PC neodpovida", "PC zaneprazdneno", "PC nedostupne" (PM-1, Q-D-13) |
+| SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | partial | base menu.cpp; "Nahraj" starts/stops a recording and shows the state (C3, RecordScreen in menu.cpp; owner 2026-11-23 item 7: it has the player screen's layout, title Nahravam, big "REC", and the same Stop icon button; the text-only "Enter = Stop" and "Nahravani nelze: hraje" lines are gone). Song list: Zpet after the last song, and a long press of Enter leaves the list (item 18). Organ off from Nastaveni while a song or recording runs uses the hold screen "Vypnuti varhan / Drzte 3 s" (item 12). Pending (step 2): NowPlaying is dismissed on PC loss; "Zastavuji" times out after 5 s to the main menu (SM-1, Q-D-12); a failed song list, play or stop shows why: "PC neodpovida", "PC zaneprazdneno", "PC nedostupne" (PM-1, Q-D-13) |
 | SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC web_server.cpp `kRescanMs` (status page + songcheck); GET_SONG_LIST and PLAY scan the folder on demand |
 | SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank, songs up to **1999** (thousands digit blank or 1, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | differs from code (gap) | base `setSong()` (display.cpp:264) caps at 1999 but has no caller; the live path display.cpp:211 `applyNowPlaying` passes any thousands digit (US-6, gap 32). PC `fromSongCode` caps at 1999 since step 2 (bab7e84, Q1-2 a) |
 | SYS-USE-18 | Digits are ones-first and right-aligned as the V2 text says; V2's "song 12" example is a typo. Shifted digits in a song file are authoring mistakes (512.mid: verse in the tens position, 513.mid: song shifted left): the PC right-aligns them and songcheck should warn (D24) | implemented (songcheck warning 2026-11-12: songcheck_warns_*) | PC display.cpp |
@@ -192,7 +192,7 @@ power policy and serves a status web page.
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-PC-01 | Base: PC lost -> overlay "Odpojeno / Cekam na PC"; remote learns it from KEEPALIVE `[pcAlive]` and shows "Cekam na PC" | implemented | router.cpp, remote |
+| SYS-PC-01 | Base: PC lost -> overlay "Odpojeno / Cekam na PC"; remote learns it from KEEPALIVE `[pcAlive]` and shows "Cekam na PC"  The Odpojeno screen keeps the status icons (link, battery/charging on the remote) on both devices (owner 2026-11-23, item 16) | implemented | router.cpp, remote |
 | SYS-PC-02 | Remote commands to an absent PC -> NAK UNREACHABLE | implemented | base router |
 | SYS-PC-03 | PC lost mid-song (USB gone, PC dead, keepalive timeout): base IMMEDIATELY sends All Notes Off (CC120 + CC123, 16 ch) to DIN AND switches the SSR off (D1). Fires only on the transition PC present -> PC lost; manual use of the base with no PC ever present keeps power (D19). This is the backstop for the PC-owned power policy (D5) | implemented (2026-11-12; DIN half unverified until SYS-NOTE-05; step-2 changes not bench-verified) | base router.cpp logChanges + logic/recovery.hpp PcLossGuard; tests host PcLossGuard.*, hw test_pc_loss.py. Pending (step 2, 64ce11c): the loss is latched, only a received PC packet restores the PC, on a wrap-safe uint32 ms clock (BF-1, Q-D-11) |
 | SYS-PC-04 | PC loses USB (base reset): playback stopped, organ state "unknown"; reconnects on USB return | implemented | PC comm.cpp:995 (`SerialLost`) |
@@ -208,9 +208,10 @@ power policy and serves a status web page.
 | SYS-ORG-02 | SSR off after any base reset | implemented (fw) | base src/base.cpp:19 (PA4 output at static init), main.cpp:290; no hardware pull-down on PA4; the float until GPIO init is accepted (D28) |
 | SYS-ORG-03 | Organ on before first note + WarmupMs; if already on, start immediately | implemented, not bench-verified | PC |
 | SYS-ORG-04 | Between songs the organ stays on. The PC owns the policy: organ on at play, off after a configurable idle time (default 30 min, D27) (D2, D5) | differs from code (gap) | PC switches off after each song (KeepPowerOn=false) |
-| SYS-ORG-05 | Idle-off: PC switches the organ off after X min (default 30, D27) without playback/recording; a paused song is NOT idle (D18); setting in PC config (D5) | partial | step 2 (41f143b): `Config::organIdleOffMs` 30 min, armed when the startup reset finds the organ on (SYS-PWR-07, Q1-1 b), after a song end/Stop/failed start with KeepPowerOn=true and after an organ-off give-up with the relay still on (B1); disarmed by a PC organ command, a song or the base reporting off; restarted by a recording. Config key `[PLAYBACK] OrganIdleOffMs` (ms, >= 1000, B3); the status page shows an armed timer and `organ_power_fault`; a manual console `on` arms no timer (gap 4) |
+| SYS-ORG-05 | Idle-off: PC switches the organ off after X min (default 30, D27) without playback/recording; a paused song is NOT idle (D18); setting in PC config (D5) | partial | step 2 (41f143b): `Config::organIdleOffMs` 30 min, armed when the startup reset finds the organ on (SYS-PWR-07, Q1-1 b), after a song end/Stop/failed start with KeepPowerOn=true and after an organ-off give-up with the relay still on (B1); disarmed by a PC organ command, a song or the base reporting off; restarted by a recording. Config key `[PLAYBACK] OrganIdleOffMs` (ms, >= 1000; `0` = never switch off, B3, owner 2026-11-23); the status page shows an armed timer and `organ_power_fault`. Since 2026-11-23 (B1) a manual console `on` and an `on` adopted from the base (menu or remote, when the PC is not playing or recording) also arm the timer |
 | SYS-ORG-06 | SSR drive (LM317L constant-current, <= ~104 mA) must match the installed SSR | open (D12: SSR type unknown, O-4) | hardware |
-| SYS-ORG-07 | Manual organ-on from the base menu or the remote: organ stays on (overrides song-end handling) until the next idle timeout; the PC must see the manual state and run its idle timer (D2) | partial | base checkbox exists (menu.cpp:457-464, PC learns it only via the 5 s GET_STATUS poll); remote has no control and shows no organ state; PC switches it off at song end (`finishPlayback`), on stop even when nothing played (`doStop`) and on a failed start; the startup reset leaves it on and arms the idle timer since step 2 (Q1-1 b, SYS-PWR-07); a manual on at runtime arms no timer (gap 4, gap 5). With no PC the base backstop cuts it after 2 h (SYS-IDLE-04) |
+| SYS-ORG-07 | Manual organ-on from the base menu or the remote: organ stays on (overrides song-end handling) until the next idle timeout; the PC must see the manual state and run its idle timer (D2) | partial | base checkbox exists (menu.cpp:457-464, PC learns it only via the 5 s GET_STATUS poll); remote has no control and shows no organ state; PC switches it off at song end (`finishPlayback`), on stop even when nothing played (`doStop`) and on a failed start; the startup reset leaves it on and arms the idle timer since step 2 (Q1-1 b, SYS-PWR-07); a manual on at runtime (console or adopted from the base) arms the idle timer since 2026-11-23 (B1; gap 5 remains). With no PC the base backstop cuts it after 2 h (SYS-IDLE-04) |
+| SYS-ORG-08 | Emergency organ off without the PC: hold the remote MF key 3 s (hold screen "Vypnout organ / Drzte 3 s"; a tap is still Left, release before 3 s does nothing) -> EMERGENCY_OFF (0x15, protocol v2, ACKed, not forwarded); the base switches the SSR off and sends All Notes Off on DIN; the PC sees the state in its next GET_STATUS. An old base NAKs UNKNOWN_MSG (owner 2026-11-23, D14) | implemented 2026-11-23, not bench-verified | remote menu.cpp, base router.cpp, PROTOCOL.md |
 
 ### 4.7 Stuck notes / All Notes Off
 
@@ -227,7 +228,7 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-IDLE-01 | Remote powers off after 20 min without a key press ("Necinnost: vypnuti") | implemented, not bench-verified | timer never fired on the bench |
-| SYS-IDLE-02 | Remote idle clock suspended while playing, during OTA; the idle auto-off is disabled on USB power (the 5 s hold still works, SYS-BAT-04) | implemented, not bench-verified | remote; during OTA the idle clock is reset by every FW packet (link.cpp:167 `Power::touch()`), not suspended (P-TG-2). Pending (step 2, 74ed6d4, 83fb028): playing counts only while the PC is alive (link up and no PC-loss report), so after a drop without reconnect the auto-off still runs (RF-12, Q-D-16) |
+| SYS-IDLE-02 | Remote idle clock suspended while playing, during OTA; the idle auto-off is disabled on USB power (the 3 s hold still works, SYS-BAT-04) | implemented, not bench-verified | remote; during OTA the idle clock is reset by every FW packet (link.cpp:167 `Power::touch()`), not suspended (P-TG-2). Pending (step 2, 74ed6d4, 83fb028): playing counts only while the PC is alive (link up and no PC-loss report), so after a drop without reconnect the auto-off still runs (RF-12, Q-D-16) |
 | SYS-IDLE-03 | Remote power: easy wins only (OLED sleep, WFI, BLE module/peripheral sleep where trivial); no stop-mode redesign required (D17) | partial | OLED sleep + WFI done; BLE module / peripheral sleep not reviewed |
 | SYS-IDLE-04 | Base: OLED sleep after 30 s. Organ backstop: if the SSR is on and no valid packet has come from the PC for 2 h, the base sends All Notes Off and switches the SSR off; any received PC packet restarts the 2 h (Q1-1 c, 2026-11-14). Organ idle-off with a PC present is the PC's (SYS-ORG-05) | implemented, not bench-verified | OLED sleep: implemented. Backstop: base `routercore::SsrBackstop` (step 2, 976f788), tests Backstop.*. With the 2 s KEEPALIVE it acts only when the PC is absent. Pending: switching the SSR on also restarts the 2 h; hand playing with no PC is cut after 2 h (Q-D-3) |
 
@@ -238,7 +239,7 @@ power policy and serves a status web page.
 | SYS-BAT-01 | 2P NCR18650B (~7 Ah); BQ24195 charge 2048 mA, term 256 mA, 12 h timer; input limit from Type-C Rp / D+D- | implemented, not bench-verified | confirmed by the owner (D28); the pack may change later |
 | SYS-BAT-02 | SOC: 47 ms samples, trimmed mean, EMA, hysteresis; 4180 mV = 100 %, 3300 mV = 0 % | implemented | remote logic/battery_soc |
 | SYS-BAT-03 | Warning at 15 % (re-arms at 20 %, never on USB): 5 s "Slaba baterie" splash, Enter/Back dismiss it (D2). Critical: 5 consecutive 1 s means < 3300 mV -> "Slaba baterie", shutdown, diag slot saved. An invalid measurement (no ADC samples, ADC init failure, 3 s empty) shows "Chyba mereni" with no percentage and no critical shutdown (D1) | implemented, not bench-verified | remote battery.cpp, logic/low_warning, logic/battery_validity |
-| SYS-BAT-04 | On USB only the idle auto-off is disabled; the 5 s ON/OFF hold still powers the remote off (owner 2026-11-22, bench 7.6). The charger watchdog is kept off: a REG05 mismatch is rewritten and logged as CHARGER_FAULT arg 0x200\|REG05 (D4) | implemented | remote battery.cpp, bq24195.cpp |
+| SYS-BAT-04 | On USB only the idle auto-off is disabled; the 3 s ON/OFF hold (5 s until 2026-11-23, item 12) still powers the remote off (owner 2026-11-22, bench 7.6). The charger watchdog is kept off: a REG05 mismatch is rewritten and logged as CHARGER_FAULT arg 0x200\|REG05 (D4) | implemented | remote battery.cpp, bq24195.cpp |
 | SYS-BAT-05 | Battery % on the status page | implemented | PC status |
 
 ### 4.10 Firmware update
@@ -247,7 +248,7 @@ power policy and serves a status web page.
 |---|---|---|---|
 | SYS-FW-01 | Only `<name>-update.bin` with 24 B trailer; board ID checked in browser, PC and device | implemented | PC firmware_image, bootloader |
 | SYS-FW-02 | Base update over USB: ENTER_BOOTLOADER, bootloader CDC (ABCD:1235), first 2 KB written last; ~11 s | implemented | base bootloader |
-| SYS-FW-03 | A power cut during the vector-page commit must not hang the base bootloader (F4); fixed before deployment (proposed default, P6) | implemented 2026-11-13 | `boot::ecc::handleNmi`: ECC double error in the app region -> erase that page + vector page, reset; base stays in its bootloader (USB), remote releases PA1 |
+| SYS-FW-03 | A power cut during the vector-page commit must not hang the base bootloader (F4); fixed before deployment (proposed default, P6) | implemented 2026-11-13 | `boot::ecc::handleNmi`: ECC double error in the app region -> erase that page + vector page, reset; base stays in its bootloader (USB), remote releases PA1. Repairs are counted in TAMP BKP3R; after 3 the bootloader gives up and stays in update mode (C9, owner 2026-11-23); the apps clear the counter after 10 s of healthy running. Base bootloader with no valid app shows "Chybi firmware / Pripojte PC" (BP-12). A remote bootloader that cannot clear the staged flag reports diag 19 STAGE_CLEAR_FAILED (BP-1) |
 | SYS-FW-04 | An image without a valid trailer must not boot (F5); fixed before deployment (proposed default, P6) | implemented 2026-11-13 | `boot::appBootable` accepts only `Check::Ok`; a plain ELF over SWD no longer starts (flash `-full.hex` / `-update.hex`) |
 | SYS-FW-05 | Base bootloader entry: TAMP BKP0R magic or encoder held at power-on; progress on OLED | implemented | base bootloader |
 | SYS-FW-06 | Remote OTA via base: staged in W25Q32, CRC check, bootloader copies (3 tries per boot) | implemented | ~75 s 1M, 2 min 32 s Coded S8 (68.8 kB) |
@@ -259,7 +260,7 @@ power policy and serves a status web page.
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-DIAG-01 | Base: fault record in no-init RAM, loop watchdog 1000 ms, IWDG ~2 s, reported at next boot | implemented | base fault.*, wdg; debug builds: `stack` command on the log CDC prints the stack high-water mark (step 2, 3237615) |
+| SYS-DIAG-01 | Base: fault record in no-init RAM, loop watchdog 1000 ms, IWDG ~2 s, reported at next boot  Since 2026-11-23 (owner item 8): capture on a fresh stack, NMI and stack-overflow kinds, base INFO tag FAULT_LAST 0x09 (kind + pc) so the PC shows the last crash without the log port; the remote reports a fresh fault the same way through its INFO. Front LEDs are not used for faults (kept for later) | implemented | base fault.*, wdg; debug builds: `stack` command on the log CDC prints the stack high-water mark (step 2, 3237615) |
 | SYS-DIAG-02 | Remote: 32-record RAM ring, flash slots for fault/stall/error shutdown; loop watchdog 2000 ms, IWDG ~4 s; a fault powers the remote off | implemented | remote diag.*, fault.* |
 | SYS-DIAG-03 | PC polls DIAG_GET every 10 s, stores JSONL 1 MiB x 3; pauses during remote OTA | implemented | PC diag_poller |
 | SYS-DIAG-04 | PROTOCOL.md lists all diag codes (incl. 17 BLE_MODULE_REBOOT, 18 BLE_ERR_CONN), KEEPALIVE byte 1 (base RSSI) and the correct CRC name (non-reflected, poly 0x31) (proposed default, P8) | implemented | midicontrol-protocol PROTOCOL.md:32 (CRC), :179 (KEEPALIVE byte 1), :263-264 (diag 17/18), protocol 6ce5716 |
@@ -275,7 +276,7 @@ power policy and serves a status web page.
 | SYS-WEB-02 | "Prehled" (Czech): health, now playing, stops; "Pokrocile" (English): debug | implemented, not bench-verified | PC web_page |
 | SYS-WEB-03 | Controller dot green only if STATUS_RESP <= 15 s old | implemented, not bench-verified | PC status |
 | SYS-WEB-04 | Stops editor writes `<CODE>.conf` | implemented, not bench-verified | PC stops_file |
-| SYS-WEB-05 | No authentication; the church LAN is trusted and the page stays open (D4). Writes (stops, firmware, fault ack) are POST/PUT only and refused (403) unless Host is an IP address, localhost or in `[WEB] AllowedHosts` and any Origin matches Host (CSRF / DNS rebinding, Q2-25, B7). No play/stop/organ controls on the page | implemented | PC http.cpp, diag_api.cpp |
+| SYS-WEB-05 | No authentication; the church LAN is trusted and the page stays open (D4). Writes (stops, firmware, fault ack) are POST/PUT only and refused (403) unless Host is an IP address, localhost, the PC's own hostname (`gethostname()`, `<name>.local`), `midicontrol`/`midicontrol.local` or in `[WEB] AllowedHosts` (`*` = any Host) and any Origin matches Host (CSRF / DNS rebinding, Q2-25, B7). No play/stop/organ controls on the page | implemented | PC http.cpp, diag_api.cpp |
 
 ### 4.13 Recording (new group, D6, D9)
 
@@ -351,7 +352,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 1 | SYS-PC-03, SYS-NOTE-03 | CLOSED 2026-11-12 (PcLossGuard, test_pc_loss.py; DIN half waits for gap 28): Base: on PC loss (USB gone / keepalive timeout) send All Notes Off + SSR off immediately (D1) | midicontrol-fw |
 | 2 | SYS-PWR-07, SYS-NOTE-04 | CLOSED 2026-11-12 (startup_reset.cpp, test_startup_reset.cpp): PC start/restart: All Notes Off + organ off, indicator untouched (D14). Power rule changed by Q1-1 b (a manual on stays on), see SYS-PWR-07 | midicontrol-sw |
 | 3 | SYS-ORG-04, SYS-USE-10 | Organ stays on between songs; no off at song end/stop (D2, D5) | midicontrol-sw |
-| 4 | SYS-ORG-05 | Configurable idle-off timer on the PC (D5). Step 2: 30 min timer for an organ found on at PC start or reconnect (41f143b), after a KeepPowerOn song end and after an off give-up (B1); config key `OrganIdleOffMs` (B3); a manual console on arms no timer | midicontrol-sw |
+| 4 | SYS-ORG-05 | Configurable idle-off timer on the PC (D5). Step 2: 30 min timer for an organ found on at PC start or reconnect (41f143b), after a KeepPowerOn song end and after an off give-up (B1); config key `OrganIdleOffMs` (B3); a manual console on and an adopted base-menu on arm the timer too since 2026-11-23 (B1); `OrganIdleOffMs = 0` = never (B3) | midicontrol-sw |
 | 5 | SYS-ORG-07 | Manual organ-on from base/remote overrides until the next idle timeout; PC learns manual state; remote control. Today the PC switches a manual on off at stop (also with nothing playing), song end and failed start (US-2/3/4, Q-US-2); the startup reset keeps it since step 2 (Q1-1 b); the remote has no organ control or display (US-5, routing Q-US-3); a manual base-on with no PC is cut by the 2 h backstop since step 2 (Q1-1 c, SYS-IDLE-04; was US-17, Q-US-4) | midicontrol-sw, midicontroller-fw, midicontrol-protocol (if a new message), midicontrol-fw |
 | 6 | SYS-PAIR-04, SYS-FW-07 | CLOSED 2026-11-12 (`peerguard::Guard`, `test_remote_guard.py`, `PeerGuard.*`): Remote accepts connection/frames/OTA only from the bonded base (D3) | midicontroller-fw |
 | 7 | SYS-PAIR-06 | CLOSED 2026-11-12 (menu "Sparovat zakl.", `test_pairing_window_*`): Explicit "pair new base" action on the remote (D3) | midicontroller-fw |
@@ -428,13 +429,13 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | FW chunk | <= 120 B; base multiple of 8 B |
 | PC GET_STATUS / GET_INFO / DIAG | 5 s (2 s timeout) / 15 s / 10 s |
 | PC warm-up | WarmupMs 3000 ms |
-| Organ idle-off | 30 min default, configurable on the PC (D27); `Config::organIdleOffMs`, config key `[PLAYBACK] OrganIdleOffMs` (B3); armed per SYS-ORG-05 (gap 4) |
+| Organ idle-off | 30 min default, configurable on the PC (D27); `Config::organIdleOffMs`, config key `[PLAYBACK] OrganIdleOffMs` (B3); `0` = never off (B3, 2026-11-23); armed per SYS-ORG-05 (gap 4), also by a manual console on and an adopted base-menu on (B1) |
 | Base organ backstop | 2 h with the SSR on and no PC packet (Q1-1 c, SYS-IDLE-04) |
 | PC startup reset | power part waits up to 12 s for an SSR report (pending, Q-D-4) |
 | PC organ reconcile | unconfirmed command younger than 30 s, up to 3 re-sends (pending, Q-D-10) |
 | Stops | AllOffDelayMs 100, StopDelayMs 20 default, per stop |
 | Verse gap | VerseGapMs 0 |
-| Remote idle off / power button | 20 min / hold 5 s |
+| Remote idle off / power button | 20 min / hold 3 s (shared hold screen, also MF emergency off and base organ off) |
 | Key debounce | remote 20 ms; base encoder/keys polled every 10 ms |
 | Battery cut-off | 3300 mV, 5 x 1 s |
 | Charge | 2048 mA, term 256 mA, 12 h timer |
@@ -491,7 +492,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | Parovani / Hledam ovladac... / Sparovano / Nesparovano / Parovani selhalo / Cas vyprsel / Zbyva n s | Pairing screens |
 | Sparovat zakl. | Pair a new base (remote menu, opens the 60 s pairing window, SYS-PAIR-06; abbreviated, Q-TG-2) |
 | Sparovat? (Kod nnnnnn) | Confirm pairing (passkey, information only) |
-| Vypnuti / Drzte 5 s | Switching off / hold 5 s (remote power button) |
+| Vypnuti / Drzte 3 s | Switching off / hold 3 s (remote power button; same hold screen: "Vypnout organ" on the remote MF key, "Vypnuti varhan" on the base) |
 | Aktualizace / Prijem dat / Prenos do ovladace / Instalace ovladace / Chyba aktualizace / Chyba, opakujte / Nevypinejte | Firmware update screens (the last two from the base bootloader) |
 | Baterie: Napeti / Uroven / Nabiji / Nabito / Nenabiji / Vybiji | Battery page (remote) |
 | Verze FW: Revize / Vetev / Datum / Cas | Firmware version page |
