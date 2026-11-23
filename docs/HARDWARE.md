@@ -52,7 +52,7 @@ Read these before touching the base firmware.
 | LSE | Never started (no LSEON) | fw:src/base.cpp |
 | Bootloader clocks | Core on HSI16. USB on HSI48 + CRS. Sets PWR_CR2.USV | boot:src/main.cpp |
 | IWDG | LSI/32, RLR 2000 (~2 s), started on every boot. Loop watchdog 1000 ms | fw:CLAUDE.md "Key modules" (fault, wdg) |
-| Clocked, no visible use | TIM1, TIM2, TIM4, TIM7, RTCAPB | fw:src/base.cpp initClock |
+| Clocks switched off (2026-11-23) | TIM1, TIM2, TIM4, TIM7, RTCAPB | fw:src/base.cpp initClock |
 
 | Region | Address | Size | Source |
 |---|---|---|---|
@@ -271,4 +271,4 @@ Answer each one when known. Decisions D10 (BLE fit) and D11 (which source is aut
 17. **Rear LED order.** Do the panel labels match pixels 0..5 = USB, Display, Current, MIDI A, MIDI B, Bluetooth on chain D7, D1..D5?
 18. **Front J4.** What is the 1×4 I2C header for?
 
-Firmware housekeeping (not hardware): TIM1/TIM2/TIM4/TIM7/RTCAPB are clocked with no visible use; `dfuCheck()` (fw:src/base.cpp:110-128) is never called. Keep them or delete them.
+Firmware housekeeping (not hardware): the unused TIM1/TIM2/TIM4/TIM7/RTCAPB clocks were switched off in `initClock` (2026-11-23, no user in src/ or lib/; the one RTCAPB user, the TAMP backup-register boot flag in `requestBootloader`, now enables the clock itself before writing); `dfuCheck()` is removed.

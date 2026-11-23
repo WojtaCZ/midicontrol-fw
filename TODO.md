@@ -151,6 +151,10 @@ DONE 2026-11-23: recording screen redone like Prehravani (RecordScreen in menu.c
 - Manual/facts: none visible except SYSTEM.md router/dedup row (VERIFY row id: grep -n "dedup" docs/SYSTEM.md).
 - Risk / open points: VERIFY whether the PC resends signals with the same id on purpose (retries) or reuses ids across different signals. Check midicontrol-sw packet id allocation (`grep -rn packetId` there) before choosing "last id only".
 
+### Item 8 fault audit - DONE 2026-11-23 (backlog/sys-1123: fresh-stack capture, NMI + STACK_OVERFLOW kinds, INFO FAULT_LAST; remote d0efa06). Bench: (1) force a stack overflow (deep recursion test hook) on base and remote, expect banner/DIAG kind STACK_OVERFLOW; (2) trigger NMI on each, kind NMI; (3) read base INFO FAULT_LAST from the PC after a fault (kind + pc); (4) remote fault_fresh stub: provoke a HardFault, DIAG record present after reboot.
+
+### Item 9 unused clocks - DONE 2026-11-23: TIM1/TIM2/TIM4/TIM7/RTCAPB off in initClock (RTCAPB enabled locally in requestBootloader for TAMP). Bench: Servis > update via bootloader still enters the bootloader.
+
 ### C6 Remove dead firmware code (Q2-27) - DONE (C6: removed dfuCheck, current::toggle, isProtocolPacketAvailable, Debug get/setLevel, display::wasChanged, Oled isInverted/getBufferSize, oled_fonts.cpp, empty git.cpp; KEPT signalError/frontStrip pending owner Q, Color::shiftHue chain, set* of display, fault::clear (absent))
 - Goal: delete code with no callers listed in the audit; keep protocol items (RECORD_SONG, SIGNAL_RECORDING) reserved.
 - Current code: list at audit/STEP2-REPORT.md lines 255-290 (dfuCheck and others); STEP4 facts mention `dfuCheck` has no callers; `signalError` (src/main.cpp ~:739-757, declared ~:95) has no callers; led.cpp frontStrip is only used by it.
@@ -179,7 +183,9 @@ DONE 2026-11-23: recording screen redone like Prehravani (RecordScreen in menu.c
 - Manual/facts: SYSTEM.md settings storage row (VERIFY id); no manual change unless the pairing note changes.
 - Risk / open points: the bootloader and app share flash: check lib/bootloader layout.hpp for the last pages before choosing the layout. Not bench-verified until tested with a real power cut.
 
-### C9 Count ECC repairs, give up to safe mode (Q2-10, BP-2)
+### C9 Count ECC repairs, give up to safe mode (Q2-10, BP-2) - DONE in code 2026-11-23 (bench open)
+- Done (branch backlog/sys-1123): lib/bootloader ac1db5d: counter in TAMP BKP3R (`boot/persist.hpp`, tag 0xB0CE, survives every reset, a power loss decodes as clear), bumped BEFORE the erase, erase result not trusted; after 3 repairs `appBootable()` returns false without reading the app, so the bootloader stays in update mode (safe mode, screen "Chybi firmware"). Cleared: base app after 10 s of healthy loop (main.cpp), base bootloader after a verified update. Host tests in the bootloader repo.
+- Bench: cannot be forced without a power cut during a flash write; check only that a normal boot still reaches the app and `boot::persist` word reads 0xB0CE0000 after 10 s (openocd `mdw 0x4000B10C` style read of TAMP BKP3R, address per SVD).
 - Goal: the ECC NMI repair must not loop forever: count repairs, check the erase result, and after N failures stop repairing and go to a safe mode.
 - Current code: bootloader repo (shared by base and remote), src/ecc_guard.cpp `handleNmi()`: reads FLASH->ECCR, `decide()` picks the page, unlock, `erasePageAt(page)` (+ vector page), lock, writes ECCR back, `NVIC_SystemReset()`. Erase result is not checked; no loop guard. Added in bootloader 21dca81 (ECC NMI + trailer).
 - Change: (1) keep a repair counter that survives reset: a backup register (RTC BKP / TAMP) if unused, or a RAM word in the no-init section; VERIFY what the bootloader already keeps across reset (grep `noinit|BKP|TAMP` in the bootloader and layout.hpp). (2) check the result of `erasePageAt` (return value or SR). (3) if count >= 3 (VERIFY the number with owner; propose 3): do not repair, do not boot the app, stay in the bootloader (the update mode that waits for an image) so a USB or BLE update can heal it. This is the safe mode; BP-12 (below) is related. (4) clear the counter after a boot that stays up (the app clears it with the diag boot record; needs the same address in the app: pass it through the shared layout header). (5) log in the diag ring if the app is reached.
@@ -188,7 +194,9 @@ DONE 2026-11-23: recording screen redone like Prehravani (RecordScreen in menu.c
 - Manual/facts: manual sprava/problemy: "zakladna se po vypadku proudu spusti jen do aktualizace" (VERIFY wording); SYSTEM.md SYS-FW-03 row.
 - Risk / open points: bench needed (cannot make an ECC error on demand without a power cut during a flash write). VERIFY safe mode behaviour on the base (waits for a PC: BP-12) and on the remote.
 
-### C10 Bump lib/bootloader to 229d79b, BP-1 in diag, BP-12 (Q2-13)
+### C10 Bump lib/bootloader to 229d79b, BP-1 in diag, BP-12 (Q2-13) - DONE in code 2026-11-23 (bench open)
+- Done (backlog/sys-1123): lib/bootloader bumped to ac1db5d (contains 229d79b + C9), lib/protocol to e63f2f5 (diag STAGE_CLEAR_FAILED = 19; remote only, BP-1 is SPI staging). BP-12: base bootloader shows "Chybi firmware" / "Pripojte PC" (same drawProgress, 7x10 font, 14 and 11 chars of 18) when no valid app and no update was requested; a requested or forced entry keeps "Aktualizace" / "Cekam na PC". No timeout. Bootloader size 23.2 KB of 32 KB.
+- Bench: erase the app area (or flash only the bootloader hex: `mcu flashBootloader`) and check the screen; then update over USB from the PC and check the base boots the new app.
 - Goal: pin the base fw to bootloader 229d79b (BP-1 fix), show the recorded apply-clear failure in diag, and handle BP-12 (the base bootloader waits forever for a PC).
 - Current code: `git submodule status lib/bootloader` = a488f5e (docs only after 19e5fdb). What changed in the bootloader since the pin:
   - Bootloader log, newest first (main repo, checked): a5d7a91 CLAUDE.md manual rule; dde171d docs sync; 19e5fdb docs sync; 229d79b "BP-1: record a failed clearStagePending() and still boot the app" (adds `stageClearFailed()` in inc/boot/spiflash_apply.hpp, `s_clearFailed` in src/spiflash_apply.cpp, tests/test_apply.cpp; apply result unchanged; not bench-verified); a488f5e (the current pin); then 16d99a4, 560809b docs; 21dca81 ECC NMI recovery and trailer required to boot (already in the pin).
@@ -247,7 +255,7 @@ Owner present. Each item: what to do, what to record.
 - ECC repair (C9): no on-demand method; bench only the normal boot path unchanged.
 - Battery items, ProgramOffset -1: not base (remote and organ/PC side).
 
-### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13) - DONE (already implemented as SYS-PC-03: keepalive loss 6 s -> midi::sendStuckNoteCleanup + organ off in router.cpp logChanges; fits the 10 s budget; remote emergency-off from D14 stays LATER; bench: stop the PC process during playback, DIN OUT silent and SSR off within 6 s)
+### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13) - DONE (already implemented as SYS-PC-03: keepalive loss 6 s -> midi::sendStuckNoteCleanup + organ off in router.cpp logChanges; fits the 10 s budget; remote emergency-off (D14) DONE in code 2026-11-23: EMERGENCY_OFF 0x15 handled in router.cpp handleLocal = same actions, ACKed, bench: hold MF 3 s on the remote, relay off, DIN OUT silent, PC STATUS shows organ off, tools/basetest test_emergency_off; bench: stop the PC process during playback, DIN OUT silent and SSR off within 6 s)
 - Goal: second safety layer for hung notes: if the PC keepalive or MIDI stream stops during playback, the base sends All Notes Off on DIN OUT (and, if the owner agrees, switches the organ off) within the 10 s budget. Also handles the remote emergency-off message from midicontroller-fw D14 (LATER).
 - Open: a playing song can legitimately send no MIDI for seconds (long held notes), so key the trigger on the PC keepalive, not on MIDI silence. VERIFY the keepalive period fits 10 s.
 

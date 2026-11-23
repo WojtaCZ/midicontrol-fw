@@ -1,5 +1,6 @@
 #include "wdg.hpp"
 #include "fault.hpp"
+#include "ram.hpp"
 
 #include <stm32g431xx.h>
 #include <core_cm4.h>
@@ -40,6 +41,11 @@ namespace wdg {
 
 	void onTick(const uint32_t *stackedFrame, uint32_t excReturn) {
 		if (!_armed) return;
+		// Silent stack overflow (no MPU): the stack reached the heap. Checked on every tick, 2 compares.
+		if (ram::stackOverflowed(reinterpret_cast<uint32_t>(stackedFrame))) {
+			_armed = false;
+			fault::captureFresh(fault::Kind::STACK_OVERFLOW, stackedFrame, excReturn);
+		}
 		uint32_t n = _sinceKick + 1;
 		_sinceKick = n;
 		if (n >= LOOP_TIMEOUT_MS) {

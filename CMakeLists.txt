@@ -88,6 +88,7 @@ set(SOURCES
 	${SOURCE_BASE}/wdg.cpp
 	${SOURCE_BASE}/settings.cpp
 	${SOURCE_BASE}/router.cpp
+	${CMAKE_SOURCE_DIR}/lib/bootloader/src/persist.cpp
 
 
 	${CMAKE_SOURCE_DIR}/lib/gfx/src/icons.cpp

@@ -14,6 +14,9 @@ namespace ram {
 	// Smallest free gap seen so far between the heap break and the deepest stack use, in bytes
 	size_t stackUntouched();
 
+	// Stack overflow check for the SysTick watchdog: sp = the interrupted stack pointer (stacked frame address). Cheap (2 compares).
+	bool stackOverflowed(uint32_t sp);
+
 	// Heap in use (break - start of the heap) and the limit it may reach, in bytes
 	size_t heapUsed();
 	size_t heapLimit();

@@ -25,6 +25,7 @@ class MT(IntEnum):
     RECORD_SONG = 0x12
     NOW_PLAYING_INFO = 0x13
     REPLAY_ANCHOR = 0x14
+    EMERGENCY_OFF = 0x15  # remote -> base (D14): organ off + All Notes Off, no payload
     GET_SONG_LIST = 0x20
     SONG_LIST_RESP = 0x21
     SIGNAL_PLAYING = 0x30

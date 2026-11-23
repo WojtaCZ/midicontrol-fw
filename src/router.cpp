@@ -294,7 +294,8 @@ namespace router {
 	static void requestBootloader() {
 		// Set the backup-register flag the bootloader checks on reset, so it stays
 		// resident (USB-CDC firmware update) instead of jumping back to the app.
-		stmcpp::reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_PWREN);
+		// TAMP (backup registers) sits behind the RTCAPB clock, which initClock leaves off
+		stmcpp::reg::set(std::ref(RCC->APB1ENR1), RCC_APB1ENR1_PWREN | RCC_APB1ENR1_RTCAPBEN);
 		PWR->CR1 |= PWR_CR1_DBP; // unlock backup domain write protection
 		TAMP->BKP0R = kEnterBootMagic;
 	}
@@ -350,6 +351,11 @@ namespace router {
 		w.u8(Tag::RESET_CAUSE, static_cast<uint8_t>((resetcause::last() >> 24) & 0xFEU));
 		const fault::Record *f = fault::saved();
 		w.u8(Tag::FAULT_COUNT, f ? f->count : 0);
+		if (f) {
+			const uint8_t last[5] = {f->kind, static_cast<uint8_t>(f->pc), static_cast<uint8_t>(f->pc >> 8), static_cast<uint8_t>(f->pc >> 16),
+				static_cast<uint8_t>(f->pc >> 24)};
+			w.bytes(Tag::FAULT_LAST, last, sizeof(last));
+		}
 		uint8_t ble = 0;
 		if (Bluetooth::isConnected()) ble |= BLE_CONNECTED;
 		if (Bluetooth::isStreamOpen()) ble |= BLE_STREAM_OPEN;
@@ -419,6 +425,17 @@ namespace router {
 				sendReliable(resp); // acknowledged like STATUS_RESP
 				break;
 			}
+
+			case MsgType::EMERGENCY_OFF:
+				// D14: the remote's MF key was held for 3 s. The base acts alone (the PC may be stalled or gone): All Notes Off
+				// on DIN OUT and the organ relay off, as for a lost PC. The PC learns it from the organ bit of the next STATUS_RESP.
+				// A repeat is ACKed by the dedup above and not executed again.
+				if (ack) sendAck(pkt, via);
+				midi::sendStuckNoteCleanup();
+				base::current::disable();
+				GUI::syncPowerCheckbox();
+				Debug::log(Debug::Level::WARNING, "router", "emergency off from 0x%02x: all notes off, organ power off", pkt.source);
+				break;
 
 			case MsgType::NOW_PLAYING_INFO:
 				// One frame to the display, no ACK (frequent message)

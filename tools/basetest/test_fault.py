@@ -19,7 +19,7 @@ from conftest import remote_alive, wait_until
 from test_log import BANNER_RE, PRE_END, PRE_START, keepalive_rtt, log, wait_log_port  # noqa: F401 - fixture log
 
 INJ_BUS, INJ_STALL, INJ_IWDG = 1, 2, 3
-FAULT_RE = r"E fault: (HARDFAULT|MEMMANAGE|BUSFAULT|USAGEFAULT|ERROR|LOOP_STALL) #(\d+)"
+FAULT_RE = r"E fault: (HARDFAULT|MEMMANAGE|BUSFAULT|USAGEFAULT|ERROR|LOOP_STALL|NMI|STACK_OVERFLOW) #(\d+)"
 
 
 def reboot(link, log, action, gone_within: float, back_within: float = 6.0):
