@@ -21,7 +21,7 @@ ELF: `export BASETEST_REMOTE_ELF=<-g build>/midicontroller-fw.elf` (recipe in `t
       link comes back by itself within ~10 s. *2026-10-25: link back in 6.2 s.*
 - [ ] **Church display hot-plug:** unplug and replug the display; the PC status shows `displayConnected` follow it
       (PC13 sense). *2026-10-25: no display on the bench.*
-- [x] **Remote ON/OFF:** a short press does nothing; a 5 s hold shows the progress screen and powers off (20 ms debounce).
+- [x] **Remote ON/OFF:** a short press does nothing; a 3 s hold shows the progress screen and powers off (20 ms debounce).
 - [x] **SSR:** with the relay fitted, organ power on/off from the menu ("Napajeni Varhan") and from the PC switches the relay. *2026-10-25: LED on the SSR output.*
 
 ## 2. Tests that switch the remote off (someone must switch it on again)
