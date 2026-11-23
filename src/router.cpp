@@ -426,6 +426,17 @@ namespace router {
 				break;
 			}
 
+			case MsgType::EMERGENCY_OFF:
+				// D14: the remote's MF key was held for 3 s. The base acts alone (the PC may be stalled or gone): All Notes Off
+				// on DIN OUT and the organ relay off, as for a lost PC. The PC learns it from the organ bit of the next STATUS_RESP.
+				// A repeat is ACKed by the dedup above and not executed again.
+				if (ack) sendAck(pkt, via);
+				midi::sendStuckNoteCleanup();
+				base::current::disable();
+				GUI::syncPowerCheckbox();
+				Debug::log(Debug::Level::WARNING, "router", "emergency off from 0x%02x: all notes off, organ power off", pkt.source);
+				break;
+
 			case MsgType::NOW_PLAYING_INFO:
 				// One frame to the display, no ACK (frequent message)
 				display::applyNowPlaying(pkt.payload, pkt.payloadLen);

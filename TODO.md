@@ -254,7 +254,7 @@ Owner present. Each item: what to do, what to record.
 - ECC repair (C9): no on-demand method; bench only the normal boot path unchanged.
 - Battery items, ProgramOffset -1: not base (remote and organ/PC side).
 
-### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13) - DONE (already implemented as SYS-PC-03: keepalive loss 6 s -> midi::sendStuckNoteCleanup + organ off in router.cpp logChanges; fits the 10 s budget; remote emergency-off from D14 stays LATER; bench: stop the PC process during playback, DIN OUT silent and SSR off within 6 s)
+### C13 Base-side silence when the PC stops while a song plays (owner 2026-11-22, with midicontrol-sw B13) - DONE (already implemented as SYS-PC-03: keepalive loss 6 s -> midi::sendStuckNoteCleanup + organ off in router.cpp logChanges; fits the 10 s budget; remote emergency-off (D14) DONE in code 2026-11-23: EMERGENCY_OFF 0x15 handled in router.cpp handleLocal = same actions, ACKed, bench: hold MF 3 s on the remote, relay off, DIN OUT silent, PC STATUS shows organ off, tools/basetest test_emergency_off; bench: stop the PC process during playback, DIN OUT silent and SSR off within 6 s)
 - Goal: second safety layer for hung notes: if the PC keepalive or MIDI stream stops during playback, the base sends All Notes Off on DIN OUT (and, if the owner agrees, switches the organ off) within the 10 s budget. Also handles the remote emergency-off message from midicontroller-fw D14 (LATER).
 - Open: a playing song can legitimately send no MIDI for seconds (long held notes), so key the trigger on the PC keepalive, not on MIDI silence. VERIFY the keepalive period fits 10 s.
 

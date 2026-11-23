@@ -98,6 +98,19 @@ def test_set_current_on_off(quiet, base):
         assert checkbox_power(base) == value  # GUI::syncPowerCheckbox
 
 
+def test_emergency_off(quiet, base):
+    # D14: EMERGENCY_OFF is handled by the base alone: ACK, relay off (PA4), the menu checkbox follows, and the next
+    # STATUS_RESP reports the organ as off (normal status path)
+    pid = quiet.send_msg(MT.SET_CURRENT, b"\x01")
+    assert quiet.recv(1.0, is_reply(MT.ACK, pid)) is not None
+    assert base.gpio("A", 4) == 1
+    pid = quiet.send_msg(MT.EMERGENCY_OFF)
+    assert quiet.recv(1.0, is_reply(MT.ACK, pid)) is not None
+    assert base.gpio("A", 4) == 0
+    assert checkbox_power(base) == 0
+    assert get_status(quiet)[1].payload[1] == 0  # STATUS_RESP payload[1] = organ (SSR) on
+
+
 def test_set_current_bad_payload(quiet):
     pid = quiet.send_msg(MT.SET_CURRENT, b"")
     nak = quiet.recv(1.0, lambda p: p.src == ADDR_BASE and p.mtype == MT.NAK)
