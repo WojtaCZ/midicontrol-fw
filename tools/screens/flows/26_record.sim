@@ -11,7 +11,6 @@ expect var recstarts=1
 expect var recstops=0
 event recording on
 expect text Nahravam
-expect text Enter = Stop
 key enter
 expect var recstops=1
 expect text Zastavuji

@@ -498,36 +498,76 @@ static recording::Machine _recording;
 static GUI::RecordCallback _recordCallback = nullptr;
 
 // C3: the recording screen follows recording::Machine. "Priprava" while the PC warms the organ up, "Nahravam"
-// with Enter = Stop, "Zastavuji" until SIGNAL_STOPPED; a refusal (BUSY, protocol v1 PC, any other failure) stays
-// until Enter. "Nahravani nelze: hraje" is the base's own refusal while a song plays (one at a time).
+// with the Stop button, "Zastavuji" until SIGNAL_STOPPED; a refusal (BUSY, protocol v1 PC, any other failure) stays
+// until Enter. "Nelze: hraje pisen" is the base's own refusal while a song plays (one at a time).
 static bool _recordShown = false;     // the screen is in the navigator stack
 static bool _recordRefused = false;   // the base refused (playing): not a machine state
 
 static void onRecordEnter(void* userData);
-static ui::SplashScreen recordScreen("Nahravani", "", "", onRecordEnter);
+
+// Same look as NowPlayingScreen (the state in the title bar, a big line in the song code's place, the Stop icon
+// button at the bottom, OK = Stop). A refusal is shown the way "Prehravam" shows a failed stop: the reason in the
+// info line, no button; OK dismisses it.
+class RecordScreen : public ui::Screen {
+public:
+    void set(const char* title, const char* big, const char* info, bool stopButton) {
+        title_ = title;
+        big_   = big;
+        info_  = info;
+        stop_  = stopButton;
+        markDirty();
+    }
+
+    bool handleInput(ui::InputEvent event) override {
+        if (event == ui::InputEvent::Enter) onRecordEnter(nullptr);
+        return true;
+    }
+
+    void render(gfx::IFrameBuffer<uint8_t>& fb, const ui::Theme& theme) override {
+        gfx::fill(fb, (uint8_t)0);
+        ui::drawTitleBar(fb, theme, title_);
+        gfx::text::drawText(fb, *theme.itemFont, big_, theme.displayWidth / 2, 14, gfx::Anchor::TopCenter, (uint8_t)1);
+        const int infoY = ui::hintY(theme) - (int)theme.smallFont->height() - 6;
+        gfx::text::drawText(fb, *theme.smallFont, info_, theme.displayWidth / 2, infoY, gfx::Anchor::TopCenter, (uint8_t)1);
+        if (stop_) {
+            const int x = (theme.displayWidth - (int)btn_stop_selected.width) / 2;
+            gfx::drawIcon(fb, btn_stop_selected, x, theme.displayHeight - (int)btn_stop_selected.height, gfx::Anchor::TopLeft, (uint8_t)1);
+        }
+        clearDirty();
+    }
+
+private:
+    const char* title_ = "";
+    const char* big_   = "";
+    const char* info_  = "";
+    bool        stop_  = false;
+};
+
+static RecordScreen recordScreen;
 
 static void syncRecordScreen() {
     const recording::State st = _recording.state();
-    const char* sub = "";
-    const char* com = "";
+    const char* title = "Nahravani";
+    const char* big   = "";
+    const char* info  = "";
+    bool stop = false;
     if (_recordRefused) {
-        sub = "Nahravani nelze: hraje";
+        info = "Nelze: hraje pisen";
     } else {
         switch (st) {
-            case recording::State::Starting:   sub = "Priprava"; break;
-            case recording::State::Recording:  sub = "Nahravam"; com = "Enter = Stop"; break;
-            case recording::State::Stopping:   sub = "Zastavuji"; break;
-            case recording::State::Busy:       sub = "Zaneprazdneno"; break;
-            case recording::State::NoSupport:  sub = "PC nema nahravani"; break;
-            case recording::State::Failed:     sub = "Nahravani selhalo"; break;
+            case recording::State::Starting:   title = "Priprava";  big = "REC"; stop = true; break;
+            case recording::State::Recording:  title = "Nahravam";  big = "REC"; stop = true; break;
+            case recording::State::Stopping:   title = "Zastavuji"; big = "REC"; stop = true; break;
+            case recording::State::Busy:       info = "Zaneprazdneno"; break;
+            case recording::State::NoSupport:  info = "PC nema nahravani"; break;
+            case recording::State::Failed:     info = "Nahravani selhalo"; break;
             case recording::State::Idle:       break;
         }
     }
     const bool want = _recordRefused || st != recording::State::Idle;
     if (want) {
         if (fwPushed) return; // the update screen owns the display
-        recordScreen.setSubtitle(sub);
-        recordScreen.setComment(com);
+        recordScreen.set(title, big, info, stop);
         if (!_recordShown) {
             nav.push(&recordScreen);
             _recordShown = true;

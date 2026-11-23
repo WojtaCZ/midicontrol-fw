@@ -161,15 +161,18 @@ int main(int argc, char **argv) {
 	GUI::render();
 
 	// C3: Nahraj
+	down(20); // the pairing part left Nastaveni open: Zpet to the main menu
+	key(E::Enter);
 	GUI::setRecordCallback([](bool) {});
-	key(E::Down);
+	key(E::Up); // the cursor is on Nastaveni; Nahraj is above it
 	key(E::Enter);
 	snap("record_starting", "Nahraj: RECORD_SONG sent, the PC warms the organ up (Priprava)");
 	GUI::recordingSignal(true);
-	snap("record_recording", "Recording: Enter = Stop");
+	snap("record_recording", "Recording: state title, Stop button");
 	key(E::Enter);
 	snap("record_stopping", "Enter pressed: RECORD_SONG [0] sent, waiting for the PC");
 	GUI::recordingSignal(false);
+	snap("record_idle", "Recording finished: back in the main menu");
 	key(E::Enter);
 	GUI::recordingFailed(routercore::Failure::Nak, protocol::NakReason::BUSY);
 	snap("record_busy", "The PC refused: a song plays or an update runs");
