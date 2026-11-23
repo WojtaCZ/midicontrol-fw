@@ -31,7 +31,8 @@ def is_reply(mtype, pid=None):
 
 
 def checkbox_power(base) -> int:
-    return base.read(base.sym("GUI::settingsItems") + 2 * MENUITEM_SIZE + MENUITEM_CHECKED, 1)[0]
+    # settingsItems[1] = "Napajeni varhan" since C7 moved "Ident. MIDI" to Nastaveni > Servis (menu.cpp syncPowerCheckbox)
+    return base.read(base.sym("GUI::settingsItems") + 1 * MENUITEM_SIZE + MENUITEM_CHECKED, 1)[0]
 
 
 def test_keepalive_ack(quiet):
@@ -60,8 +61,12 @@ def test_get_status(quiet, base):
     ack, resp = get_status(quiet)
     after = link_usable(base)
     assert ack is not None and resp is not None
-    assert len(resp.payload) == 4
-    ble, current, display, pc_alive = resp.payload
+    # Protocol v2 (A2): [ble, ssr, display, pcAlive, flags, boot_id u16 LE]; flags bit0 = remote boot id valid
+    assert len(resp.payload) == 7
+    ble, current, display, pc_alive, flags = resp.payload[:5]
+    assert flags & 0xFE == 0
+    if not flags & 1:
+        assert resp.payload[5:7] == b"\x00\x00"
     assert pc_alive == 1
     assert ble in (before, after)
     assert quiet.expect_silence(0.7) == []

@@ -446,7 +446,8 @@ class Target:
 
     def screen_name(self) -> str:
         cur = self.current_screen()
-        for name in ("playerScreen", "mainScreen", "songListScreen", "pairingScreen", "splashScreen", "messageScreen", "settingsScreen", "noBaseScreen"):
+        for name in ("playerScreen", "mainScreen", "songListScreen", "pairingScreen", "splashScreen", "messageScreen", "settingsScreen", "noBaseScreen",
+                     "fwProgressScreen"):
             try:
                 if cur == self.sym(f"GUI::{name}"):
                     return name
@@ -470,6 +471,10 @@ class Target:
 
     def goto_player(self):
         """Remote: wake the OLED and get to the player screen (main menu, item 0)."""
+        # An OTA result ("Chyba aktualizace"/"Instalace") stays up kResultMs = 10 s (lib/bootloader fw_progress.hpp) and takes no keys
+        deadline = time.monotonic() + 15
+        while self.screen_name() == "fwProgressScreen" and time.monotonic() < deadline:
+            time.sleep(0.2)
         for _ in range(5):
             name = self.screen_name()
             if name == "playerScreen" and not self.oled_sleeping():

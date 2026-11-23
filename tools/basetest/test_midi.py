@@ -105,7 +105,10 @@ def stream(pr, count=600, period=0.010, during=None):
 def check_stream(sent, got, times):
     got_f = [g for g in got if g[0] == 0x90]
     assert got_f == sent, f"lost/changed: sent {len(sent)}, got {len(got_f)}"
-    gaps = [b - a for a, b in zip(times, times[1:])]
+    # gaps between the streamed notes only: a link loss makes the base send a panic (CC 123/120) burst that arrives before the
+    # 0.2 s settle in stream(), which would otherwise count as a ~200 ms "gap" (2026-11-23, looptime showed the loop never stalled)
+    t_notes = [t for g, t in zip(got, times) if g[0] == 0x90]
+    gaps = [b - a for a, b in zip(t_notes, t_notes[1:])]
     worst = max(gaps)
     print(f"\nmax gap {worst * 1000:.1f} ms, mean {sum(gaps) / len(gaps) * 1000:.2f} ms over {len(gaps)} gaps")
     assert worst < MAX_GAP, f"max inter-arrival gap {worst * 1000:.1f} ms >= {MAX_GAP * 1000:.0f} ms"
