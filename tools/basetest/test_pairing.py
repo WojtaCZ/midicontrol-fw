@@ -1,6 +1,7 @@
 """First pairing of the base with the remote (menu "Sparovat ovladac" -> Bluetooth::startPairing): scan, connecting only to
 MIDIControlRemote, bond (Just Works: base and remote SA,2 NoInputNoOutput, see CLAUDE.md), reconnection after a
-base reset and a timeout without the remote.
+base reset and a timeout without the remote. Since D3 (2026-11-24) a new pairing also needs the remote's pairing window and
+Ano on both devices (conftest.pair_confirmed); a bonded reconnect needs neither.
 No logic analyser (owner 2026-11-22): asserts use only state the STM32s read."""
 
 import time
@@ -8,19 +9,13 @@ import time
 import pytest
 
 import dbg
-from conftest import remote_alive, wait_until
+from conftest import forget_remote, pair_confirmed, remote_alive, wait_until
 
 REMOTE_ADDR = "40843204625F"
 SETTINGS_ADDR = 0x0801F800
 
 
-def disconnect_and_forget(base):
-    """The base forgets all bonds (U,Z) and disconnects if connected. Order U,Z -> K,1: an auto-reconnect ("C" to the
-    last bonded device) right after the disconnect would succeed if the bond still existed."""
-    base.call('Bluetooth::queueCommand("U,Z")')
-    if base.read_bool("Bluetooth::_connected"):
-        base.call('Bluetooth::queueCommand("K,1")')
-    wait_until(lambda: not base.read_bool("Bluetooth::_connected"), 10, what="base disconnected")
+disconnect_and_forget = forget_remote
 
 
 def remote_waits_for_base(remote) -> bool:
@@ -38,8 +33,7 @@ def pair(base, timeout=20):
 
 
 def test_pairing_finds_remote_and_bonds(base, remote):
-    disconnect_and_forget(base)
-    state = pair(base)
+    state = pair_confirmed(base, remote)
     assert state == dbg.PAIR_DONE, f"pairing state {state}"
     assert base.read_bool("Bluetooth::_bonded")
     # bond + stream open take ~6 s after PAIR_DONE (bench 2026-11-22)
@@ -80,6 +74,6 @@ def test_pairing_timeout_no_remote(base, remote_probe):
         remote.hold_ble_reset(False)
     # restore the bond for the other tests (after the reset is released the remote starts advertising again)
     time.sleep(3)
-    state = pair(base, timeout=20)
+    state = pair_confirmed(base, remote)
     assert state == dbg.PAIR_DONE, f"re-pairing state {state}"
     wait_until(lambda: remote_alive(base), 15, interval=0.5, what="remote alive after re-pairing")

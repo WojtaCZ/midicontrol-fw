@@ -346,6 +346,11 @@ class Target:
             parts = line.split(" ", 2)
             if len(parts) == 3 and parts[1] in "tTwW" and parts[2].startswith(name + "(") and "[clone" not in parts[2]:
                 return parts[2]
+        # LTO may keep only a renamed copy ("[clone .lto_priv.0]") of a static function, e.g. GUI::onPairConfirmResult
+        for line in nm.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) == 3 and parts[1] in "tTwW" and parts[2].startswith(name + "(") and "[clone .lto_priv" in parts[2]:
+                return parts[2]
         raise KeyError(f"function {name} not in the symbol table of {self.elf} (inlined/removed?)")
 
     def has_function(self, name: str) -> bool:

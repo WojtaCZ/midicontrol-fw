@@ -108,6 +108,19 @@ static void pairingTimeout() {
 // (settings remote address, peer accepted) is stored only after the remote answered our protocol AND the user pressed Ano here and on the
 // remote with the same code. Ne, timeout or a silent peer: K,1 + U,Z (the module forgets the bond) and nothing is stored.
 // Bonded reconnects (no pairing in progress) skip all of this.
+// Outbox: sendProtocolPacket refuses a frame while the BLE engine is busy (base: not idle right after %SECURED%; remote: not
+// in data mode yet). A frame sent once and dropped stalled the handshake until the 5 s reply timeout (bench 2026-11-24), so
+// PAIR_* frames wait here in order and are retried every loop pass while the session runs.
+static constexpr uint8_t PAIR_OUTBOX = 2;
+static protocol::Packet s_out[PAIR_OUTBOX];
+static uint8_t s_outN = 0;
+static void pairFlush() {
+	while (s_outN > 0 && Bluetooth::sendProtocolPacket(s_out[0])) {
+		for (uint8_t i = 1; i < s_outN; ++i) s_out[i - 1] = s_out[i];
+		--s_outN;
+	}
+}
+
 static void pairSend(protocol::MsgType type, const uint8_t *payload, size_t len) {
 	protocol::Packet pkt{};
 	pkt.source = protocol::ADDR_BASE;
@@ -116,7 +129,8 @@ static void pairSend(protocol::MsgType type, const uint8_t *payload, size_t len)
 	pkt.msgType = type;
 	std::memcpy(pkt.payload, payload, len);
 	pkt.payloadLen = static_cast<uint8_t>(len);
-	Bluetooth::sendProtocolPacket(pkt);
+	if (s_outN < PAIR_OUTBOX) s_out[s_outN++] = pkt;
+	pairFlush();
 }
 
 static void pairStep(protocol::pairing::Step step) {
@@ -157,6 +171,7 @@ static void pairStep(protocol::pairing::Step step) {
 static void pairStart() {
 	uint8_t nonce[protocol::pairing::NONCE_LEN];
 	protocol::pairing::makeNonce(stmcpp::systick::getTicks(), *reinterpret_cast<const volatile uint32_t *>(UID_BASE) ^ *reinterpret_cast<const volatile uint32_t *>(UID_BASE + 4), nonce);
+	s_outN = 0;
 	s_pair.start(protocol::pairing::Role::INITIATOR, nonce, stmcpp::systick::getTicks());
 	Bluetooth::setPairPending(true);
 	uint8_t buf[protocol::pairing::CONFIRM_SIZE];
@@ -172,6 +187,7 @@ static void pairAnswer(bool accept) {
 }
 
 static void pairProcess() {
+	pairFlush(); // also lets a final PAIR_CONFIRM(no) out after FAIL; pairStart() clears leftovers
 	if (!s_pair.active()) return;
 	protocol::Packet pkt;
 	while (Bluetooth::getPairPacket(pkt)) {
@@ -183,6 +199,7 @@ static void pairProcess() {
 
 // The link ended during the handshake: nothing was stored, the module may still hold the bond
 static bool pairLinkDown() {
+	s_outN = 0; // a leftover frame must not reach the next link
 	if (!s_pair.active()) return false;
 	s_pair.reset();
 	GUI::closePairingConfirm();
@@ -471,6 +488,7 @@ extern "C" int main(void) {
 	GUI::setRecordCallback(onRecordRequest);
 	GUI::setRequestSongListCallback(onRequestSongList);
 	GUI::setPlaySongCallback(onPlaySongSelected);
+	GUI::setPairAnswerHandler(pairAnswer); // D3: Ano / Ne on the pairing code (missing until the bench run 2026-11-24: the base answer was lost)
 
 	// Splash straight to the display (before the blocking BLE initialization); the 3 s are counted from when it is shown
 	GUI::render();

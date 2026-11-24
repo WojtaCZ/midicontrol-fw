@@ -12,7 +12,8 @@ import time
 
 import pytest
 
-from conftest import remote_alive, wait_until
+import dbg
+from conftest import pair_confirmed, remote_alive, wait_until
 
 pytestmark = pytest.mark.hw
 
@@ -80,8 +81,8 @@ def paired(base, remote_probe, guard):
     """The remote is bonded to the bench base and the link is up (pairs it through the window when not)."""
     remote = remote_probe
     if state(remote, guard)["bond"] != BASE_MAC:
-        remote.write(remote.sym("Bluetooth::pairRequest"), b"\x01")
-        wait_until(lambda: state(remote, guard)["bond"] == BASE_MAC, 70.0, what="pairing window stores the bench base")
+        assert pair_confirmed(base, remote) == dbg.PAIR_DONE, "pairing through the window (D3: Ano on both)"
+        wait_until(lambda: state(remote, guard)["bond"] == BASE_MAC, 10.0, what="pairing window stores the bench base")
     wait_until(lambda: linked_to_base(base, remote, guard), LINK_S, what="remote linked to the bonded base")
     return remote
 
@@ -145,12 +146,14 @@ def test_other_central_is_refused(base, paired, guard):
 
 def test_pairing_window_stores_the_base(base, paired, guard):
     """Gap 7: Nastaveni -> "Sparovat zakl." opens a 60 s window (pairRequest = the menu item), drops the current link and
-    clears the accept list; the first central that connects and secures becomes the bond and is saved."""
+    clears the accept list; the first central that connects, secures and passes the D3 handshake (base "Sparovat ovladac",
+    Ano on both) becomes the bond and is saved."""
     remote = paired
     remote.write(guard + G_BOND, b"000000000002")  # proves the window really stores the new base
     remote.write(remote.sym("Bluetooth::pairRequest"), b"\x01")
-    wait_until(lambda: state(remote, guard)["window"] or state(remote, guard)["bond"] == BASE_MAC, 5.0, what="window open")
-    wait_until(lambda: state(remote, guard)["bond"] == BASE_MAC, 70.0, what="window stores the bench base")
+    wait_until(lambda: state(remote, guard)["window"], 5.0, interval=0.05, what="window open")
+    assert pair_confirmed(base, remote, open_window=False) == dbg.PAIR_DONE
+    wait_until(lambda: state(remote, guard)["bond"] == BASE_MAC, 10.0, what="window stores the bench base")
     s = state(remote, guard)
     assert not s["window"], "one base per window"
     assert stored_bond(remote) == BASE_MAC
