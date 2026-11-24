@@ -1,0 +1,43 @@
+# Item 17: one error screen over ANY screen; 5 s or a key; the cause is the big word
+tick 3000
+# NAK: "Chyba" + the reason
+event fail PLAY_SONG nak PC zaneprazdneno
+expect screen error
+expect text Chyba
+expect text PC zaneprazdneno
+tick 5100
+expect screen main
+# a single timeout: "Bez odpovedi / Zkus znovu"
+event fail PLAY_SONG timeout
+expect scrolled Bez odpovedi
+expect text Zkus znovu
+key enter
+expect screen main
+# a second timeout within 10 s: connection lost
+tick 3000
+event fail PLAY_SONG timeout
+expect screen error
+expect text Odpojeno
+expect text Cekam na PC
+key enter
+# more than 10 s after the last one it is a single timeout again
+tick 11000
+event fail PLAY_SONG timeout
+expect scrolled Bez odpovedi
+key enter
+# the PC is already gone: connection lost at once
+tick 11000
+state pc=0
+event fail PLAY_SONG timeout
+expect text Odpojeno
+key enter
+state pc=1
+# over the player, the player is still there afterwards
+tick 11000
+event playing 406A
+expect screen nowplaying
+event fail PLAY_SONG nak Pisen nenalezena
+expect screen error
+expect text Chyba
+key enter
+expect screen nowplaying

@@ -5,9 +5,10 @@ tick 600
 event songs 401;403
 key enter
 expect screen main
-event fail PLAY_SONG PC nedostupne
-expect screen songs_loading
-expect text PC nedostup
+event fail PLAY_SONG nak PC nedostupne
+expect screen error
+expect text Chyba
+expect text PC nedostupne
 expect scrolled PC nedostupne
 key enter
 expect screen main

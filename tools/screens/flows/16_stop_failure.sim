@@ -1,6 +1,10 @@
-# B10: a failed STOP_SONG is reported on the playing screen
+# Item 17: a STOP_SONG that timed out over the player shows "Odpojeno / Cekam na PC" (any screen, 5 s or a key)
 tick 3000
 event playing 406A
 key enter
-event fail STOP_SONG Bez odpovedi
-expect text Bez odpovedi
+event fail STOP_SONG timeout
+expect screen error
+expect text Odpojeno
+expect text Cekam na PC
+key enter
+expect screen nowplaying

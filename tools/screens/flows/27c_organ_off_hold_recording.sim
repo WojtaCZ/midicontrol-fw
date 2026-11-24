@@ -8,5 +8,8 @@ expect text Nahravam
 event poweroff
 expect screen hold
 hold 3000
-expect screen recording
+expect screen abort
+expect text Nahravani
 expect var power=0
+tick 5100
+expect screen main

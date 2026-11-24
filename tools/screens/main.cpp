@@ -184,10 +184,25 @@ int main(int argc, char **argv) {
 
 	// C12: hold-to-confirm screen (organ off while playing/recording), same look as the remote power-off hold
 	GUI::checkboxPower().invoke();
-	GUI::showHold("Vypnuti varhan", "Drzte 3 s", []() {});
+	GUI::showHold("Nouzove stop", "Drzte 3 s", []() {});
 	GUI::buttonHold(true, 1500);
-	snap("organ_off_hold", "Hold the encoder button 3 s to switch the organ off (bar at 50 %)");
+	snap("organ_off_hold", "Hold the encoder button 3 s = emergency stop (bar at 50 %); the remote MF hold looks the same");
 	GUI::hideHold();
+
+	// Item 12: emergency abort, 5 s or a key, then the main menu
+	GUI::abortAll(true);
+	snap("abort_organ", "Emergency stop while the organ was on");
+	key(E::Enter);
+	// Item 17: error screens (any screen, 5 s or a key)
+	GUI::requestFailed(protocol::MsgType::PLAY_SONG, routercore::Failure::Nak, "PC zaneprazdneno");
+	snap("error_nak", "Request refused: Chyba + the reason");
+	key(E::Enter);
+	GUI::requestFailed(protocol::MsgType::PLAY_SONG, routercore::Failure::NoAnswer, "");
+	snap("error_timeout", "Request without answer: Bez odpovedi / Zkus znovu");
+	key(E::Enter);
+	GUI::requestFailed(protocol::MsgType::PLAY_SONG, routercore::Failure::NoAnswer, "");
+	snap("error_connlost", "Second timeout within 10 s: Odpojeno / Cekam na PC");
+	key(E::Enter);
 
 	GUI::showFwProgress("Prenos do ovladace", 42);
 	snap("fw_remote_update", "Remote firmware update relayed");

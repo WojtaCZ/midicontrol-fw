@@ -20,6 +20,9 @@ namespace router {
 	// source and packetId are filled in by the router. Returns false when the queue is full or the destination is unreachable.
 	bool sendReliable(protocol::Packet &pkt);
 
+	// Owner item 12: emergency abort (notes off, organ off, GUI cleared); forwardToPc sends 0x15 on to the PC.
+	void emergencyAbort(bool forwardToPc);
+
 	bool isPcAlive();
 	bool isRemoteAlive();
 
