@@ -32,6 +32,7 @@ set(GUI_SOURCES
 	${FW_LIB_DIR}/ui/src/paragraph_screen.cpp
 	${FW_LIB_DIR}/ui/src/progress.cpp
 	${FW_LIB_DIR}/ui/src/splash_screen.cpp
+	${FW_LIB_DIR}/ui/src/timed_splash.cpp
 	${FW_LIB_DIR}/gfx/src/font_7x10.cpp
 	${FW_LIB_DIR}/gfx/src/font_11x18.cpp
 	${FW_LIB_DIR}/gfx/src/font_16x26.cpp
