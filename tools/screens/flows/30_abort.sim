@@ -1,0 +1,30 @@
+# Item 12: emergency abort on the base (remote MF hold): "Preruseno" for 5 s, then the main menu; works from any screen
+tick 3000
+# idle, organ on
+state power=1
+event abort organ
+expect screen abort
+expect text Preruseno
+expect text Varhany vypnuty
+tick 4500
+expect screen abort
+tick 600
+expect screen main
+# over the player: the player is gone afterwards
+event playing 406A
+expect screen nowplaying
+event abort
+expect screen abort
+expect text Prehravani
+expect notext Varhany vypnuty
+tick 5100
+expect screen main
+# recording
+key down
+key enter
+event recording on
+expect text Nahravam
+event abort
+expect text Nahravani
+key down
+expect screen main

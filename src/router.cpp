@@ -222,7 +222,26 @@ namespace router {
 		const char *text = routercore::failureText(f, reason);
 		Debug::log(Debug::Level::WARNING, "router", "request type 0x%02x failed: %s", static_cast<unsigned>(type), text);
 		if (type == MsgType::RECORD_SONG) GUI::recordingFailed(f, reason);
-		GUI::requestFailed(type, text);
+		GUI::requestFailed(type, f, text);
+	}
+
+	// Owner item 12: the remote's hold (or the PC's own echo) ends everything. The base stops its own state, shows "Preruseno" and,
+	// when the order came from the remote, forwards it once to the PC (reliable; a NAK from an old PC is ignored by reportFailure).
+	void emergencyAbort(bool forwardToPc) {
+		const bool organWasOn = base::current::isEnabled();
+		midi::sendStuckNoteCleanup();
+		base::current::disable();
+		GUI::syncPowerCheckbox();
+		display::clearIfOwn();
+		GUI::abortAll(organWasOn);
+		Debug::log(Debug::Level::WARNING, "router", "emergency abort: all notes off, organ off, playing/recording cleared");
+		if (forwardToPc && isPcAlive()) {
+			Packet fwd = {};
+			fwd.dest = protocol::ADDR_PC;
+			fwd.msgType = MsgType::EMERGENCY_OFF;
+			fwd.payloadLen = 0;
+			sendReliable(fwd);
+		}
 	}
 
 	bool sendReliable(Packet &pkt) {
@@ -429,14 +448,11 @@ namespace router {
 			}
 
 			case MsgType::EMERGENCY_OFF:
-				// D14: the remote's MF key was held for 3 s. The base acts alone (the PC may be stalled or gone): All Notes Off
-				// on DIN OUT and the organ relay off, as for a lost PC. The PC learns it from the organ bit of the next STATUS_RESP.
+				// Owner item 12: the remote's MF key was held for 3 s = emergency abort. The base acts alone (the PC may be stalled or gone):
+				// notes off, organ off, own play/record state cleared, "Preruseno" screen; then it forwards 0x15 to the PC.
 				// A repeat is ACKed by the dedup above and not executed again.
 				if (ack) sendAck(pkt, via);
-				midi::sendStuckNoteCleanup();
-				base::current::disable();
-				GUI::syncPowerCheckbox();
-				Debug::log(Debug::Level::WARNING, "router", "emergency off from 0x%02x: all notes off, organ power off", pkt.source);
+				emergencyAbort(pkt.source != protocol::ADDR_PC);
 				break;
 
 			case MsgType::NOW_PLAYING_INFO:

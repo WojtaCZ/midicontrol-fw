@@ -448,7 +448,7 @@ TEST(PM1, FailureTexts) {
 	EXPECT_STREQ(failureText(Failure::Nak, NakReason::NOT_PLAYING), "Nehraje se");
 	EXPECT_STREQ(failureText(Failure::Nak, NakReason::INVALID_PAYLOAD), "Odmitnuto");
 	EXPECT_STREQ(failureText(Failure::Nak, NakReason::UNKNOWN_MSG), "Odmitnuto");
-	EXPECT_STREQ(failureText(Failure::NoAnswer), "PC neodpovida");
+	EXPECT_STREQ(failureText(Failure::NoAnswer), "Bez odpovedi");
 	EXPECT_STREQ(failureText(Failure::NotSent), "Neodeslano");
 	// one 7x10 line on the 128 px OLED, plain ASCII (no diacritics)
 	for (auto f : {Failure::Nak, Failure::NoAnswer, Failure::NotSent})

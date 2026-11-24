@@ -102,8 +102,8 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 - C9 DONE in code 2026-11-23: 3 ECC repairs, then the bootloader stays in update mode (lib/bootloader ac1db5d, 4c584e7). Bench: only that a normal boot still reaches the app (TAMP BKP3R reads 0xB0CE0000 after 10 s).
 - C10 DONE in code 2026-11-23: bootloader bump ac1db5d, protocol e63f2f5, BP-12 screen "Chybi firmware / Pripojte PC", diag 19 STAGE_CLEAR_FAILED (4c584e7). Bench: flash only the bootloader (`mcu flashBootloader`), check the screen, then update over USB.
 - C11 DONE 2026-11-22: short song codes right-aligned with blanks (47ef1fc).
-- C12 DONE 2026-11-23: organ off while playing/recording = 3 s hold screen like the remote power-off, owner item 12 (708c440, 88b6826).
-- C13 DONE 2026-11-22/23: base silences the organ on PC keepalive loss (SYS-PC-03, 6 s; e212c5c); remote EMERGENCY_OFF 0x15 handler (b8e04c4). Bench: stop the PC process during playback (DIN silent, SSR off within 6 s); hold MF 3 s on the remote.
+- C12 DONE 2026-11-23, FOLDED into the emergency abort 2026-11-24 (owner item 12): the base hold ("Nouzove stop" / "Drzte 3 s") now ends in `router::emergencyAbort` like the remote MF hold (notes off, organ off, own play/record state cleared, "Preruseno" 5 s, main menu, 0x15 forwarded to the PC). Bench: hold the base button while playing, and MF 3 s on the remote; the PC must stop and send SIGNAL_STOPPED.
+- C13 DONE 2026-11-22/23: base silences the organ on PC keepalive loss (SYS-PC-03, 6 s; e212c5c); remote EMERGENCY_OFF 0x15 handler (b8e04c4); 2026-11-24: the base also forwards 0x15 reliably to the PC and shows "Preruseno" (branch backlog/abort-1124). Bench: stop the PC process during playback (DIN silent, SSR off within 6 s); hold MF 3 s on the remote.
 - C18 DONE 2026-11-23: long press of the base Enter leaves the song list, Zpet row stays (88b6826). Bench: hold the button in the song list.
 - E3 DONE 2026-11-22: per-screen timing flows (e212c5c).
 - Item 8 fault audit DONE 2026-11-23: fresh-stack capture, NMI + STACK_OVERFLOW kinds, INFO FAULT_LAST (0d1831d; remote d0efa06). Bench: force stack overflow and NMI on base and remote, read FAULT_LAST from the PC, provoke a remote HardFault and find the DIAG record after reboot.
@@ -120,3 +120,5 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 - Q3-11: capture the RNBD350 module UART after a connect (stuck command mode, see the remote's open item "stuck cmd mode"), and a long old-set batch.
 - DIN probe (postponed since 2026-11-13): U14.17, DIN pin 4 voltage.
 - Open consistency: owner 2026-11-23 item 17 (shared error / connection-lost screen, Timeout = lost connection?): proposal in plans/2026-11-23-owner-answers.md, no code until the owner approves.
+
+- Item 17 DONE in code 2026-11-24 (backlog/abort-1124): one timed error screen over any screen ("Odpojeno"/"Bez odpovedi"/"Chyba", 5 s or a key, ui::LinkErrorPolicy); the base "PC neodpovida" wording is gone. TimedSplash (lib/ui) also drives the abort notice. Bench: unplug the PC during a song list request and a STOP, check the wording and the 10 s rule.

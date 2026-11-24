@@ -74,7 +74,9 @@ namespace GUI {
 
     // PM-1/UI2-1: a request the base sent to the PC (GET_SONG_LIST, PLAY_SONG, STOP_SONG) was NAKed,
     // never answered or not sent; text from routercore::failureText. Other types are ignored.
-    void requestFailed(protocol::MsgType type, const char* text);
+    void requestFailed(protocol::MsgType type, routercore::Failure f, const char* text);
+    // Owner item 12: emergency abort. Clears the playing/recording state and the stack, shows "Preruseno" for 5 s or a key, then the main menu.
+    void abortAll(bool organWasOn);
 
     // A7: recording ("Nahraj"). recordingSignal: SIGNAL_RECORDING (true) / SIGNAL_STOPPED (false) seen by the router;
     // recordingFailed: RECORD_SONG was NAKed, unanswered or not sent. The state is recording::Machine.

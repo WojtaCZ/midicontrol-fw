@@ -5,6 +5,7 @@
 #include "bluetooth.hpp"
 #include "display.hpp"
 #include "router.hpp"
+#include "menu.hpp"
 #include "settings.hpp"
 #include <stmcpp/systick.hpp>
 
@@ -52,6 +53,12 @@ namespace display {
 namespace router {
 	bool isPcAlive() { return host::state.pcAlive; }
 	bool isRemoteAlive() { return host::state.connected; }
+	void emergencyAbort(bool) {
+		const bool organWasOn = host::state.power;
+		host::state.power = false;
+		host::state.aborts++;
+		GUI::abortAll(organWasOn);
+	}
 }
 
 namespace settings {

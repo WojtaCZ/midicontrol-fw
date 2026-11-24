@@ -17,6 +17,8 @@
 #include "router.hpp"
 
 #include <ui/progress_screen.hpp>
+#include <ui/timed_splash.hpp>
+#include <ui/link_error.hpp>
 #include <ui/list.hpp>
 #include <ui/text_scroll.hpp>
 #include <stmcpp/systick.hpp>
@@ -495,6 +497,24 @@ static void onSongSelected(ui::MenuItem* item, void* userData) {
 static ui::ProgressScreen fwProgressScreen("Aktualizace", "");
 static bool fwPushed = false; // the screen is in the navigator stack (always as the only one above the main menu)
 
+// ── Timed notices (5 s or any key): the emergency abort (owner item 12) and request errors (owner item 17) ──
+// Both use the "Odpojeno" splash layout (empty title row, the big word = cause, a small line = what to do/why) with the
+// status icons. The error screen overlays ANY screen (also the player) and only pops itself; the abort splash resets the
+// stack to the main menu when it closes.
+static constexpr uint32_t NOTICE_MS = 5000;
+static ui::TimedSplash abortScreen(nav, &mainScreen, NOTICE_MS, "", "Preruseno", "Nouzove stop");
+static ui::TimedSplash errorScreen(nav, nullptr, NOTICE_MS, "", "Chyba", "");
+static ui::LinkErrorPolicy _linkPolicy;
+
+// Shows a timed notice on top of whatever is there; a repeat while it is already on top only re-arms the timer.
+static void showNotice(ui::TimedSplash& s) {
+    if (fwPushed) return; // the update screen owns the display
+    if (nav.current() == &s) s.restart();
+    else nav.push(&s);
+    Oled::wakeupCallback();
+    nav.forceRender();
+}
+
 // ── Callbacks ─────────────────────────────────────────────────────────
 
 static void playCallback(ui::MenuItem* item, void* userData) {
@@ -626,10 +646,11 @@ static void recordCallback(ui::MenuItem* item, void* userData) {
 }
 
 // C12 / Q2-29b (owner 2026-11-23): switching the organ off while a song plays or a recording runs needs a 3 s hold of
-// the encoder button on the same hold screen as the remote's power off (inc/hold_screen.hpp); switching on, or off when
-// idle, never asks. The checkbox follows the real state either way.
+// the encoder button on the same hold screen as the remote's emergency stop (inc/hold_screen.hpp); switching on, or off when
+// idle, never asks. Owner 2026-11-24 (item 12): the completed hold IS the emergency abort (router::emergencyAbort: notes off,
+// organ off, playing/recording state cleared, the PC told to stop), the same as the remote's MF hold.
 static void powerOffHeld() {
-    base::current::disable();
+    router::emergencyAbort(true);
     settingsItems[1].setChecked(base::current::isEnabled());
 }
 
@@ -639,7 +660,7 @@ static void powerCallback(ui::MenuItem* item, void* userData) {
         const bool busy = _nowPlayingActive || _recording.state() != recording::State::Idle;
         if (busy) {
             if (item) item->setChecked(true); // stays on until the hold completes
-            GUI::showHold("Vypnuti varhan", "Drzte 3 s", powerOffHeld);
+            GUI::showHold("Nouzove stop", "Drzte 3 s", powerOffHeld);
             return;
         }
         base::current::disable();
@@ -756,6 +777,9 @@ void render() {
     syncNoPcScreen();
 
     if (_nowPlayingActive && nowPlayingScreen.expired()) nowPlayingScreen.leave();
+    // A notice that covered the player or the recording screen kept them in the stack when their state ended meanwhile
+    if (!_nowPlayingActive && nav.current() == &nowPlayingScreen) nav.pop();
+    if (!_recordShown && nav.current() == &recordScreen) nav.pop();
 
     // Bluetooth info: value refresh; the display does not sleep while the screen is open (changes are visible)
     if (nav.current() == &bluetoothScreen) {
@@ -773,7 +797,7 @@ void render() {
     // Status icons on the menu screens and on the now playing screen (and on the noPcScreen overlay; not on other SplashScreens, ParagraphScreen, ConfirmScreen)
     ui::Screen* cur = nav.current();
 
-    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen || cur == &nowPlayingScreen || cur == &noPcScreen);
+    bool showStatusIcons = (cur == &mainScreen || cur == &settingsScreen || cur == &serviceScreen || cur == &songListScreen || cur == &nowPlayingScreen || cur == &noPcScreen || cur == &errorScreen || cur == &abortScreen);
 
     if (showStatusIcons && Bluetooth::isConnected()) {
         int iconX = theme.displayOffsetX + theme.displayWidth - 14;
@@ -1014,6 +1038,30 @@ void dismissNowPlaying() {
     }
 }
 
+void abortAll(bool organWasOn) {
+    const bool playing = _nowPlayingActive;
+    const bool recording = _recording.state() != recording::State::Idle;
+    // Same state reset as the update screen: everything the stack reset removes loses its flag
+    _win.abort();
+    _loadingScreenShown = false;
+    songListTimeoutScheduler.stop();
+    songListDelayScheduler.stop();
+    _pairStatusShown = false;
+    _nowPlayingActive = false;
+    _recording.pcLost(); // nothing records any more and no SIGNAL_STOPPED is awaited
+    _recordRefused = false;
+    _recordShown = false;
+    _holdShown = false;
+    _holdDone = nullptr;
+    if (fwPushed) return; // the update screen stays
+    abortScreen.setComment(playing ? "Prehravani" : recording ? "Nahravani" : "Nouzove stop");
+    abortScreen.setComment2(organWasOn ? "Varhany vypnuty" : nullptr);
+    nav.reset(&mainScreen);
+    nav.push(&abortScreen);
+    Oled::wakeupCallback();
+    nav.forceRender();
+}
+
 void showFwProgress(const char* hint, uint8_t percent) {
     fwProgressScreen.setHint(hint);
     fwProgressScreen.setPercent(percent);
@@ -1056,20 +1104,46 @@ void setNowPlayingAnchor(const char* label) {
     nav.forceRender();
 }
 
-void requestFailed(protocol::MsgType type, const char* text) {
+// Item 17 (owner 2026-11-23): one error screen for every failed request, over ANY screen, 5 s or a key.
+// Big word = the cause, small line = what to do: "Odpojeno / Cekam na PC" (a 2nd timeout within 10 s, the PC already gone, or
+// a STOP that timed out), "Bez odpovedi / Zkus znovu" (a single timeout), "Chyba / <NAK reason>".
+static void closeLoadingScreen() {
+    if (!_loadingScreenShown) return;
+    _loadingScreenShown = false;
+    if (nav.current() == &songListLoadingScreen) nav.pop();
+}
+
+static void showRequestError(protocol::MsgType type, routercore::Failure f, const char* text) {
+    ui::LinkVerdict v = ui::LinkVerdict::Error;
+    if (f == routercore::Failure::NoAnswer) {
+        v = _linkPolicy.classify(ui::LinkFailure::Timeout, isPcAlive(), type == protocol::MsgType::STOP_SONG,
+                                 static_cast<uint32_t>(stmcpp::systick::getTicks()));
+    }
+    switch (v) {
+        case ui::LinkVerdict::ConnLost:
+            errorScreen.setSubtitle("Odpojeno");
+            errorScreen.setComment("Cekam na PC");
+            break;
+        case ui::LinkVerdict::NoResponse:
+            errorScreen.setSubtitle("Bez odpovedi");
+            errorScreen.setComment("Zkus znovu");
+            break;
+        case ui::LinkVerdict::Error:
+            errorScreen.setSubtitle("Chyba");
+            errorScreen.setComment(text);
+            break;
+    }
+    showNotice(errorScreen);
+}
+
+void requestFailed(protocol::MsgType type, routercore::Failure f, const char* text) {
     switch (type) {
         case protocol::MsgType::GET_SONG_LIST:
             if (_win.state() == SongListState::WaitingFirst) {
-                // the reason instead of the generic "PC neodpovida" timeout
                 _win.abort();
                 songListDelayScheduler.stop();
                 songListTimeoutScheduler.stop();
-                songListLoadingScreen.setSubtitle(text);
-                songListLoadingScreen.setComment("");
-                if (!_loadingScreenShown) {
-                    nav.push(&songListLoadingScreen);
-                    _loadingScreenShown = true;
-                }
+                closeLoadingScreen();
             } else if (_win.state() == SongListState::WaitingMore) {
                 _win.abort(); // the next scroll asks again
                 songListTimeoutScheduler.stop();
@@ -1080,20 +1154,15 @@ void requestFailed(protocol::MsgType type, const char* text) {
             break;
         case protocol::MsgType::PLAY_SONG:
             if (fwPushed) return;
-            // same splash as the song list; its dismiss only pops (the list state is Idle here)
-            songListLoadingScreen.setSubtitle(text);
-            songListLoadingScreen.setComment("");
-            if (nav.current() != &songListLoadingScreen) nav.push(&songListLoadingScreen);
             break;
         case protocol::MsgType::STOP_SONG:
             if (!_nowPlayingActive) return;
-            nowPlayingScreen.stopFailed(text);
+            nowPlayingScreen.stopFailed(text); // the player shows "Prehravam" again with the reason
             break;
         default:
             return;
     }
-    Oled::wakeupCallback();
-    nav.forceRender();
+    showRequestError(type, f, text);
 }
 
 void syncPowerCheckbox() {
@@ -1232,20 +1301,13 @@ void songListDelayShow() {
 // Called from the timeout scheduler (3s)
 void songListTimeout() {
     if (_win.state() == SongListState::WaitingFirst) {
+        // Same screen as a request the router gave up on (the router's retries usually report first, 1.5 s)
         songListDelayScheduler.stop();
-        if (!_loadingScreenShown) {
-            songListLoadingScreen.setSubtitle("PC neodpovida");
-            songListLoadingScreen.setComment("");
-            nav.push(&songListLoadingScreen);
-            _loadingScreenShown = true;
-        } else {
-            songListLoadingScreen.setSubtitle("PC neodpovida");
-            songListLoadingScreen.setComment("");
-        }
-        nav.forceRender();
+        _win.abort();
+        closeLoadingScreen();
+        showRequestError(protocol::MsgType::GET_SONG_LIST, routercore::Failure::NoAnswer, "");
     } else if (_win.state() == SongListState::WaitingMore) {
         // A9: no answer for the next/previous window: back to Idle, the next scroll asks again.
-        // TODO(D12): visible feedback / one-action Back while waiting.
         _win.abort();
     }
 }

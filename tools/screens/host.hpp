@@ -17,6 +17,7 @@ namespace host {
 		uint16_t	song		= 406;
 		uint8_t		verse		= 2;
 		char		letter		= 'A';
+		uint8_t		aborts		= 0; // router::emergencyAbort calls (each forwards 0x15 to the PC when it is alive)
 		uint8_t		requests	= 0; // song list requests made by the GUI
 		bool		sleeping	= false; // OLED off: the first key only wakes (driver sets it after 30 s idle)
 		uint32_t	lastWake	= 0;	 // systick of the last wakeupCallback

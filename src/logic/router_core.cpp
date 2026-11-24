@@ -101,7 +101,7 @@ namespace routercore {
 
 	const char *failureText(Failure f, protocol::NakReason reason) {
 		using protocol::NakReason;
-		if (f == Failure::NoAnswer) return "PC neodpovida";
+		if (f == Failure::NoAnswer) return "Bez odpovedi";
 		if (f == Failure::NotSent) return "Neodeslano"; // retry queue full
 		switch (reason) { // same texts as the remote (player_screen.cpp)
 			case NakReason::NOT_FOUND: return "Pisen nenalezena";

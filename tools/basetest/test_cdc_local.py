@@ -99,8 +99,9 @@ def test_set_current_on_off(quiet, base):
 
 
 def test_emergency_off(quiet, base):
-    # D14: EMERGENCY_OFF is handled by the base alone: ACK, relay off (PA4), the menu checkbox follows, and the next
-    # STATUS_RESP reports the organ as off (normal status path)
+    # D14 / item 12: EMERGENCY_OFF from the remote is an ABORT: ACK, notes off, relay off (PA4), the menu checkbox follows, the
+    # base shows "Preruseno" 5 s and forwards 0x15 to the PC (reliably, its NAK is ignored). Sent from the PC side as here, the
+    # base does not forward it back. The next STATUS_RESP reports the organ as off (normal status path).
     pid = quiet.send_msg(MT.SET_CURRENT, b"\x01")
     assert quiet.recv(1.0, is_reply(MT.ACK, pid)) is not None
     assert base.gpio("A", 4) == 1

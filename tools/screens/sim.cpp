@@ -12,9 +12,9 @@
 //                                             letter, sleeping, power, led, midi
 //   event <name> [args]                       playing <song> | stopped | anchor <label> | songs <a;b;c|-> [more]
 //                                             | songs_delay | songs_timeout | pairing <text> | pairing_key <code> | pairing_close | fw <transfer|install|error> <pct>
-//                                             | fw_end | recording <on|off> | recfail <busy|nosupport|other|none> | pclost | fail <GET_SONG_LIST|PLAY_SONG|STOP_SONG> <text> | sync_power | poweroff
+//                                             | fw_end | recording <on|off> | recfail <busy|nosupport|other|none> | pclost | fail <TYPE> <timeout|nak|notsent> [text] | abort [organ] | pcalive <on|off> | sync_power | poweroff
 //   expect screen <id>                        id: splash main settings service firmware display bluetooth pairing pairkey
-//                                             songs_loading songs nowplaying fwupdate nopc recording hold
+//                                             songs_loading songs nowplaying fwupdate nopc recording hold error abort
 //   expect text <line> | expect notext <line> exact match of one drawn text line (trimmed; a line wider
 //                                             than the display shows its clipped window, as on the OLED)
 //   expect scrolled <line>                    advances time (<= 12 s) until a scrolling line was seen from start to end
@@ -59,6 +59,8 @@ static const char *screenId() {
 	if (c == &recordScreen) return "recording";
 	if (c == &holdScreen) return "hold";
 	if (c == &noPcScreen) return "nopc";
+	if (c == &errorScreen) return "error";
+	if (c == &abortScreen) return "abort";
 	return "unknown";
 }
 
@@ -154,6 +156,7 @@ static std::string getVar(const std::string &k) {
 	if (k == "addverses") return std::to_string(g_addVerses);
 	if (k == "recstarts") return std::to_string(g_recStarts);
 	if (k == "recstops") return std::to_string(g_recStops);
+	if (k == "aborts") return std::to_string(host::state.aborts);
 	if (k == "power") return s.power ? "1" : "0";
 	if (k == "led") return s.ledMaster ? "1" : "0";
 	if (k == "midi") return s.midiRole ? "1" : "0";
@@ -186,14 +189,26 @@ static std::string event(const std::string &name, const std::string &rest) {
 		GUI::showFwProgress(h, static_cast<uint8_t>(std::atoi(b.c_str())));
 	}
 	else if (name == "fw_end") GUI::hideFwProgress();
-	else if (name == "fail") {
+	else if (name == "fail") { // fail <TYPE> <timeout|nak|notsent> [text]  (text = the NAK reason line)
 		protocol::MsgType t;
 		if (a == "GET_SONG_LIST") t = protocol::MsgType::GET_SONG_LIST;
 		else if (a == "PLAY_SONG") t = protocol::MsgType::PLAY_SONG;
 		else if (a == "STOP_SONG") t = protocol::MsgType::STOP_SONG;
-		else return "fail: GET_SONG_LIST|PLAY_SONG|STOP_SONG";
-		GUI::requestFailed(t, (keep[3] = b).c_str());
+		else return "fail: GET_SONG_LIST|PLAY_SONG|STOP_SONG <timeout|nak|notsent> [text]";
+		std::istringstream is2(b);
+		std::string kind, text;
+		is2 >> kind;
+		std::getline(is2, text);
+		keep[3] = trim(text);
+		routercore::Failure f;
+		if (kind == "timeout") f = routercore::Failure::NoAnswer;
+		else if (kind == "nak") f = routercore::Failure::Nak;
+		else if (kind == "notsent") f = routercore::Failure::NotSent;
+		else return "fail kind: timeout|nak|notsent";
+		GUI::requestFailed(t, f, keep[3].c_str());
 	}
+	else if (name == "abort") GUI::abortAll(a == "organ"); // emergency abort from the remote (organ = the relay was on)
+	else if (name == "pcalive") host::state.pcAlive = (a == "on");
 	else if (name == "recording") GUI::recordingSignal(a == "on");
 	else if (name == "pclost") GUI::recordingPcLost();
 	else if (name == "recfail") {

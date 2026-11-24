@@ -5,7 +5,7 @@ event playing 406A
 expect screen nowplaying
 event poweroff
 expect screen hold
-expect text Vypnuti varhan
+expect text Nouzove stop
 expect text Drzte 3 s
 expect var power=1
 # a short press does nothing; releasing early starts the bar over
@@ -26,5 +26,12 @@ hold 2900
 expect screen hold
 expect var power=1
 hold 100
-expect screen nowplaying
+expect screen abort
+expect text Preruseno
+expect text Prehravani
+expect text Varhany vypnuty
 expect var power=0
+expect var aborts=1
+# any key closes it, the main menu follows (stack cleared: no player behind)
+key enter
+expect screen main
