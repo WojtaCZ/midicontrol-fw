@@ -8,6 +8,9 @@
 #include "oled.hpp"
 #include "screenshot.hpp"
 
+#include <boot/oled_frame.hpp> // lib/bootloader: the bootloader draws into this frame type
+#include <ui/progress.hpp>
+
 #include <stmcpp/systick.hpp>
 
 #include <cstdlib>
@@ -227,6 +230,18 @@ int main(int argc, char **argv) {
 	snap("main_unpaired", "Main menu, no remote paired yet");
 	host::state.pcAlive = false;
 	snap("no_pc_unpaired", "PC not connected, no remote paired yet: the overlay carries the hint");
+
+	// Base bootloader screens (not the application GUI): the bootloader renders them with ui::drawProgress into a
+	// boot::oled::Frame (lib/bootloader src/oled.cpp, texts in bootloader/src/main.cpp displayInit). Same code, host frame.
+	{
+		uint8_t			  pixels[boot::oled::Frame::kWidth * boot::oled::Frame::kHeight / 8] = {};
+		boot::oled::Frame frame(pixels);
+		ui::drawProgress(frame, gfx::text::Font_7x10, boot::oled::Frame::kWidth, "Chybi firmware", "Pripojte PC", 0);
+		char file[64];
+		std::snprintf(file, sizeof(file), "%02d_%s", ++counter, "bootloader_no_firmware");
+		ex.save(file, "Base bootloader, no bootable firmware (blank, damaged or ECC safe mode, BP-12): waits for the PC without timeout",
+				128, 64, [&](int x, int y) { return frame.getPixel(x, y) != 0; });
+	}
 
 	ex.writeSheet();
 	ex.writeIndex("MIDIControl base - screens");

@@ -51,7 +51,8 @@ target_include_directories(${t} PRIVATE
 	${FW_LIB_DIR}
 	${FW_LIB_DIR}/ui/inc
 	${FW_LIB_DIR}/gfx/inc
-	${FW_LIB_DIR}/protocol/inc)
+	${FW_LIB_DIR}/protocol/inc
+	${FW_LIB_DIR}/bootloader/inc)
 set_target_properties(${t} PROPERTIES CXX_STANDARD 23)
 target_compile_options(${t} PRIVATE -Wall -Wno-unused-function -Wno-unused-variable)
 endforeach()
