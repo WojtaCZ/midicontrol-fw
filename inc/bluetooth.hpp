@@ -329,6 +329,11 @@ namespace Bluetooth{
     // Can a data frame be sent to the Remote now? (link + transparent UART + accepted peer + data mode)
     bool canSendData();
 
+    // D3 pairing handshake: a peer secured in a user-started pairing is pending, only PAIR_* frames pass (never to the router)
+    void setPairPending(bool pending);
+    bool isPairPending();
+    bool getPairPacket(protocol::Packet &pkt);
+
     // Data receive timestamp
     stmcpp::units::duration getDataReceivedTimestamp();
 

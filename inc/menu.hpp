@@ -54,6 +54,10 @@ namespace GUI {
 
     // Pairing result from the menu ("Sparovano", ...) on the "Parovani" screen, if it is open
     void showPairingResult(const char* text);
+    // D3: the pairing code confirmation (Ano/Ne, starts on Ne); the answer goes to the handler after the dialog closed
+    void showPairingConfirm(uint32_t code);
+    void closePairingConfirm();
+    void setPairAnswerHandler(void (*handler)(bool));
 
     // Show/hide the "Přehrávání" screen
     void showNowPlaying(const char* songName);

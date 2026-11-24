@@ -11,14 +11,14 @@
 //   state <k>=<v>                             pc, connected, ble, remote ("-" = none), display, song, verse,
 //                                             letter, sleeping, power, led, midi
 //   event <name> [args]                       playing <song> | stopped | anchor <label> | songs <a;b;c|-> [more]
-//                                             | songs_delay | songs_timeout | pairing <text> | fw <transfer|install|error> <pct>
+//                                             | songs_delay | songs_timeout | pairing <text> | pairing_key <code> | pairing_close | fw <transfer|install|error> <pct>
 //                                             | fw_end | recording <on|off> | recfail <busy|nosupport|other|none> | pclost | fail <GET_SONG_LIST|PLAY_SONG|STOP_SONG> <text> | sync_power | poweroff
-//   expect screen <id>                        id: splash main settings service firmware display bluetooth pairing
+//   expect screen <id>                        id: splash main settings service firmware display bluetooth pairing pairkey
 //                                             songs_loading songs nowplaying fwupdate nopc recording hold
 //   expect text <line> | expect notext <line> exact match of one drawn text line (trimmed; a line wider
 //                                             than the display shows its clipped window, as on the OLED)
 //   expect scrolled <line>                    advances time (<= 12 s) until a scrolling line was seen from start to end
-//   expect var <k>=<v>                        requests lastOffset played stops addverses recstarts recstops power led midi sleeping
+//   expect var <k>=<v>                        requests lastOffset pair_answer played stops addverses recstarts recstops power led midi sleeping
 // Output: one JSON object per step: step, cmd, screen, text[] (drawn text, top to bottom), frame (FNV-1a of
 // the visible 128x64 pixels), ok.
 
@@ -36,7 +36,7 @@
 namespace GUI {
 using E = ui::InputEvent;
 
-static int		  g_requests = 0, g_lastOffset = -1, g_stops = 0, g_recStarts = 0, g_recStops = 0, g_addVerses = 0;
+static int		  g_pairAnswer = -1, g_requests = 0, g_lastOffset = -1, g_stops = 0, g_recStarts = 0, g_recStops = 0, g_addVerses = 0;
 static std::string g_played;
 
 static stmcpp::scheduler::Scheduler splashSched(3000_ms, [] { GUI::splashAutoDismiss(); }, false, false);
@@ -51,6 +51,7 @@ static const char *screenId() {
 	if (c == &displayScreen) return "display";
 	if (c == &bluetoothScreen) return "bluetooth";
 	if (c == &pairStatusScreen) return "pairing";
+	if (c == &pairingConfirmScreen) return "pairkey";
 	if (c == &songListLoadingScreen) return "songs_loading";
 	if (c == &songListScreen) return "songs";
 	if (c == &nowPlayingScreen) return "nowplaying";
@@ -147,6 +148,7 @@ static std::string getVar(const std::string &k) {
 	auto &s = host::state;
 	if (k == "requests") return std::to_string(g_requests);
 	if (k == "lastOffset") return std::to_string(g_lastOffset);
+	if (k == "pair_answer") return g_pairAnswer == 1 ? "ano" : g_pairAnswer == 0 ? "ne" : "-"; // D3: last answer of the pairing popup
 	if (k == "played") return g_played;
 	if (k == "stops") return std::to_string(g_stops);
 	if (k == "addverses") return std::to_string(g_addVerses);
@@ -176,6 +178,8 @@ static std::string event(const std::string &name, const std::string &rest) {
 	else if (name == "songs_delay") GUI::songListDelayShow();
 	else if (name == "songs_timeout") GUI::songListTimeout();
 	else if (name == "pairing") GUI::showPairingResult((keep[2] = rest).c_str());
+	else if (name == "pairing_key") GUI::showPairingConfirm(static_cast<uint32_t>(std::atol(a.c_str())));
+	else if (name == "pairing_close") GUI::closePairingConfirm();
 	else if (name == "fw") {
 		const char *h = a == "transfer" ? "Prenos do ovladace" : a == "install" ? "Instalace ovladace" : a == "error" ? "Chyba aktualizace" : nullptr;
 		if (!h) return "fw: transfer|install|error";
@@ -215,6 +219,7 @@ static int runScript(const char *path, const char *outPath) {
 	stmcpp::systick::ticks_ = 10000;
 	host::state.lastWake = 10000;
 	GUI::init();
+	GUI::setPairAnswerHandler([](bool a) { g_pairAnswer = a ? 1 : 0; });
 	GUI::setRequestSongListCallback([](uint16_t off) { host::state.requests++; g_requests++; g_lastOffset = off; });
 	GUI::setPlaySongCallback([](const char *n) { g_played = n; });
 	GUI::setStopCallback([] { g_stops++; });

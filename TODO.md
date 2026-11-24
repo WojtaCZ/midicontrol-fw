@@ -33,6 +33,16 @@ read but returned no data") because the base USB CDC disappears, and the run han
 dropping off USB is worth a root cause: next step is a run with base fault/reset-cause readout (`fault::` / RCC_CSR) right
 after the CDC disappears.
 
+## D3 Pairing confirmation on both devices (2026-11-24, code done on backlog/pair-1124, BENCH OPEN)
+The base pairing now ends in a handshake (see CLAUDE.md, Pairing): code shown on base and remote, Ano on both stores the bond; Ne, timeout or a silent peer: `K,1` + `U,Z`, settings untouched. Also `Y` after config/reboot/disconnect (audit B1). Flash BOTH devices (an old remote does not answer `PAIR_REQ`, pairing then fails after 5 s). Already bonded boards stay bonded (a bonded reconnect needs no handshake), no re-pair needed.
+Bench steps:
+1. Pair new: base Nastaveni -> Sparovat ovladac; remote Nastaveni -> Sparovat zakl. Both show `Sparovat? Kod nnnnnn` (same number, cursor on Ne). Left+OK (Ano) on both: base says Sparovano, link reconnects, MIDI/PC path works.
+2. Reject: repeat, Ano on one and Ne on the other (and once with Ne on both, once with no answer for 30 s): base `Zamitnuto`/`Parovani selhalo`, remote `Zamitnuto, znovu`, base settings keep the old remote, link does not stay up.
+3. Bonded reconnect: reset the remote, then the base: reconnects with NO popup on either device.
+4. Power cycle both together and each alone: reconnect without prompt.
+5. Phone check: a phone (nRF Connect) cannot connect to the base at any time (Y) and cannot finish pairing with the remote window (no `Sparovat?` ever completes).
+Open: Ne/timeout leaves the module with `U,Z`: the old remote bond on the base is gone, a second pairing of the same pair re-bonds silently.
+
 ## RNBD350 migration: checks still to run on a full bench (open since 2026-11-05)
 
 Verified by hand on 2026-11-05: pairing (F, X, C, bond, settings saved), reconnect after a base reset with the stored

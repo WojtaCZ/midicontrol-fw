@@ -40,6 +40,14 @@ namespace Bluetooth{
 	// Accepted peer: link secured (%SECURED%/%BONDED%) with a device whose address from %CONNECT% matched
 	// the stored remote (or the pairing address). Without it received frames are dropped and nothing is sent.
 	[[gnu::used]] volatile bool _peerAccepted = false;
+	// D3: a peer secured during a user-started pairing is "pending" until the handshake (protocol/pairing.hpp) succeeded. Only PAIR_* frames
+	// pass in either direction; they land in their own slot and never reach the router (so never the PC).
+	volatile bool _pairPending = false;
+	protocol::Packet _pairRx;
+	volatile bool _pairRxValid = false;
+	static bool _isPairType(protocol::MsgType t) {
+		return t == protocol::MsgType::PAIR_REQ || t == protocol::MsgType::PAIR_RSP || t == protocol::MsgType::PAIR_CONFIRM;
+	}
 	static bool _dropLogged = false; // one log line about dropped frames per connection
 	static duration _pairingStart = 0_ms;
 	duration _dataReceivedTimestamp = 0_ms;
@@ -628,7 +636,10 @@ namespace Bluetooth{
 
 			if (_inFrame) {
 				if (_protocolParser.feed(c)) {
-					if (_peerAccepted) {
+					if ((_peerAccepted || _pairPending) && _isPairType(_protocolParser.getPacket().msgType)) {
+						_pairRx = _protocolParser.getPacket();
+						_pairRxValid = true;
+					} else if (_peerAccepted) {
 						_rxPackets.push(_protocolParser.getPacket());
 					} else if (!_dropLogged) {
 						// Unsecured or foreign peer: the frame is not executed (the Remote retries after %SECURED%)
@@ -733,11 +744,25 @@ namespace Bluetooth{
 
 	bool canSendData() { return _connected && _streamOpen && _peerAccepted && isIdle(); }
 
+	void setPairPending(bool pending) {
+		_pairPending = pending;
+		_pairRxValid = false;
+	}
+	bool isPairPending() { return _pairPending; }
+	bool getPairPacket(protocol::Packet &pkt) {
+		if (!_pairRxValid) return false;
+		pkt = _pairRx;
+		_pairRxValid = false;
+		return true;
+	}
+
 	bool isPeerAccepted() { return _peerAccepted; }
 	void setPeerAccepted() { _peerAccepted = true; }
 
 	void resetPeer() {
 		_peerAccepted = false;
+		_pairPending = false;
+		_pairRxValid = false;
 		_dropLogged = false;
 		_rxPackets.clear();
 		_protocolParser.reset();
@@ -769,7 +794,8 @@ namespace Bluetooth{
 	}
 
 	bool sendProtocolPacket(const protocol::Packet &pkt) {
-		if (!canSendData()) return false;
+		const bool pairOk = _pairPending && _isPairType(pkt.msgType) && _connected && _streamOpen && isIdle();
+		if (!canSendData() && !pairOk) return false;
 
 		uint8_t frame[protocol::MAX_FRAME_SIZE];
 		uint16_t len = protocol::encode(pkt, frame);

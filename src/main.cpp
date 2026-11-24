@@ -28,6 +28,7 @@
 
 #include "protocol/types.hpp"
 #include "protocol/constants.hpp"
+#include "protocol/pairing.hpp"
 #include "ram.hpp"
 #include "logic/stale_link.hpp"
 #include "looptime.hpp"
@@ -60,6 +61,8 @@ static bool remoteKnown() { return settings::remoteAddr()[0] != '\0'; }
 // BONDING:    %SECURED% / %BONDED% → DONE
 // PAIRING_TIMEOUT in any unfinished state, a second disconnect (the first one connects again) or %ERR_SEC% → FAILED.
 // Auto-reconnect does not run during pairing.
+static void bleStopAdvertising();
+static protocol::pairing::Session s_pair; // handshake state, see "Pairing handshake" below
 static void pairingFinished(bool ok, Bluetooth::PairingState failedIn) {
 	using PS = Bluetooth::PairingState;
 	Bluetooth::setPairingState(ok ? PS::DONE : PS::FAILED);
@@ -89,6 +92,7 @@ static void pairingTimeout() {
 	using PS = Bluetooth::PairingState;
 	PS state = Bluetooth::pairingState();
 	if (!Bluetooth::isPairing() || Bluetooth::pairingElapsed() < Bluetooth::PAIRING_TIMEOUT) return;
+	if (s_pair.active()) return; // the handshake has its own timeouts (5 s reply, 30 s decision)
 	// Clean up depending on where the state machine got stuck: X = end scan, Z = cancel connection attempt, K,1 = disconnect
 	bool queued = true;
 	if (state == PS::SCANNING) queued &= Bluetooth::stopScan();
@@ -97,6 +101,95 @@ static void pairingTimeout() {
 	if (!queued) Debug::log(Debug::Level::WARNING, "ble", "pairing: cleanup not queued");
 	Debug::log(Debug::Level::WARNING, "ble", "pairing timeout (state %u)", static_cast<unsigned>(state));
 	pairingFinished(false, state);
+}
+
+// ── Pairing handshake (D3, 2026-11-24, protocol/pairing.hpp) ──
+// A remote that secured inside a user-started pairing is only "pending": just PAIR_* frames pass (Bluetooth::setPairPending). The bond
+// (settings remote address, peer accepted) is stored only after the remote answered our protocol AND the user pressed Ano here and on the
+// remote with the same code. Ne, timeout or a silent peer: K,1 + U,Z (the module forgets the bond) and nothing is stored.
+// Bonded reconnects (no pairing in progress) skip all of this.
+static void pairSend(protocol::MsgType type, const uint8_t *payload, size_t len) {
+	protocol::Packet pkt{};
+	pkt.source = protocol::ADDR_BASE;
+	pkt.dest = protocol::ADDR_REMOTE;
+	pkt.packetId = 0;
+	pkt.msgType = type;
+	std::memcpy(pkt.payload, payload, len);
+	pkt.payloadLen = static_cast<uint8_t>(len);
+	Bluetooth::sendProtocolPacket(pkt);
+}
+
+static void pairStep(protocol::pairing::Step step) {
+	using protocol::pairing::Step;
+	using PS = Bluetooth::PairingState;
+	uint8_t buf[protocol::pairing::CONFIRM_SIZE];
+	switch (step) {
+		case Step::SHOW:
+			GUI::showPairingConfirm(s_pair.code());
+			break;
+		case Step::SUCCESS:
+			Bluetooth::setPairPending(false);
+			Bluetooth::setBonded(true);
+			Bluetooth::setPeerAccepted();
+			// Long range: ask for Coded PHY S8 on this link (not remembered by the module, so on every connection)
+			if (!Bluetooth::requestCodedPhy()) Debug::log(Debug::Level::DEBUG, "ble", "coded PHY request not queued");
+			pairingFinished(true, PS::BONDING);
+			break;
+		case Step::FAIL: {
+			const auto why = s_pair.fail();
+			if (s_pair.notifyPeer()) pairSend(protocol::MsgType::PAIR_CONFIRM, buf, s_pair.confirm(false, buf));
+			Debug::log(Debug::Level::WARNING, "ble", "pairing handshake failed (%u)", static_cast<unsigned>(why));
+			GUI::closePairingConfirm();
+			Bluetooth::setPairPending(false);
+			Bluetooth::setBonded(false);
+			if (Bluetooth::isConnected() && !Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
+			if (!Bluetooth::queueCommand("U,Z")) Debug::log(Debug::Level::WARNING, "ble", "U,Z not queued");
+			pairingFinished(false, PS::BONDING);
+			using F = protocol::pairing::Fail;
+			if (why == F::REJECTED_LOCAL || why == F::REJECTED_PEER) GUI::showPairingResult("Zamitnuto");
+			break;
+		}
+		default:
+			break;
+	}
+}
+
+static void pairStart() {
+	uint8_t nonce[protocol::pairing::NONCE_LEN];
+	protocol::pairing::makeNonce(stmcpp::systick::getTicks(), *reinterpret_cast<const volatile uint32_t *>(UID_BASE) ^ *reinterpret_cast<const volatile uint32_t *>(UID_BASE + 4), nonce);
+	s_pair.start(protocol::pairing::Role::INITIATOR, nonce, stmcpp::systick::getTicks());
+	Bluetooth::setPairPending(true);
+	uint8_t buf[protocol::pairing::CONFIRM_SIZE];
+	pairSend(protocol::MsgType::PAIR_REQ, buf, s_pair.hello(buf));
+}
+
+static void pairAnswer(bool accept) {
+	if (s_pair.state() != protocol::pairing::State::CONFIRM) return;
+	uint8_t buf[protocol::pairing::CONFIRM_SIZE];
+	protocol::pairing::Step step = s_pair.onLocal(accept);
+	if (accept) pairSend(protocol::MsgType::PAIR_CONFIRM, buf, s_pair.confirm(true, buf));
+	pairStep(step);
+}
+
+static void pairProcess() {
+	if (!s_pair.active()) return;
+	protocol::Packet pkt;
+	while (Bluetooth::getPairPacket(pkt)) {
+		pairStep(s_pair.onFrame(static_cast<uint8_t>(pkt.msgType), pkt.payload, pkt.payloadLen, stmcpp::systick::getTicks()));
+		if (!s_pair.active()) return;
+	}
+	pairStep(s_pair.poll(stmcpp::systick::getTicks()));
+}
+
+// The link ended during the handshake: nothing was stored, the module may still hold the bond
+static bool pairLinkDown() {
+	if (!s_pair.active()) return false;
+	s_pair.reset();
+	GUI::closePairingConfirm();
+	Bluetooth::setPairPending(false);
+	if (!Bluetooth::queueCommand("U,Z")) Debug::log(Debug::Level::WARNING, "ble", "U,Z not queued");
+	pairingFinished(false, Bluetooth::PairingState::BONDING);
+	return true;
 }
 
 extern stmcpp::scheduler::Scheduler oledSleepScheduler;
@@ -486,6 +579,7 @@ extern "C" int main(void) {
 		lt.lap(looptime::S_SCHED);
 
 		pairingTimeout();
+		pairProcess();
 
 		bleProcess();
 		lt.lap(looptime::S_BLEPROC);
@@ -551,12 +645,14 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::SECURED:
 					Debug::log(Debug::Level::INFO, "ble", "%s", command->getType() == Bluetooth::Command::Type::BONDED ? "bonded" : "secured");
 					// Frames are executed only from a secured link with the correct address (stored remote / pairing)
-					if (_peerAddrMatched && (pairing == PS::BONDING || !Bluetooth::isPairing())) {
+					if (_peerAddrMatched && pairing == PS::BONDING) {
+						// D3: secured is not enough, the handshake decides (a duplicate BONDED/SECURED does not restart it)
+						if (!s_pair.active()) pairStart();
+					} else if (_peerAddrMatched && !Bluetooth::isPairing()) {
 						Bluetooth::setBonded(true);
 						Bluetooth::setPeerAccepted();
 						// Long range: ask for Coded PHY S8 on this link (not remembered by the module, so on every connection)
 						if (!Bluetooth::requestCodedPhy()) Debug::log(Debug::Level::DEBUG, "ble", "coded PHY request not queued");
-						if (pairing == PS::BONDING) pairingFinished(true, pairing);
 					} else {
 						Debug::log(Debug::Level::WARNING, "ble", "secured link from unexpected peer, K,1");
 						if (Bluetooth::isConnected() && !Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
@@ -567,6 +663,8 @@ extern "C" int main(void) {
 				case Bluetooth::Command::Type::ERR_SEC:
 					Debug::log(Debug::Level::WARNING, "ble", "ERR_SEC");
 					if (pairing == PS::BONDING) {
+						s_pair.reset();
+						Bluetooth::setPairPending(false);
 						if (!Bluetooth::queueCommand("K,1")) Debug::log(Debug::Level::WARNING, "ble", "K,1 not queued");
 						pairingFinished(false, pairing);
 					} else if (!Bluetooth::isPairing() && Bluetooth::isConnected()) {
@@ -671,7 +769,10 @@ extern "C" int main(void) {
 					_peerAddrMatched = false;
 					Bluetooth::setConnected(false);
 					_reconnectNeeded = true;
-					if (pairing == PS::CONNECTING || pairing == PS::BONDING) {
+					if (_bleState == BleState::READY) bleStopAdvertising();
+					if (pairLinkDown()) {
+						// handshake interrupted: failed, no retry
+					} else if (pairing == PS::CONNECTING || pairing == PS::BONDING) {
 						if (!_pairRetried && Bluetooth::connectTo(_pairAddrType, Bluetooth::pendingConnectAddr())) {
 							_pairRetried = true;
 							Debug::log(Debug::Level::INFO, "ble", "pairing: link dropped, connecting again");
@@ -698,6 +799,9 @@ extern "C" int main(void) {
 					Bluetooth::setConnected(false);
 					Bluetooth::setBonded(false);
 					_reconnectNeeded = true;
+					if (_bleState == BleState::READY) bleStopAdvertising();
+					s_pair.reset();
+					GUI::closePairingConfirm();
 					if (Bluetooth::isPairing()) pairingFinished(false, pairing);
 					break;
 
@@ -750,6 +854,11 @@ static void bleConfigFailed() {
 	else bleFailed(fault::ERR_BLE_INIT, "init");
 }
 
+// D3 audit B1: the base is a central, it must never be a connectable peripheral (a phone could otherwise connect to it)
+static void bleStopAdvertising() {
+	if (!Bluetooth::queueCommand("Y")) Debug::log(Debug::Level::DEBUG, "ble", "Y not queued");
+}
+
 // Once per pass through the loop; nothing blocks
 static void bleProcess() {
 	using RS = Bluetooth::RestartState;
@@ -759,6 +868,7 @@ static void bleProcess() {
 			if (Bluetooth::configState() == CS::DONE) {
 				_bleState = BleState::READY;
 				Bluetooth::setUp(true);
+				bleStopAdvertising();
 				if (_bleWasDown) Debug::log(Debug::Level::INFO, "ble", "RN4870 init ok after retry");
 				_bleWasDown = false;
 			} else if (Bluetooth::configState() == CS::FAILED) {

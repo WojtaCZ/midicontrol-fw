@@ -1,0 +1,40 @@
+# D3: pairing code confirmation on the base: the dialog starts on "Ne", OK = Ne, Left+OK = Ano, Back = Ne, link loss closes it
+tick 3000
+key down
+key down
+key enter
+key down
+key down
+key down
+key down
+key down
+key enter
+expect screen pairing
+event pairing_key 123456
+expect screen pairkey
+expect text Sparovat? Kod
+expect text 123456
+expect text Ano
+expect text Ne
+key enter
+expect screen pairing
+expect var pair_answer=ne
+event pairing Zamitnuto
+expect text Zamitnuto
+event pairing_key 4711
+expect screen pairkey
+expect text 004711
+key left
+key enter
+expect screen pairing
+expect var pair_answer=ano
+event pairing Sparovano
+expect text Sparovano
+event pairing_key 555
+key back
+expect screen pairing
+expect var pair_answer=ne
+event pairing_key 777
+expect screen pairkey
+event pairing_close
+expect screen pairing

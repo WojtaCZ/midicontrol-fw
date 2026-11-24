@@ -450,6 +450,17 @@ static void onPairStatusDismiss(void* userData) {
 
 static ui::SplashScreen pairStatusScreen("Parovani", "", "Hledam ovladac...", onPairStatusDismiss);
 
+// D3 (2026-11-24): confirmation of the pairing code (main.cpp, protocol/pairing.hpp). Starts on "Ne" so a stray click does not pair.
+static char pairingPrompt[32] = "Sparovat?";
+static void (*pairAnswerHandler)(bool) = nullptr;
+void setPairAnswerHandler(void (*handler)(bool)) { pairAnswerHandler = handler; }
+static void onPairConfirmResult(bool confirmed, void* userData) {
+    (void)userData;
+    nav.pop();
+    if (pairAnswerHandler) pairAnswerHandler(confirmed);
+}
+static ui::ConfirmScreen pairingConfirmScreen(pairingPrompt, onPairConfirmResult);
+
 // ── Song list screens ─────────────────────────────────────────────────
 
 static void onLoadingDismiss(void* userData) {
@@ -958,6 +969,24 @@ void showPairingResult(const char* text) {
     pairStatusScreen.setComment(text);
     Oled::wakeupCallback();
     nav.forceRender();
+}
+
+void showPairingConfirm(uint32_t code) {
+    std::snprintf(pairingPrompt, sizeof(pairingPrompt), "Sparovat? Kod %06lu", static_cast<unsigned long>(code % 1000000u));
+    if (nav.current() != &pairingConfirmScreen) {
+        pairingConfirmScreen.~ConfirmScreen();
+        new (&pairingConfirmScreen) ui::ConfirmScreen(pairingPrompt, onPairConfirmResult);
+        pairingConfirmScreen.handleInput(ui::InputEvent::Right);
+        nav.push(&pairingConfirmScreen);
+    } else {
+        pairingConfirmScreen.markDirty();
+    }
+    Oled::wakeupCallback();
+    nav.forceRender();
+}
+
+void closePairingConfirm() {
+    if (nav.current() == &pairingConfirmScreen) nav.pop();
 }
 
 void showNowPlaying(const char* songName) {
