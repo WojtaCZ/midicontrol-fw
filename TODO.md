@@ -43,6 +43,24 @@ Bench steps:
 5. Phone check: a phone (nRF Connect) cannot connect to the base at any time (Y) and cannot finish pairing with the remote window (no `Sparovat?` ever completes).
 Open: Ne/timeout leaves the module with `U,Z`: the old remote bond on the base is gone, a second pairing of the same pair re-bonds silently.
 
+**Bench 2026-11-25: step 1 FAILS (to fix).** Both devices on da1fc00 / 7d6a8b5 (fonts fix, no more base crash). The base shows
+`Parovani selhalo`; the remote shows `Zamitnuto, znovu` or `Cekam na zakladnu`. Base debug log: `pairing failed in state 3`, then every
+~5 s `connect 40843204625F` -> `phy tx 2 rx 2` -> `connect failed during setup, last rssi -128 dBm` about 23 ms later, plus
+`cmd failed: Z` every 5 s. So the remote drops the base right after the connect. Hypothesis: the handshake was rejected (remote sent
+`K,1` + `U,Z`) and the remote now refuses the base until its pairing window is reopened. Note that the base's `Z` fails too.
+Next: read the remote over its ST-Link (PeerGuard pending/bond, `baseMac` in settings, diag records, RX ring `rxBuf`/`rxHead`) to see
+why it rejects in state 3; check whether the remote window had expired or the handshake timed out (5 s silent peer); then fix and
+redo steps 1-5. Remote side: `../midicontroller-fw/TODO.md` ("D3 pairing fails on the bench").
+
+## Base encoder still faulty (bench 2026-11-25, to fix)
+Owner: the base encoder still misbehaves after the 2026-11-25 flash (da1fc00). Not investigated yet. Lead: `loop_stats` shows
+schedulers+Oled pass peaks of 10.6 ms (75 passes over 1 ms); check how the encoder is sampled (ISR vs main loop) and whether
+these long passes lose or double steps. Ask the owner for the exact symptom (skips, wrong direction, double steps, dead).
+
+## Base stack headroom unverified (2026-11-25)
+A paint check from `end` (0x20004708) to `_estack` (0x20007800) found 0 untouched bytes. Check where (and whether) the stack is
+painted at boot before concluding anything; then measure the high-water mark properly (skill stack-usage-estimate for the static side).
+
 ## RNBD350 migration: checks still to run on a full bench (open since 2026-11-05)
 
 Verified by hand on 2026-11-05: pairing (F, X, C, bond, settings saved), reconnect after a base reset with the stored
