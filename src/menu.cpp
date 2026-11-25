@@ -397,25 +397,21 @@ public:
             gfx::text::drawText(fb, *theme.smallFont, buf, theme.leftMargin, infoY, gfx::Anchor::TopLeft, (uint8_t)1);
         }
 
-        // Buttons: Stop alone (selected) until the first anchor; then Stop | Pridat sloku, the encoder picks one
+        // Buttons, same layout as the remote player (midicontroller-fw src/player_screen.cpp): Stop alone (selected)
+        // until the first anchor; then the Stop | Repeat ("Pridat sloku") icon pair centered, the encoder picks one
         if (state_ != State::Stopped) {
-            const int y = theme.displayHeight - (int)btn_stop_selected.height;
-            if (!machine_.addVerseAvailable()) {
-                const int x = (theme.displayWidth - (int)btn_stop_selected.width) / 2;
-                gfx::drawIcon(fb, btn_stop_selected, x, y, gfx::Anchor::TopLeft, (uint8_t)1);
-            } else {
-                const bool addSel = machine_.selection() == nowplaying::Selection::AddVerse;
-                const int sw = (int)btn_stop_selected.width;
-                const int x0 = theme.leftMargin + 4;
-                gfx::drawIcon(fb, addSel ? btn_stop_normal : btn_stop_selected, x0, y, gfx::Anchor::TopLeft, (uint8_t)1);
-                const char* lbl = "Pridat sloku";
-                const int lw = 12 * (int)theme.smallFont->width() + 6;
-                const int bx = x0 + sw + 8;
-                const int bh = (int)btn_stop_selected.height;
-                if (addSel) gfx::drawFilledRect(fb, bx, y, lw, bh, (uint8_t)1);
-                else gfx::drawRect(fb, bx, y, lw, bh, (uint8_t)1);
-                gfx::text::drawText(fb, *theme.smallFont, lbl, bx + 3, y + (bh - (int)theme.smallFont->height()) / 2,
-                                    gfx::Anchor::TopLeft, (uint8_t)(addSel ? 0 : 1));
+            const bool repeat  = machine_.addVerseAvailable();
+            const bool stopSel = !repeat || machine_.selection() != nowplaying::Selection::AddVerse;
+            const int bw    = (int)btn_stop_selected.width;
+            const int gap   = 8;
+            const int count = repeat ? 2 : 1;
+            const int total = count * bw + (count - 1) * gap;
+            const int x0    = (theme.displayWidth - total) / 2;
+            const int y     = theme.displayHeight - (int)btn_stop_selected.height;
+            gfx::drawIcon(fb, stopSel ? btn_stop_selected : btn_stop_normal, x0, y, gfx::Anchor::TopLeft, (uint8_t)1);
+            if (repeat) {
+                gfx::drawIcon(fb, stopSel ? btn_repeat_normal : btn_repeat_selected, x0 + bw + gap, y,
+                              gfx::Anchor::TopLeft, (uint8_t)1);
             }
         }
 
@@ -502,7 +498,8 @@ static bool fwPushed = false; // the screen is in the navigator stack (always as
 // status icons. The error screen overlays ANY screen (also the player) and only pops itself; the abort splash resets the
 // stack to the main menu when it closes.
 static constexpr uint32_t NOTICE_MS = 5000;
-static ui::TimedSplash abortScreen(nav, &mainScreen, NOTICE_MS, "", "Preruseno", "Nouzove stop");
+// Owner 2026-11-25: the abort says only "Nouzove / Preruseno", both in the big font (title row + subtitle), no small lines
+static ui::TimedSplash abortScreen(nav, &mainScreen, NOTICE_MS, "Nouzove", "Preruseno", "");
 static ui::TimedSplash errorScreen(nav, nullptr, NOTICE_MS, "", "Chyba", "");
 static ui::LinkErrorPolicy _linkPolicy;
 
@@ -524,7 +521,7 @@ static void playCallback(ui::MenuItem* item, void* userData) {
 
     _loadingScreenShown = false;
     uint16_t offset = _win.startFirst();
-    songListDelayScheduler.start();   // 500ms delay before showing loading screen
+    songListDelayScheduler.start();   // loading screen only if the list takes over 1 s (owner 2026-11-25)
     songListTimeoutScheduler.start(); // 3s timeout
     _requestSongListCallback(offset); // last: a failure reported at once stops both schedulers
 }
@@ -1039,8 +1036,7 @@ void dismissNowPlaying() {
 }
 
 void abortAll(bool organWasOn) {
-    const bool playing = _nowPlayingActive;
-    const bool recording = _recording.state() != recording::State::Idle;
+    (void)organWasOn; // the screen no longer says whether the organ was on (owner 2026-11-25)
     // Same state reset as the update screen: everything the stack reset removes loses its flag
     _win.abort();
     _loadingScreenShown = false;
@@ -1054,8 +1050,6 @@ void abortAll(bool organWasOn) {
     _holdShown = false;
     _holdDone = nullptr;
     if (fwPushed) return; // the update screen stays
-    abortScreen.setComment(playing ? "Prehravani" : recording ? "Nahravani" : "Nouzove stop");
-    abortScreen.setComment2(organWasOn ? "Varhany vypnuty" : nullptr);
     nav.reset(&mainScreen);
     nav.push(&abortScreen);
     Oled::wakeupCallback();
@@ -1319,7 +1313,7 @@ void songListTimeout() {
 stmcpp::scheduler::Scheduler guiRenderScheduler(30_ms, &GUI::render, true, true);
 
 // One-shot: delayed loading screen (500ms grace period)
-stmcpp::scheduler::Scheduler songListDelayScheduler(500_ms, GUI::songListDelayShow, false, false);
+stmcpp::scheduler::Scheduler songListDelayScheduler(1000_ms, GUI::songListDelayShow, false, false);
 
 // One-shot: timeout for loading the song list (3s)
 stmcpp::scheduler::Scheduler songListTimeoutScheduler(3000_ms, GUI::songListTimeout, false, false);

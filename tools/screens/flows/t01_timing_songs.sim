@@ -1,11 +1,11 @@
-# E3: the song list timers run by time: loading screen after 500 ms, "Bez odpovedi" after 3 s
+# E3: the song list timers run by time: loading screen after 1 s (owner 2026-11-25), "Bez odpovedi" after 3 s
 tick 3000
 key enter
-tick 400
+tick 900
 expect screen main
 tick 200
 expect screen songs_loading
-tick 2300
+tick 1800
 expect screen songs_loading
 expect notext Bez odpovedi
 tick 600

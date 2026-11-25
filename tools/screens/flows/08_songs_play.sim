@@ -1,9 +1,9 @@
-# B8/B9: Prehraj requests the list (offset 0), loading splash after 500 ms, list, pick plays
+# B8/B9: Prehraj requests the list (offset 0), loading splash after 1 s (owner 2026-11-25), list, pick plays
 tick 3000
 key enter
 expect var requests=1
 expect var lastOffset=0
-tick 400
+tick 900
 expect screen main
 tick 200
 expect screen songs_loading

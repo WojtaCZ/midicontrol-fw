@@ -1,11 +1,11 @@
-# Item 12: emergency abort on the base (remote MF hold): "Preruseno" for 5 s, then the main menu; works from any screen
+# Item 12: emergency abort on the base (remote MF hold): "Nouzove / Preruseno" (big font, nothing else, owner 2026-11-25) for 5 s, then the main menu; works from any screen
 tick 3000
 # idle, organ on
 state power=1
 event abort organ
 expect screen abort
 expect text Preruseno
-expect text Varhany vypnuty
+expect text Nouzove
 tick 4500
 expect screen abort
 tick 600
@@ -15,8 +15,8 @@ event playing 406A
 expect screen nowplaying
 event abort
 expect screen abort
-expect text Prehravani
-expect notext Varhany vypnuty
+expect text Nouzove
+expect notext Prehravani
 tick 5100
 expect screen main
 # recording
@@ -25,6 +25,6 @@ key enter
 event recording on
 expect text Nahravam
 event abort
-expect text Nahravani
+expect notext Nahravani
 key down
 expect screen main

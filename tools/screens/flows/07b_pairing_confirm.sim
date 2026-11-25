@@ -31,7 +31,11 @@ expect var pair_answer=ano
 event pairing Sparovano
 expect text Sparovano
 event pairing_key 555
+# Back selects Ano and does not answer (same ConfirmScreen as the remote, bench 2026-11-25); Right selects Ne
 key back
+expect screen pairkey
+key right
+key enter
 expect screen pairing
 expect var pair_answer=ne
 event pairing_key 777

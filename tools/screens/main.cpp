@@ -194,7 +194,7 @@ int main(int argc, char **argv) {
 
 	// Item 12: emergency abort, 5 s or a key, then the main menu
 	GUI::abortAll(true);
-	snap("abort_organ", "Emergency stop while the organ was on");
+	snap("abort_organ", "Emergency stop: Nouzove / Preruseno in the big font");
 	key(E::Enter);
 	// Item 17: error screens (any screen, 5 s or a key)
 	GUI::requestFailed(protocol::MsgType::PLAY_SONG, routercore::Failure::Nak, "PC zaneprazdneno");

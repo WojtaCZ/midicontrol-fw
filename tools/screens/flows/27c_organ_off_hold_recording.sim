@@ -9,7 +9,7 @@ event poweroff
 expect screen hold
 hold 3000
 expect screen abort
-expect text Nahravani
+expect text Nouzove
 expect var power=0
 tick 5100
 expect screen main

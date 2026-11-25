@@ -28,8 +28,8 @@ expect var power=1
 hold 100
 expect screen abort
 expect text Preruseno
-expect text Prehravani
-expect text Varhany vypnuty
+expect text Nouzove
+expect notext Varhany vypnuty
 expect var power=0
 expect var aborts=1
 # any key closes it, the main menu follows (stack cleared: no player behind)
